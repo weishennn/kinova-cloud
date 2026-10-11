@@ -69,7 +69,7 @@ export default function SettingsPage() {
   const queryClient = useQueryClient();
   const syncStatus = useSyncStatus();
   const { theme, resolvedTheme, setTheme } = useTheme();
-  const { isTrustedDevice, lockApp, untrustDevice, changePin, currentPin } = useAuth();
+  const { isTrustedDevice, lockApp, untrustDevice, changePin, currentPin, googleUser, isLocalMode } = useAuth();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [mounted, setMounted] = useState(false);
   const [apiUrl, setApiUrl] = useState('');
@@ -737,10 +737,18 @@ export default function SettingsPage() {
                       ? 'Connected'
                       : 'Connection unavailable'}
               </p>
-              <p className="text-[10px] text-slate-500 dark:text-zinc-400">Google Apps Script Bridge</p>
+              <p className="text-[10px] text-slate-500 dark:text-zinc-400">
+                {googleUser
+                  ? `Google Drive Cloud (${googleUser.email})`
+                  : isLocalMode
+                  ? 'Local Device Storage Only (Not backed up to Google Drive)'
+                  : 'Google Apps Script Bridge'}
+              </p>
               {!syncStatus.isConnected && syncStatus.lastSyncError && (
                 <p role="status" className="pt-1 text-[11px] leading-relaxed text-rose-800 dark:text-rose-300 break-words">
-                  {syncStatus.lastSyncError}
+                  {syncStatus.lastSyncError.includes('console.developers.google.com')
+                    ? 'Google Sheets / Drive API needs to be enabled once in Google Cloud Console for this project.'
+                    : syncStatus.lastSyncError}
                 </p>
               )}
             </div>
@@ -1058,52 +1066,60 @@ export default function SettingsPage() {
                 <Database className="h-5 w-5" />
               </div>
               <div>
-                <div className="font-semibold text-slate-950 dark:text-white text-sm">Google Apps Script Bridge</div>
+                <div className="font-semibold text-slate-950 dark:text-white text-sm">
+                  {googleUser ? 'Personal Google Drive & Sheets Engine' : 'Google Cloud Connection'}
+                </div>
                 <div className="text-xs flex items-center gap-1.5 mt-0.5">
                   <span className={`h-2 w-2 rounded-full ${apiUrl ? 'bg-emerald-400' : 'bg-amber-400'}`} />
                   <span className={apiUrl ? 'text-emerald-800 dark:text-emerald-400 font-medium' : 'text-amber-800 dark:text-amber-400 font-medium'}>
-                    {apiUrl ? 'Connected to Google Sheets' : 'Local-only (not synced)'}
+                    {googleUser
+                      ? `Connected as ${googleUser.email}`
+                      : apiUrl
+                      ? 'Connected to Google Sheets'
+                      : 'Local-only (not synced)'}
                   </span>
                 </div>
               </div>
             </div>
 
-            <a
-              href="https://script.google.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-zinc-700 transition-colors"
-            >
-              <span>Open Apps Script</span>
-              <ExternalLink className="h-3 w-3" />
-            </a>
+            {!googleUser && (
+              <a
+                href="/api/auth/google/login"
+                className="flex items-center gap-1.5 text-xs px-3.5 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-semibold transition-colors"
+              >
+                <Cloud className="h-3.5 w-3.5" />
+                <span>Sign in with Google</span>
+              </a>
+            )}
           </div>
 
-          <form onSubmit={handleSaveUrl} className="space-y-3">
-            <div className="space-y-1.5">
-              <label className="text-xs text-slate-600 dark:text-zinc-400 block font-medium">
-                Web App Deployment URL:
-              </label>
-              <div className="flex flex-col sm:flex-row gap-2.5">
-                <input
-                  type="text"
-                  placeholder="https://script.google.com/macros/s/.../exec"
-                  value={apiUrl}
-                  onChange={(e) => setApiUrl(e.target.value)}
-                  className="flex-1 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-3 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-indigo-500 transition-colors"
-                />
-                <button
-                  type="submit"
-                  className="px-5 py-3 rounded-2xl bg-indigo-500 hover:bg-indigo-600 text-white dark:text-white font-semibold text-xs transition-all cursor-pointer shrink-0"
-                >
-                  Save Connection
-                </button>
+          {!googleUser && (
+            <form onSubmit={handleSaveUrl} className="space-y-3">
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-600 dark:text-zinc-400 block font-medium">
+                  Custom Web App Deployment URL (Optional Advanced Mode):
+                </label>
+                <div className="flex flex-col sm:flex-row gap-2.5">
+                  <input
+                    type="text"
+                    placeholder="https://script.google.com/macros/s/.../exec"
+                    value={apiUrl}
+                    onChange={(e) => setApiUrl(e.target.value)}
+                    className="flex-1 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-3 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-indigo-500 transition-colors"
+                  />
+                  <button
+                    type="submit"
+                    className="px-5 py-3 rounded-2xl bg-indigo-500 hover:bg-indigo-600 text-white dark:text-white font-semibold text-xs transition-all cursor-pointer shrink-0"
+                  >
+                    Save Connection
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                  Tip: Sign in with your Google Account above for automatic zero-setup Google Drive sync.
+                </p>
               </div>
-              <p className="text-[11px] text-slate-500 dark:text-zinc-400">
-                Automatically authenticates and syncs all monthly transactions, recurring commitments, installment plans, and settings across your devices.
-              </p>
-            </div>
-          </form>
+            </form>
+          )}
 
           {/* Test Connection Button & Result */}
           <div className="flex flex-wrap items-center gap-3 pt-2">
@@ -1113,31 +1129,8 @@ export default function SettingsPage() {
               className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-100 dark:bg-zinc-800/80 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-950 dark:text-white text-xs font-semibold transition-all cursor-pointer disabled:opacity-50"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${isTesting ? 'animate-spin' : ''}`} />
-              <span>{isTesting ? 'Pinging Script...' : 'Test Connection'}</span>
+              <span>{isTesting ? 'Checking Google Drive...' : 'Test Connection'}</span>
             </button>
-
-            {apiUrl && (
-              <button
-                onClick={async () => {
-                  const ok = await confirmAction({
-                    title: 'Switch to Local-only Mode?',
-                    description: 'This browser will stop reading from Google Sheets. Sheet records are not copied into the separate local database, and new local records will not sync to other devices. Reconnect to see your Sheet data again.',
-                    confirmText: 'Switch to Local-only',
-                    cancelText: 'Stay Connected',
-                    variant: 'warning',
-                    icon: 'alert',
-                  });
-                  if (!ok) return;
-                  setCustomApiUrl('');
-                  setApiUrl('');
-                  toast.info('Local-only mode is on. Your saved connection settings were kept for reconnecting.');
-                  queryClient.invalidateQueries();
-                }}
-                className="text-xs text-slate-500 dark:text-zinc-400 hover:text-rose-800 dark:hover:text-rose-400 transition-colors px-2 py-1 cursor-pointer"
-              >
-                Disconnect URL
-              </button>
-            )}
           </div>
 
           {testResult && (
@@ -1679,129 +1672,6 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* Security & Access Section */}
-      <section className="space-y-4">
-        <h2 className="text-xs font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider">
-          Security & Device Access
-        </h2>
-
-        <div className="rounded-3xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 p-6 backdrop-blur-xl divide-y divide-zinc-800/60 specular-card">
-          {/* Trusted Device Status */}
-          <div className="flex flex-wrap items-center justify-between gap-3 pb-5">
-            <div className="flex items-center gap-3">
-              <div className={`h-10 w-10 rounded-2xl flex items-center justify-center ${
-                isTrustedDevice
-                  ? 'bg-emerald-500/10 text-emerald-800 dark:text-emerald-400'
-                  : 'bg-amber-500/10 text-amber-800 dark:text-amber-400'
-              }`}>
-                <Smartphone className="h-5 w-5" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-slate-950 dark:text-white text-sm">This Device Status</span>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
-                    isTrustedDevice
-                      ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30'
-                      : 'bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/30'
-                  }`}>
-                    {isTrustedDevice ? 'Trusted Device' : 'Untrusted Device'}
-                  </span>
-                </div>
-                <div className="text-xs text-slate-600 dark:text-zinc-400 mt-0.5">
-                  {isTrustedDevice
-                    ? 'Bypasses PIN prompt on this phone/browser. You will never be asked to login here.'
-                    : 'PIN is required whenever accessing this device.'}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={lockApp}
-                className="flex items-center gap-1.5 text-xs px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white transition-colors cursor-pointer"
-              >
-                <Lock className="h-3.5 w-3.5" />
-                <span>Lock App</span>
-              </button>
-
-              {isTrustedDevice && (
-                <button
-                  type="button"
-                  onClick={untrustDevice}
-                  className="text-xs px-3.5 py-2 rounded-xl border border-rose-500/30 text-rose-800 dark:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
-                >
-                  Revoke Trust
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Master PIN Settings */}
-          <div className="pt-5 space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-2xl bg-indigo-500/10 text-indigo-800 dark:text-indigo-400 flex items-center justify-center">
-                  <Key className="h-5 w-5" />
-                </div>
-                <div>
-                  <div className="font-semibold text-slate-950 dark:text-white text-sm">Master 4-Digit PIN</div>
-                  <div className="text-xs text-slate-600 dark:text-zinc-400 flex flex-wrap items-center gap-1.5 mt-0.5">
-                    <span>Active PIN:</span>
-                    <span className="font-mono text-slate-700 dark:text-zinc-300 font-bold tracking-wider">
-                      {showActivePin ? currentPin : '••••'}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setShowActivePin(!showActivePin)}
-                      className="text-slate-500 dark:text-zinc-400 hover:text-slate-700 dark:hover:text-zinc-300 p-0.5 cursor-pointer"
-                      title={showActivePin ? 'Hide PIN' : 'Show PIN'}
-                    >
-                      {showActivePin ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                    </button>
-                    <span className="text-slate-500 dark:text-zinc-400">• Synced across your devices</span>
-                  </div>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setShowPinInput(!showPinInput)}
-                className="text-xs px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white transition-colors cursor-pointer"
-              >
-                {showPinInput ? 'Cancel' : 'Change PIN'}
-              </button>
-            </div>
-
-            {showPinInput && (
-              <motion.form
-                initial={{ opacity: 0, y: -5 }}
-                animate={{ opacity: 1, y: 0 }}
-                onSubmit={handleUpdatePin}
-                className="flex flex-col sm:flex-row gap-2 pt-2"
-              >
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  maxLength={4}
-                  placeholder="Enter new 4-digit PIN (e.g. 0000)"
-                  value={newPin}
-                  onChange={(e) => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                  className={`flex-1 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-3 text-xs text-slate-950 dark:text-white outline-none focus:border-indigo-500 transition-colors placeholder:tracking-normal placeholder:font-sans ${
-                    newPin.length > 0 ? 'font-mono tracking-[0.3em] font-bold' : 'font-sans tracking-normal'
-                  }`}
-                />
-                <button
-                  type="submit"
-                  className="px-5 py-3 rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white dark:text-white font-semibold text-xs transition-all cursor-pointer shrink-0"
-                >
-                  Save New PIN
-                </button>
-              </motion.form>
-            )}
-          </div>
-        </div>
-      </section>
 
       {/* App Preferences Section */}
       <section className="space-y-4">

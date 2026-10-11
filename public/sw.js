@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kinova-pwa-v2';
+const CACHE_NAME = 'kinova-pwa-v3';
 const APP_SHELL = [
   '/',
   '/manifest.json',

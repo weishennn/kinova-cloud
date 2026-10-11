@@ -667,12 +667,27 @@ export function parseCurrencyAmount(val: unknown): number {
   return isNaN(parsed) ? 0 : parsed;
 }
 
+export function getActiveUserCacheScope(): string {
+  if (typeof window === 'undefined') return 'anon';
+  try {
+    const email = (localStorage.getItem('cashflow_google_user_email') || '').trim().toLowerCase();
+    if (email && localStorage.getItem('cashflow_google_authenticated') === 'true') {
+      return `u:${email}`;
+    }
+    const customUrl = (localStorage.getItem('cashflow_apps_script_url') || '').trim();
+    if (customUrl === LOCAL_ONLY_ENDPOINT_SENTINEL) return 'local_only';
+    if (customUrl) return `script:${customUrl.slice(-16)}`;
+  } catch {}
+  return 'anon';
+}
+
 export function getSwrCacheKey(action: string, params: Record<string, unknown> = {}): string {
+  const scope = getActiveUserCacheScope();
   const sortedParams = Object.keys(params).sort().reduce((acc, key) => {
     acc[key] = params[key];
     return acc;
   }, {} as Record<string, unknown>);
-  return `cashflow_swr_${action}_${JSON.stringify(sortedParams)}`;
+  return `cashflow_swr_${scope}_${action}_${JSON.stringify(sortedParams)}`;
 }
 
 export function getSwrCachedEntry<T>(action: string, params: Record<string, unknown> = {}): { data: T; savedAt: number } | null {

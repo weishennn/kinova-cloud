@@ -2,12 +2,11 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { ShieldAlert, ShieldCheck, LogOut, KeyRound, HardDrive } from 'lucide-react';
+import { ShieldAlert, ShieldCheck, LogOut, HardDrive, Smartphone, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
-import { saveSettingWithCloudSync, SETTINGS_UPDATED_EVENT } from '@/lib/cloud-settings-sync';
-import { getApiUrl, sheetsApi } from '@/lib/sheets-api';
-import { getPendingSettingMutations, LOCAL_ONLY_ENDPOINT_SENTINEL, SYNC_STATUS_EVENT } from '@/lib/cache-manager';
+import { LOCAL_ONLY_ENDPOINT_SENTINEL, SYNC_STATUS_EVENT } from '@/lib/cache-manager';
 
 export interface GoogleAccountProfile {
   email: string;
@@ -26,80 +25,93 @@ interface AuthContextType {
   changePin: (newPin: string) => boolean;
   currentPin: string;
   googleUser: GoogleAccountProfile | null;
+  isLocalMode: boolean;
   signOutGoogle: () => Promise<void>;
+  exitLocalMode: () => void;
   refreshGoogleSession: () => Promise<void>;
 }
 
-const DEFAULT_PIN = '0000';
-
 const AuthContext = createContext<AuthContextType>({
   authenticated: false,
-  isTrustedDevice: false,
+  isTrustedDevice: true,
   lockApp: () => {},
   untrustDevice: () => {},
-  changePin: () => false,
-  currentPin: DEFAULT_PIN,
+  changePin: () => true,
+  currentPin: '0000',
   googleUser: null,
+  isLocalMode: false,
   signOutGoogle: async () => {},
+  exitLocalMode: () => {},
   refreshGoogleSession: async () => {},
 });
 
-function readStoredActivePin(): string {
+/**
+ * Completely wipes all cached sheet data, settings, plans, and pending queues from localStorage
+ * whenever switching accounts or signing out so two accounts can NEVER see each other's data.
+ */
+function wipeAccountStorage(includeLocalStore = true) {
+  if (typeof window === 'undefined') return;
   try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      const customPin = localStorage.getItem('cashflow_custom_pin');
-      if (customPin && /^\d{1,4}$/.test(customPin.trim())) {
-        return customPin.trim().padStart(4, '0');
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      if (
+        k.startsWith('cashflow_swr_') ||
+        k.startsWith('swr:') ||
+        k.startsWith('cashflow_month_') ||
+        k.startsWith('cashflow_cache_') ||
+        k.startsWith('cashflow_pre_sync_') ||
+        k.startsWith('cashflow_sync_')
+      ) {
+        keysToRemove.push(k);
       }
+    }
+    keysToRemove.forEach((k) => localStorage.removeItem(k));
+
+    const explicitKeys = [
+      'cashflow_installment_plans',
+      'cashflow_recurring_commitments',
+      'cashflow_category_caps',
+      'cashflow_lhdn_tax_caps',
+      'cashflow_lhdn_tax_rate',
+      'cashflow_lhdn_tax_profile',
+      'cashflow_monthly_budget',
+      'cashflow_baseline_income',
+      'cashflow_emergency_reserve',
+      'cashflow_currency',
+      'cashflow_custom_pin',
+      'cashflow_pending_queue',
+      'cashflow_pending_plan_mutations_v2',
+      'cashflow_pending_settings_mutations',
+      'cashflow_deleted_tombstones_v1',
+      'cashflow_sync_conflicts_v1',
+      'cashflow_last_synced_at',
+      'cashflow_last_sync_error',
+      'cashflow_last_sync_error_at',
+      'cashflow_apps_script_url',
+      'cashflow_api_key',
+      'cashflow_server_proxy_token',
+      'cashflow_trusted_device',
+    ];
+    explicitKeys.forEach((k) => localStorage.removeItem(k));
+
+    if (includeLocalStore) {
+      localStorage.removeItem('cashflow_local_store');
     }
   } catch (e) {
-    console.warn('Storage read warning:', e);
+    console.warn('Failed to wipe account storage:', e);
   }
-  return process.env.NEXT_PUBLIC_APP_PIN || DEFAULT_PIN;
-}
-
-function resetLocalCacheForAccountSwitch(newEmail: string) {
-  try {
-    const prevEmail = localStorage.getItem('cashflow_google_user_email');
-    if (prevEmail && prevEmail !== newEmail) {
-      // Clear cached sheet data when switching between two different Google accounts
-      const keysToRemove: string[] = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (!k) continue;
-        if (
-          k.startsWith('cashflow_swr_') ||
-          k.startsWith('cashflow_month_') ||
-          k.startsWith('cashflow_cache_') ||
-          k === 'cashflow_installment_plans' ||
-          k === 'cashflow_recurring_commitments' ||
-          k === 'cashflow_category_caps' ||
-          k === 'cashflow_monthly_budget'
-        ) {
-          keysToRemove.push(k);
-        }
-      }
-      keysToRemove.forEach((k) => localStorage.removeItem(k));
-    }
-    localStorage.setItem('cashflow_google_user_email', newEmail);
-  } catch {}
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const queryClient = useQueryClient();
   const [authenticated, setAuthenticated] = useState(false);
-  const [isTrustedDevice, setIsTrustedDevice] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [pinInput, setPinInput] = useState('');
-  const [trustThisDevice, setTrustThisDevice] = useState(true);
-  const [errorMsg, setErrorMsg] = useState('');
-  const [activePin, setActivePin] = useState<string>(DEFAULT_PIN);
   const [googleUser, setGoogleUser] = useState<GoogleAccountProfile | null>(null);
+  const [isLocalMode, setIsLocalMode] = useState(false);
   const [accountBlocked, setAccountBlocked] = useState(false);
-  const [manualLocked, setManualLocked] = useState(false);
-  const [showPinFallback, setShowPinFallback] = useState(false);
-
-  const getActivePin = () => readStoredActivePin();
 
   const refreshGoogleSession = useCallback(async () => {
     try {
@@ -111,47 +123,92 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = await res.json();
 
       if (data.blocked) {
+        wipeAccountStorage(true);
+        queryClient.clear();
         setAccountBlocked(true);
         setGoogleUser(data.user || null);
+        setIsLocalMode(false);
         setAuthenticated(false);
         localStorage.removeItem('cashflow_google_authenticated');
+        localStorage.removeItem('cashflow_google_user_email');
+        localStorage.removeItem('cashflow_active_account_scope');
         return;
       }
 
       setAccountBlocked(false);
 
       if (data.authenticated && data.user?.email) {
-        resetLocalCacheForAccountSwitch(data.user.email);
+        const normalizedEmail = String(data.user.email).trim().toLowerCase();
+        const targetScope = `google:${normalizedEmail}`;
+        const prevScope = localStorage.getItem('cashflow_active_account_scope');
+
+        // CRITICAL: If switching accounts OR upgrading from pre-OAuth (prevScope === null),
+        // wipe all un-namespaced / previous account caches before rendering!
+        if (prevScope !== targetScope) {
+          wipeAccountStorage(true);
+          queryClient.clear();
+          localStorage.setItem('cashflow_active_account_scope', targetScope);
+        }
+
+        localStorage.removeItem('cashflow_local_mode_chosen');
+        localStorage.removeItem('cashflow_apps_script_url');
+        localStorage.setItem('cashflow_google_user_email', normalizedEmail);
         localStorage.setItem('cashflow_google_authenticated', 'true');
         localStorage.setItem('cashflow_use_server_proxy', 'true');
-        if (localStorage.getItem('cashflow_apps_script_url') === LOCAL_ONLY_ENDPOINT_SENTINEL) {
-          localStorage.removeItem('cashflow_apps_script_url');
-        }
+
         setGoogleUser(data.user);
+        setIsLocalMode(false);
         setAuthenticated(true);
         window.dispatchEvent(new Event('cashflow_api_url_changed'));
         window.dispatchEvent(new CustomEvent(SYNC_STATUS_EVENT));
       } else {
         localStorage.removeItem('cashflow_google_authenticated');
+        localStorage.removeItem('cashflow_google_user_email');
         setGoogleUser(null);
+
+        // Check if user explicitly opted into Local Storage Only mode
+        if (localStorage.getItem('cashflow_local_mode_chosen') === 'true') {
+          const prevScope = localStorage.getItem('cashflow_active_account_scope');
+          if (prevScope !== 'local_only') {
+            wipeAccountStorage(false);
+            queryClient.clear();
+            localStorage.setItem('cashflow_active_account_scope', 'local_only');
+          }
+          localStorage.setItem('cashflow_apps_script_url', LOCAL_ONLY_ENDPOINT_SENTINEL);
+          setIsLocalMode(true);
+          setAuthenticated(true);
+        } else {
+          setIsLocalMode(false);
+          setAuthenticated(false);
+        }
       }
     } catch (err) {
       console.warn('Google session check notice:', err);
     }
-  }, []);
+  }, [queryClient]);
 
   const signOutGoogle = useCallback(async () => {
     try {
       await fetch('/api/auth/google/logout', { method: 'POST', credentials: 'same-origin' });
     } catch {}
+    wipeAccountStorage(true);
+    queryClient.clear();
     localStorage.removeItem('cashflow_google_authenticated');
     localStorage.removeItem('cashflow_google_user_email');
-    localStorage.removeItem('cashflow_trusted_device');
+    localStorage.removeItem('cashflow_active_account_scope');
+    localStorage.removeItem('cashflow_local_mode_chosen');
     setGoogleUser(null);
+    setIsLocalMode(false);
     setAccountBlocked(false);
     setAuthenticated(false);
     window.dispatchEvent(new Event('cashflow_api_url_changed'));
-    toast.success('Signed out of Google Account');
+    toast.success('Signed out cleanly');
+  }, [queryClient]);
+
+  const exitLocalMode = useCallback(() => {
+    localStorage.removeItem('cashflow_local_mode_chosen');
+    setIsLocalMode(false);
+    setAuthenticated(false);
   }, []);
 
   useEffect(() => {
@@ -159,25 +216,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const initAuth = async () => {
       try {
-        setActivePin(readStoredActivePin());
         await refreshGoogleSession();
-
-        if (typeof window !== 'undefined' && window.localStorage) {
-          const isGoogleAuthed = localStorage.getItem('cashflow_google_authenticated') === 'true';
-          const isTrusted = localStorage.getItem('cashflow_trusted_device') === 'true';
-          const hasCustomScript = Boolean(
-            localStorage.getItem('cashflow_apps_script_url')?.startsWith('https://script.google.com/macros/s/')
-          );
-
-          if (isGoogleAuthed) {
-            setAuthenticated(true);
-          } else if (isTrusted && hasCustomScript) {
-            setIsTrustedDevice(true);
-            setAuthenticated(true);
-          }
-        }
-      } catch (e) {
-        console.warn('Storage read warning:', e);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -185,109 +224,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     void initAuth();
 
-    const refreshPinState = () => {
-      setActivePin(readStoredActivePin());
-    };
     const onAccountBlocked = () => {
+      wipeAccountStorage(true);
+      queryClient.clear();
       setAccountBlocked(true);
       setAuthenticated(false);
     };
-    window.addEventListener(SETTINGS_UPDATED_EVENT, refreshPinState);
-    window.addEventListener('storage', refreshPinState);
     window.addEventListener('cashflow_account_blocked', onAccountBlocked);
-
-    const apiUrl = getApiUrl();
-    if (apiUrl && apiUrl.startsWith('http')) {
-      sheetsApi
-        .getSettings(true)
-        .then((res) => {
-          if (!res.success || !res.data) return;
-          const hasPendingPinEdit = getPendingSettingMutations().some((m) => m.key === 'cashflow_custom_pin');
-          if (hasPendingPinEdit) return;
-          const rawCloudPin = res.data['cashflow_custom_pin'];
-          if (rawCloudPin !== undefined && rawCloudPin !== null && /^\d{1,4}$/.test(String(rawCloudPin).trim())) {
-            const normalizedPin = String(rawCloudPin).trim().padStart(4, '0');
-            localStorage.setItem('cashflow_custom_pin', normalizedPin);
-            setActivePin(normalizedPin);
-          }
-        })
-        .catch(() => {});
-    }
 
     return () => {
       mounted = false;
-      window.removeEventListener(SETTINGS_UPDATED_EVENT, refreshPinState);
-      window.removeEventListener('storage', refreshPinState);
       window.removeEventListener('cashflow_account_blocked', onAccountBlocked);
     };
-  }, [refreshGoogleSession]);
+  }, [refreshGoogleSession, queryClient]);
 
   // Allow public access to /privacy for Google OAuth verification
   if (pathname === '/privacy') {
     return <>{children}</>;
   }
 
-  const handleUnlock = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const correctPin = getActivePin();
-
-    if (pinInput.trim() === correctPin.trim()) {
-      setErrorMsg('');
-      setManualLocked(false);
-      setAuthenticated(true);
-
-      if (trustThisDevice) {
-        try {
-          if (typeof window !== 'undefined' && window.localStorage) {
-            localStorage.setItem('cashflow_trusted_device', 'true');
-          }
-        } catch (e) {
-          console.warn('Storage write warning:', e);
-        }
-        setIsTrustedDevice(true);
-        toast.success('Unlocked and trusted on this device');
-      } else {
-        toast.success('Unlocked for this session');
-      }
+  const handleChooseLocalMode = () => {
+    const prevScope = localStorage.getItem('cashflow_active_account_scope');
+    if (prevScope && prevScope !== 'local_only') {
+      // Wipe any previous Google user's cached data before entering Local Mode
+      wipeAccountStorage(true);
+      queryClient.clear();
     } else {
-      setErrorMsg('Incorrect PIN. Please try again.');
-      setPinInput('');
+      wipeAccountStorage(false);
+      queryClient.clear();
     }
-  };
-
-  const handleLocalOnlyStart = () => {
+    localStorage.setItem('cashflow_active_account_scope', 'local_only');
+    localStorage.setItem('cashflow_local_mode_chosen', 'true');
     localStorage.setItem('cashflow_apps_script_url', LOCAL_ONLY_ENDPOINT_SENTINEL);
-    setManualLocked(false);
+    localStorage.removeItem('cashflow_google_authenticated');
+    localStorage.removeItem('cashflow_google_user_email');
+    setGoogleUser(null);
+    setIsLocalMode(true);
     setAuthenticated(true);
     window.dispatchEvent(new Event('cashflow_api_url_changed'));
-    toast.info('Entered Local Device Mode (not synced to Google Drive)');
-  };
-
-  const lockApp = () => {
-    setManualLocked(true);
-    setAuthenticated(false);
-    setPinInput('');
-    setErrorMsg('');
-  };
-
-  const untrustDevice = () => {
-    localStorage.removeItem('cashflow_trusted_device');
-    setIsTrustedDevice(false);
-    setManualLocked(true);
-    setAuthenticated(false);
-    toast.info('Device trust revoked.');
-  };
-
-  const changePin = (newPin: string) => {
-    const cleaned = newPin.trim();
-    if (!/^\d{4}$/.test(cleaned)) {
-      toast.error('PIN must be exactly 4 digits');
-      return false;
-    }
-    setActivePin(cleaned);
-    saveSettingWithCloudSync('cashflow_custom_pin', cleaned);
-    toast.success(`4-digit Master PIN updated to ${cleaned} and synced!`);
-    return true;
+    window.dispatchEvent(new CustomEvent(SYNC_STATUS_EVENT));
+    toast.info('Using Local Storage Mode — data is stored only on this browser.');
   };
 
   if (loading) {
@@ -297,7 +273,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           <div className="h-14 w-14 flex items-center justify-center animate-pulse drop-shadow-lg">
             <img src="/kinova-mark.png" alt="Kinova" className="h-14 w-14 object-contain" />
           </div>
-          <p className="text-xs text-slate-500 dark:text-zinc-400 font-mono">Connecting to Kinova Cloud...</p>
+          <p className="text-xs text-slate-500 dark:text-zinc-400 font-mono">Loading your workspace...</p>
         </div>
       </div>
     );
@@ -330,15 +306,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Login / Unlock screen
-  if (!authenticated || manualLocked) {
+  // Welcome / Login Choice Screen (No PIN required)
+  if (!authenticated) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-black p-4 text-slate-950 dark:text-white selection:bg-indigo-500/30">
         <motion.div
           initial={{ opacity: 0, scale: 0.95, y: 15 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           transition={{ duration: 0.3 }}
-          className="w-full max-w-sm rounded-3xl border border-slate-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-950 p-6 md:p-8 shadow-2xl space-y-6"
+          className="w-full max-w-md rounded-3xl border border-slate-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-950 p-6 md:p-8 shadow-2xl space-y-6"
         >
           {/* Header */}
           <div className="text-center space-y-2">
@@ -349,15 +325,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               Welcome to Kinova
             </h1>
             <p className="text-xs text-slate-600 dark:text-zinc-400 leading-relaxed">
-              Sign in with your Google account to automatically save all transactions and receipts in your own Google Drive.
+              Choose how you want to store your financial records:
             </p>
           </div>
 
-          {/* Primary Action: Sign in with Google */}
-          <div className="space-y-3">
+          {/* Option 1: Sign in with Google (Recommended) */}
+          <div className="rounded-2xl border border-indigo-500/30 bg-indigo-500/[0.04] p-4 space-y-3">
+            <div className="flex items-start gap-2.5">
+              <HardDrive className="h-4 w-4 text-indigo-500 shrink-0 mt-0.5" />
+              <div className="text-xs space-y-0.5">
+                <div className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <span>Google Drive Cloud Sync</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/15 text-indigo-600 dark:text-indigo-300">
+                    Recommended
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-600 dark:text-zinc-400 leading-relaxed">
+                  Automatically creates and saves your ledger & receipts inside your own personal Google Drive. Unlocks AI receipt scanning & syncs across devices.
+                </p>
+              </div>
+            </div>
+
             <a
               href="/api/auth/google/login"
-              className="min-h-[48px] w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-indigo-500 via-indigo-600 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-semibold text-sm shadow-xl shadow-indigo-500/25 transition-all flex items-center justify-center gap-3 cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
+              className="min-h-[48px] w-full py-3 px-4 rounded-xl bg-gradient-to-r from-indigo-500 via-indigo-600 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-semibold text-sm shadow-lg shadow-indigo-500/25 transition-all flex items-center justify-center gap-3 cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
             >
               <svg className="h-5 w-5 bg-white rounded-full p-0.5 shrink-0" viewBox="0 0 24 24">
                 <path
@@ -379,79 +370,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               </svg>
               <span>Continue with Google</span>
             </a>
-
-            <div className="rounded-2xl bg-indigo-500/5 border border-indigo-500/15 p-3 text-[11px] text-slate-600 dark:text-zinc-400 space-y-1">
-              <p className="font-semibold text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5">
-                <HardDrive className="h-3.5 w-3.5" />
-                <span>Zero-Setup Personal Cloud</span>
-              </p>
-              <p>
-                Creates a private <code>Kinova CashFlow</code> sheet & receipt folder directly in your own Google Drive.
-              </p>
-            </div>
           </div>
 
-          {/* Optional PIN / Local Mode Toggle */}
-          <div className="pt-2 border-t border-slate-200 dark:border-zinc-800/60 space-y-3">
+          {/* Option 2: Local Browser Storage Only (with Data Loss Warning) */}
+          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/[0.04] p-4 space-y-3">
+            <div className="flex items-start gap-2.5">
+              <Smartphone className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+              <div className="text-xs space-y-1">
+                <div className="font-bold text-slate-900 dark:text-white">
+                  Local Device Storage Only (No Login)
+                </div>
+                <p className="text-[11px] text-amber-700 dark:text-amber-300/90 leading-relaxed flex items-start gap-1">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-500" />
+                  <span>
+                    Warning: Data is saved only on this browser/phone. You will <strong>lose all data</strong> if you change phones, clear browser data, or uninstall.
+                  </span>
+                </p>
+              </div>
+            </div>
+
             <button
               type="button"
-              onClick={() => setShowPinFallback((v) => !v)}
-              className="w-full text-center text-[11px] font-medium text-slate-500 dark:text-zinc-400 hover:text-indigo-500 dark:hover:text-indigo-400 flex items-center justify-center gap-1.5 cursor-pointer"
+              onClick={handleChooseLocalMode}
+              className="min-h-[42px] w-full py-2.5 px-4 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-200 text-xs font-semibold transition-colors cursor-pointer"
             >
-              <KeyRound className="h-3.5 w-3.5" />
-              <span>{showPinFallback ? 'Hide PIN / Offline Options' : 'Unlock with App PIN or Offline Mode'}</span>
+              Use Local Storage Only
             </button>
-
-            {showPinFallback && (
-              <form onSubmit={handleUnlock} className="space-y-3 pt-1">
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  maxLength={4}
-                  placeholder="Enter 4-digit PIN (default 0000)"
-                  value={pinInput}
-                  onChange={(e) => {
-                    const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 4);
-                    setPinInput(digitsOnly);
-                    if (errorMsg) setErrorMsg('');
-                  }}
-                  className={`min-h-[44px] w-full text-center py-2.5 px-4 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 text-slate-950 dark:text-white outline-none focus:border-indigo-500 transition-colors ${
-                    pinInput.length > 0
-                      ? 'tracking-[0.4em] pl-[0.4em] text-lg font-bold'
-                      : 'tracking-normal text-xs font-medium'
-                  }`}
-                />
-
-                {errorMsg && (
-                  <p role="alert" className="text-xs text-rose-600 dark:text-rose-400 text-center font-medium">
-                    {errorMsg}
-                  </p>
-                )}
-
-                <div className="flex gap-2">
-                  <button
-                    type="submit"
-                    className="flex-1 py-2.5 rounded-xl bg-slate-900 dark:bg-zinc-800 hover:bg-slate-800 text-white text-xs font-semibold cursor-pointer"
-                  >
-                    Unlock with PIN
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleLocalOnlyStart}
-                    className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-900 text-slate-700 dark:text-zinc-300 text-xs font-semibold cursor-pointer"
-                  >
-                    Local Mode Only
-                  </button>
-                </div>
-              </form>
-            )}
           </div>
 
           <div className="text-center pt-1">
             <span className="text-[11px] text-slate-500 dark:text-zinc-400 flex items-center justify-center gap-1">
               <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
-              <span>100% private • stored in your own Google Drive</span>
+              <span>100% isolated per account • zero shared data</span>
             </span>
           </div>
         </motion.div>
@@ -463,13 +413,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider
       value={{
         authenticated,
-        isTrustedDevice,
-        lockApp,
-        untrustDevice,
-        changePin,
-        currentPin: activePin,
+        isTrustedDevice: true,
+        lockApp: () => void signOutGoogle(),
+        untrustDevice: () => void signOutGoogle(),
+        changePin: () => true,
+        currentPin: '0000',
         googleUser,
+        isLocalMode,
         signOutGoogle,
+        exitLocalMode,
         refreshGoogleSession,
       }}
     >

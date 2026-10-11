@@ -264,6 +264,18 @@ async function createAndInitializeUserSpreadsheet(accessToken: string): Promise<
   return spreadsheetId;
 }
 
+interface ResolvedWorkspace {
+  spreadsheetId: string;
+  invoicesFolderId: string;
+  backupsFolderId: string;
+  meta: SpreadsheetMetadata;
+  changed: boolean;
+  cachedAt: number;
+}
+
+const userWorkspaceCache = new Map<string, ResolvedWorkspace>();
+const workspaceInitLocks = new Map<string, Promise<ResolvedWorkspace>>();
+
 export async function ensureUserWorkspace(session: GoogleUserSession): Promise<{
   spreadsheetId: string;
   invoicesFolderId: string;
@@ -271,54 +283,84 @@ export async function ensureUserWorkspace(session: GoogleUserSession): Promise<{
   meta: SpreadsheetMetadata;
   changed: boolean;
 }> {
-  let spreadsheetId = session.spreadsheetId || '';
-  let meta: SpreadsheetMetadata | null = null;
-  let changed = false;
-
-  if (spreadsheetId) {
-    meta = await getSpreadsheetMetadata(spreadsheetId, session.accessToken);
+  const emailKey = session.email.trim().toLowerCase();
+  const cached = userWorkspaceCache.get(emailKey);
+  if (cached && Date.now() - cached.cachedAt < 45_000) {
+    const changed =
+      session.spreadsheetId !== cached.spreadsheetId ||
+      session.invoicesFolderId !== cached.invoicesFolderId ||
+      session.backupsFolderId !== cached.backupsFolderId;
+    if (changed) {
+      session.spreadsheetId = cached.spreadsheetId;
+      session.invoicesFolderId = cached.invoicesFolderId;
+      session.backupsFolderId = cached.backupsFolderId;
+    }
+    return {
+      spreadsheetId: cached.spreadsheetId,
+      invoicesFolderId: cached.invoicesFolderId,
+      backupsFolderId: cached.backupsFolderId,
+      meta: cached.meta,
+      changed,
+    };
   }
 
-  if (!meta) {
-    const foundId =
-      (await findDriveItemByName(session.accessToken, 'Kinova CashFlow', 'application/vnd.google-apps.spreadsheet')) ||
-      (await findDriveItemByName(session.accessToken, 'CashFlow 记账', 'application/vnd.google-apps.spreadsheet'));
+  const inflight = workspaceInitLocks.get(emailKey);
+  if (inflight) {
+    const resolved = await inflight;
+    session.spreadsheetId = resolved.spreadsheetId;
+    session.invoicesFolderId = resolved.invoicesFolderId;
+    session.backupsFolderId = resolved.backupsFolderId;
+    return resolved;
+  }
 
-    if (foundId) {
-      meta = await getSpreadsheetMetadata(foundId, session.accessToken);
-      if (meta) {
-        spreadsheetId = foundId;
-        changed = true;
+  const initPromise = (async (): Promise<ResolvedWorkspace> => {
+    let spreadsheetId = session.spreadsheetId || cached?.spreadsheetId || '';
+    let meta: SpreadsheetMetadata | null = null;
+    let changed = false;
+
+    if (spreadsheetId) {
+      meta = await getSpreadsheetMetadata(spreadsheetId, session.accessToken);
+    }
+
+    if (!meta) {
+      const foundId =
+        (await findDriveItemByName(session.accessToken, 'Kinova CashFlow', 'application/vnd.google-apps.spreadsheet')) ||
+        (await findDriveItemByName(session.accessToken, 'CashFlow 记账', 'application/vnd.google-apps.spreadsheet'));
+
+      if (foundId) {
+        meta = await getSpreadsheetMetadata(foundId, session.accessToken);
+        if (meta) {
+          spreadsheetId = foundId;
+          changed = true;
+        }
       }
     }
-  }
 
-  if (!meta) {
-    spreadsheetId = await createAndInitializeUserSpreadsheet(session.accessToken);
-    meta = await getSpreadsheetMetadata(spreadsheetId, session.accessToken);
-    changed = true;
-  }
+    if (!meta) {
+      spreadsheetId = await createAndInitializeUserSpreadsheet(session.accessToken);
+      meta = await getSpreadsheetMetadata(spreadsheetId, session.accessToken);
+      changed = true;
+    }
 
-  if (!meta) {
-    throw new Error('Could not open or initialize Google Sheet in your Google Drive.');
-  }
+    if (!meta) {
+      throw new Error('Could not open or initialize Google Sheet in your Google Drive.');
+    }
 
-  const invoicesFolderId = await ensureDriveFolder(
-    session.accessToken,
-    'CashFlow Invoices',
-    session.invoicesFolderId
-  );
-  const backupsFolderId = await ensureDriveFolder(
-    session.accessToken,
-    'CashFlow Backups',
-    session.backupsFolderId
-  );
+    const invoicesFolderId = await ensureDriveFolder(
+      session.accessToken,
+      'CashFlow Invoices',
+      session.invoicesFolderId || cached?.invoicesFolderId
+    );
+    const backupsFolderId = await ensureDriveFolder(
+      session.accessToken,
+      'CashFlow Backups',
+      session.backupsFolderId || cached?.backupsFolderId
+    );
 
-  if (invoicesFolderId !== session.invoicesFolderId || backupsFolderId !== session.backupsFolderId) {
-    changed = true;
-  }
+    if (invoicesFolderId !== session.invoicesFolderId || backupsFolderId !== session.backupsFolderId) {
+      changed = true;
+    }
 
-  if (changed) {
     session.spreadsheetId = spreadsheetId;
     session.invoicesFolderId = invoicesFolderId;
     session.backupsFolderId = backupsFolderId;
@@ -327,15 +369,25 @@ export async function ensureUserWorkspace(session: GoogleUserSession): Promise<{
       invoicesFolderId,
       backupsFolderId,
     });
-  }
 
-  return {
-    spreadsheetId,
-    invoicesFolderId,
-    backupsFolderId,
-    meta,
-    changed,
-  };
+    const result: ResolvedWorkspace = {
+      spreadsheetId,
+      invoicesFolderId,
+      backupsFolderId,
+      meta,
+      changed,
+      cachedAt: Date.now(),
+    };
+    userWorkspaceCache.set(emailKey, result);
+    return result;
+  })();
+
+  workspaceInitLocks.set(emailKey, initPromise);
+  try {
+    return await initPromise;
+  } finally {
+    workspaceInitLocks.delete(emailKey);
+  }
 }
 
 function getDefaultHeadersForSheet(sheetName: string): string[] {
