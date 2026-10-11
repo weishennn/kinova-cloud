@@ -1,4 +1,4 @@
-import { sheetsApi, getSwrCachedEntry, setSwrCachedData } from './sheets-api';
+import { sheetsApi, getSwrCachedEntry, setSwrCachedData, getActiveUserCacheScope } from './sheets-api';
 import { 
   getRollingWindowMonths, 
   enqueuePendingMutation, 
@@ -28,6 +28,82 @@ function trackActiveWrite<T>(promise: Promise<T>): Promise<T> {
 
 type SheetRow = Record<string, unknown>;
 type SheetDataPayload = { headers: string[]; rows: SheetRow[] };
+
+interface InFlightOptimisticMutation {
+  type: 'add' | 'update';
+  sheetName: string;
+  rowId: string;
+  rowData: SheetRow;
+  createdAt: number;
+}
+
+const inFlightOptimisticRows = new Map<string, InFlightOptimisticMutation>();
+const IN_FLIGHT_RETENTION_MS = 30_000;
+
+export function ensureMonthInLocalMonthList(month: string): void {
+  if (!/^\d{4}-\d{2}$/.test(month) || typeof window === 'undefined') return;
+  try {
+    const entry = getSwrCachedEntry<{ success: boolean; data: string[] }>('getMonthList', {});
+    const existing = Array.isArray(entry?.data?.data) ? entry!.data.data : [];
+    if (!existing.includes(month)) {
+      const next = Array.from(new Set([...existing, month]))
+        .filter((m) => /^\d{4}-\d{2}$/.test(m))
+        .sort((a, b) => b.localeCompare(a));
+      setSwrCachedData('getMonthList', {}, { success: true, data: next });
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function collectLocallyKnownMonths(): string[] {
+  const months = new Set<string>();
+  const now = Date.now();
+  for (const [id, item] of inFlightOptimisticRows.entries()) {
+    if (now - item.createdAt > IN_FLIGHT_RETENTION_MS) {
+      inFlightOptimisticRows.delete(id);
+      continue;
+    }
+    if (/^\d{4}-\d{2}$/.test(item.sheetName)) {
+      months.add(item.sheetName);
+    }
+  }
+  try {
+    for (const m of getPendingMutations()) {
+      if (m.type === 'delete') continue;
+      if (/^\d{4}-\d{2}$/.test(m.sheetName)) {
+        months.add(m.sheetName);
+      }
+      const dateStr = String(m.rowData?.Date || m.rowData?.date || '');
+      if (/^\d{4}-\d{2}/.test(dateStr)) {
+        months.add(dateStr.substring(0, 7));
+      }
+    }
+  } catch {
+    // ignore
+  }
+  if (typeof window !== 'undefined') {
+    try {
+      const scope = getActiveUserCacheScope();
+      const prefix = `cashflow_swr_${scope}_getSheetData_`;
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key || !key.startsWith(prefix)) continue;
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const parsed = JSON.parse(raw);
+        const m = typeof parsed?.month === 'string' ? parsed.month : '';
+        const rows = parsed?.data?.data?.rows;
+        if (/^\d{4}-\d{2}$/.test(m) && Array.isArray(rows) && rows.length > 0) {
+          months.add(m);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return Array.from(months);
+}
 
 function scheduleBackgroundWarmRecentMonths(): void {
   if (typeof window === 'undefined' || backgroundPrefetchScheduled) return;
@@ -255,9 +331,19 @@ export const sheetsData = {
         throw new Error(`Google Sheets did not return ${selectedPeriod}.`);
       }
       const rawRows = (res.data.rows || []).map((r: SheetRow) => ({ ...r, _month: selectedPeriod }));
+      const mergedRows = applyPendingMutations(rawRows, selectedPeriod);
+      if (mergedRows.length > rawRows.length) {
+        setSwrCachedData('getSheetData', { sheetName: selectedPeriod }, {
+          success: true,
+          data: {
+            headers: res.data.headers || [],
+            rows: mergedRows,
+          },
+        });
+      }
       return {
         headers: res.data.headers || [],
-        rows: applyPendingMutations(rawRows, selectedPeriod),
+        rows: mergedRows,
       };
     }
 
@@ -265,7 +351,10 @@ export const sheetsData = {
     if (selectedPeriod && selectedPeriod.startsWith('year-')) {
       const year = selectedPeriod.replace('year-', '');
       const allMonths = await this.getMonthList();
-      const existingYearMonths = allMonths.filter(m => m.startsWith(`${year}-`));
+      const localMonths = collectLocallyKnownMonths();
+      const existingYearMonths = Array.from(new Set([...allMonths, ...localMonths]))
+        .filter(m => m.startsWith(`${year}-`))
+        .sort((a, b) => b.localeCompare(a));
       const targetMonths = existingYearMonths.length > 0
         ? existingYearMonths
         : Array.from({ length: 12 }, (_, idx) => `${year}-${String(12 - idx).padStart(2, '0')}`);
@@ -276,7 +365,11 @@ export const sheetsData = {
           if (!res.success || !res.data) {
             throw new Error(`Google Sheets did not return ${m}.`);
           }
-          return { month: m, headers: res.data.headers || [], rows: res.data.rows || [] };
+          const monthRows = applyPendingMutations(
+            (res.data.rows || []).map((r: SheetRow) => ({ ...r, _month: m })),
+            m
+          );
+          return { month: m, headers: res.data.headers || [], rows: monthRows };
         })
       );
 
@@ -366,9 +459,20 @@ export const sheetsData = {
     try {
       const res = await sheetsApi.getSheetData(sheetName);
       if (res.success && res.data) {
+        const rawRows = res.data.rows || [];
+        const mergedRows = applyPendingMutations(rawRows, sheetName);
+        if (mergedRows.length > rawRows.length) {
+          setSwrCachedData('getSheetData', { sheetName }, {
+            success: true,
+            data: {
+              headers: res.data.headers || [],
+              rows: mergedRows,
+            },
+          });
+        }
         return {
           headers: res.data.headers || [],
-          rows: applyPendingMutations(res.data.rows || [], sheetName),
+          rows: mergedRows,
         };
       }
     } catch (err) {
@@ -381,14 +485,26 @@ export const sheetsData = {
   },
 
   /**
-   * Month list from Google Sheets
+   * Month list from Google Sheets merged with any locally recorded/cached months
    */
   async getMonthList(): Promise<string[]> {
-    const res = await sheetsApi.getMonthList();
-    if (!res.success || !Array.isArray(res.data)) {
-      throw new Error('Could not load the month list from Google Sheets.');
+    const localMonths = collectLocallyKnownMonths();
+    try {
+      const res = await sheetsApi.getMonthList();
+      if (res.success && Array.isArray(res.data)) {
+        const merged = Array.from(new Set([...res.data, ...localMonths]))
+          .filter((m) => /^\d{4}-\d{2}$/.test(m))
+          .sort((a, b) => b.localeCompare(a));
+        setSwrCachedData('getMonthList', {}, { success: true, data: merged });
+        return merged;
+      }
+    } catch (err) {
+      if (localMonths.length > 0) {
+        return localMonths.sort((a, b) => b.localeCompare(a));
+      }
+      throw err;
     }
-    return res.data;
+    throw new Error('Could not load the month list from Google Sheets.');
   },
 
   /**
@@ -417,6 +533,19 @@ export const sheetsData = {
     };
 
     const swrSheet = targetMonth || sheetName;
+    if (tempId && swrSheet) {
+      inFlightOptimisticRows.set(tempId, {
+        type: 'add',
+        sheetName: swrSheet,
+        rowId: tempId,
+        rowData: normalizedRow,
+        createdAt: Date.now(),
+      });
+    }
+    if (targetMonth) {
+      ensureMonthInLocalMonthList(targetMonth);
+    }
+
     if (swrSheet && swrSheet !== 'Transactions') {
       const entry = getSwrCachedEntry<{ success: boolean; data: SheetDataPayload }>('getSheetData', { sheetName: swrSheet });
       const existingRows = entry?.data?.data?.rows || [];
@@ -459,6 +588,21 @@ export const sheetsData = {
       ...(typeof rowIndex === 'number' ? { _rowIndex: rowIndex } : {}),
     };
 
+    const swrSheet = targetMonth || sheetName;
+    if (id && swrSheet) {
+      const existingInFlight = inFlightOptimisticRows.get(id);
+      inFlightOptimisticRows.set(id, {
+        type: existingInFlight?.type === 'add' ? 'add' : 'update',
+        sheetName: swrSheet,
+        rowId: id,
+        rowData: existingInFlight ? { ...existingInFlight.rowData, ...updatedRow } : updatedRow,
+        createdAt: Date.now(),
+      });
+    }
+    if (targetMonth) {
+      ensureMonthInLocalMonthList(targetMonth);
+    }
+
     const candidateSheets = new Set<string>();
     if (sheetName && sheetName !== 'Transactions') candidateSheets.add(sheetName);
     if (targetMonth) candidateSheets.add(targetMonth);
@@ -498,6 +642,7 @@ export const sheetsData = {
    */
   optimisticDeleteRow(sheetName: string, rowIndex?: number, id?: string): void {
     if (id) {
+      inFlightOptimisticRows.delete(id);
       recordDeletedTombstone(id, 'transaction', sheetName);
     }
 
@@ -910,8 +1055,15 @@ function applyPendingMutations(rows: SheetRow[], targetSheet?: string): SheetRow
   const pending = getPendingMutations();
   const tombstones = getDeletedTombstones();
   const hasTombstones = Object.keys(tombstones).length > 0;
+  const now = Date.now();
 
-  if (pending.length === 0 && !hasTombstones) return rows;
+  for (const [id, item] of inFlightOptimisticRows.entries()) {
+    if (now - item.createdAt > IN_FLIGHT_RETENTION_MS || (id && tombstones[id])) {
+      inFlightOptimisticRows.delete(id);
+    }
+  }
+
+  if (pending.length === 0 && inFlightOptimisticRows.size === 0 && !hasTombstones) return rows;
 
   let result = hasTombstones
     ? rows.filter((r) => {
@@ -919,6 +1071,50 @@ function applyPendingMutations(rows: SheetRow[], targetSheet?: string): SheetRow
         return !rowId || !tombstones[rowId];
       })
     : [...rows];
+
+  const matchesTargetSheet = (sheetName: string, mutMonth: string): boolean => {
+    if (!targetSheet || targetSheet === 'Transactions' || targetSheet === 'all') {
+      return true;
+    }
+    if (targetSheet.startsWith('year-')) {
+      const yrPrefix = `${targetSheet.slice(5)}-`;
+      return sheetName.startsWith(yrPrefix) || mutMonth.startsWith(yrPrefix);
+    }
+    return sheetName === targetSheet || mutMonth === targetSheet;
+  };
+
+  for (const [, inflight] of inFlightOptimisticRows.entries()) {
+    const mutDateStr = String(inflight.rowData?.Date || inflight.rowData?.date || '');
+    const mutMonth =
+      /^\d{4}-\d{2}$/.test(inflight.sheetName)
+        ? inflight.sheetName
+        : /^\d{4}-\d{2}/.test(String(inflight.rowData?._month || ''))
+          ? String(inflight.rowData?._month).substring(0, 7)
+          : /^\d{4}-\d{2}/.test(mutDateStr)
+            ? mutDateStr.substring(0, 7)
+            : inflight.sheetName;
+
+    if (!matchesTargetSheet(inflight.sheetName, mutMonth)) {
+      continue;
+    }
+
+    if (inflight.type === 'add') {
+      const alreadyHas = result.some((r) => String(r.Id || r.id || '') === inflight.rowId);
+      if (!alreadyHas) {
+        result.unshift({
+          ...inflight.rowData,
+          _month: mutMonth || inflight.sheetName,
+        });
+      }
+    } else if (inflight.type === 'update') {
+      result = result.map((r) => {
+        if (String(r.Id || r.id || '') === inflight.rowId) {
+          return { ...r, ...inflight.rowData };
+        }
+        return r;
+      });
+    }
+  }
 
   for (const m of pending) {
     const mutDateStr = String(m.rowData?.Date || m.rowData?.date || '');
@@ -931,14 +1127,7 @@ function applyPendingMutations(rows: SheetRow[], targetSheet?: string): SheetRow
             ? mutDateStr.substring(0, 7)
             : m.sheetName;
 
-    if (
-      targetSheet &&
-      targetSheet !== 'Transactions' &&
-      targetSheet !== 'all' &&
-      !targetSheet.startsWith('year-') &&
-      m.sheetName !== targetSheet &&
-      mutMonth !== targetSheet
-    ) {
+    if (!matchesTargetSheet(m.sheetName, mutMonth)) {
       continue;
     }
 

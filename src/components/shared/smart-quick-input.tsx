@@ -60,7 +60,7 @@ const EXPENSE_CATEGORIES = [
 export function SmartQuickInput() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { setAiPrefill, setQuickAddOpen } = useAppStore();
+  const { setAiPrefill, setQuickAddOpen, selectedMonth, setSelectedMonth } = useAppStore();
   const { transactions = [] } = useTransactions();
   const [input, setInput] = useState('');
   const [isListening, setIsListening] = useState(false);
@@ -605,12 +605,29 @@ export function SmartQuickInput() {
     clearReceiptState();
     setIsSubmitting(false);
 
+    const isOtherPeriod =
+      Boolean(monthStr) &&
+      monthStr !== selectedMonth &&
+      selectedMonth !== 'all' &&
+      selectedMonth !== `year-${monthStr.slice(0, 4)}`;
+    const toastOptions = isOtherPeriod
+      ? {
+          action: {
+            label: `View ${monthStr}`,
+            onClick: () => setSelectedMonth(monthStr),
+          },
+          duration: 5000,
+        }
+      : undefined;
+
     const toastMsg = currentReceipt && shouldUploadPhoto
       ? `📸 Recorded & saved receipt photo: ${recordedText}!`
       : savedTaxCat
       ? `🇲🇾 Recorded (${savedTaxCat.shortName} Tax Relief): ${recordedText}! Remember to attach your receipt in Invoices & Tax.`
+      : isOtherPeriod
+      ? `✨ Recorded to ${monthStr}: ${recordedText}!`
       : `✨ Recorded: ${recordedText}!`;
-    toast.success(toastMsg);
+    toast.success(toastMsg, toastOptions);
 
     // Asynchronously save to Google Sheets (and upload photo to Google Drive) in background
     void (async () => {
@@ -658,6 +675,7 @@ export function SmartQuickInput() {
             receiptUrl: uploadedUrl,
           });
         }
+        queryClient.invalidateQueries({ queryKey: ['months'] });
         queryClient.invalidateQueries({ queryKey: ['overview'] });
       } catch (err) {
         console.warn('Background sync failed', err);

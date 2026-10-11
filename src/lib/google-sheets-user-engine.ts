@@ -679,6 +679,14 @@ async function ensureSheetExists(
 
   if (!addRes.ok) {
     const errText = await addRes.text();
+    if (errText.toLowerCase().includes('already exists')) {
+      const freshMeta = await getSpreadsheetMetadata(spreadsheetId, accessToken);
+      if (freshMeta) {
+        meta.sheets = freshMeta.sheets;
+        const found = meta.sheets.find((s) => s.properties.title === sheetName);
+        if (found) return found.properties.sheetId;
+      }
+    }
     throw new Error(`Failed to create sheet tab "${sheetName}": ${errText}`);
   }
 
@@ -1001,11 +1009,21 @@ export async function executeUserGoogleAction(
         spreadsheetId,
       });
 
-    case 'getAllSheetNames':
+    case 'getAllSheetNames': {
+      const freshMeta = await getSpreadsheetMetadata(spreadsheetId, accessToken);
+      if (freshMeta) {
+        meta.sheets = freshMeta.sheets;
+      }
       return wrap(meta.sheets.map((s) => s.properties.title));
+    }
 
-    case 'getMonthList':
+    case 'getMonthList': {
+      const freshMeta = await getSpreadsheetMetadata(spreadsheetId, accessToken);
+      if (freshMeta) {
+        meta.sheets = freshMeta.sheets;
+      }
       return wrap(getMonthListFromMeta(meta));
+    }
 
     case 'getSheetSchema': {
       let sheetName = String(params.sheetName || '');
@@ -1037,9 +1055,27 @@ export async function executeUserGoogleAction(
       const isMonthlyTab = /^\d{4}-\d{2}$/.test(sheetName);
       const exists = meta.sheets.some((s) => s.properties.title === sheetName);
       if (!exists) {
-        if (action === 'getSheetDataIfExists' || isMonthlyTab) {
+        if (isMonthlyTab) {
+          // Try reading directly in case another serverless instance just created this month tab
+          const directValues = await readSheetValues(spreadsheetId, accessToken, sheetName);
+          if (directValues.length > 0) {
+            meta.sheets.push({
+              properties: {
+                sheetId: 0,
+                title: sheetName,
+                index: meta.sheets.length,
+              },
+            });
+            return wrap(parseValuesToRows(sheetName, directValues, getDefaultHeadersForSheet(sheetName)));
+          }
           return wrap({
             headers: action === 'getSheetDataIfExists' ? [] : getDefaultHeadersForSheet(sheetName),
+            rows: [],
+          });
+        }
+        if (action === 'getSheetDataIfExists') {
+          return wrap({
+            headers: [],
             rows: [],
           });
         }

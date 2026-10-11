@@ -112,7 +112,7 @@ function dataUrlToFile(dataUrl: string, fileName: string, mimeType: string): Fil
 }
 
 export function RecordPaymentModal() {
-  const { isQuickAddOpen, setQuickAddOpen, editTransaction, setEditTransaction, aiPrefill, setAiPrefill } = useAppStore();
+  const { isQuickAddOpen, setQuickAddOpen, editTransaction, setEditTransaction, aiPrefill, setAiPrefill, selectedMonth, setSelectedMonth } = useAppStore();
   const queryClient = useQueryClient();
 
   const [type, setType] = useState<'Expense' | 'Income' | 'Investment'>('Expense');
@@ -981,6 +981,7 @@ export function RecordPaymentModal() {
               },
             );
           }
+          queryClient.invalidateQueries({ queryKey: ['months'] });
           queryClient.invalidateQueries({ queryKey: ['overview'] });
         } catch (err: unknown) {
           console.error('Failed to update transaction in background', err);
@@ -1072,20 +1073,40 @@ export function RecordPaymentModal() {
     removeReceipt();
     setQuickAddOpen(false);
 
+    const isOtherPeriod =
+      Boolean(finalMonthStr) &&
+      finalMonthStr !== selectedMonth &&
+      selectedMonth !== 'all' &&
+      selectedMonth !== `year-${finalMonthStr.slice(0, 4)}`;
+    const toastOptions = isOtherPeriod
+      ? {
+          action: {
+            label: `View ${finalMonthStr}`,
+            onClick: () => setSelectedMonth(finalMonthStr),
+          },
+          duration: 5000,
+        }
+      : undefined;
+
     if (isInstallment) {
       if (isFutureInstallment) {
-        toast.success(`Installment plan for "${description || category}" scheduled! First payment due on ${targetDate}.`);
+        toast.success(`Installment plan for "${description || category}" scheduled! First payment due on ${targetDate}.`, toastOptions);
       } else {
-        toast.success(`Installment 1/${installmentMonths} (${pendingCurrency} ${targetAmount.toFixed(2)}) recorded! Future months will be tracked month-by-month.`);
+        toast.success(`Installment 1/${installmentMonths} (${pendingCurrency} ${targetAmount.toFixed(2)}) recorded! Future months will be tracked month-by-month.`, toastOptions);
       }
     } else if (savedTaxCat) {
       if (pendingPreview) {
-        toast.success(`Recorded under LHDN ${savedTaxCat.shortName} with tax receipt! 🇲🇾🧾`);
+        toast.success(`Recorded under LHDN ${savedTaxCat.shortName} with tax receipt! 🇲🇾🧾`, toastOptions);
       } else {
-        toast.success(`Recorded under LHDN ${savedTaxCat.shortName}! Don't forget to attach the receipt in Invoices & Claims. 🇲🇾📸`);
+        toast.success(`Recorded under LHDN ${savedTaxCat.shortName}! Don't forget to attach the receipt in Invoices & Claims. 🇲🇾📸`, toastOptions);
       }
     } else {
-      toast.success(`${type} of ${pendingCurrency} ${targetAmount.toFixed(2)} recorded! ⚡`);
+      toast.success(
+        isOtherPeriod
+          ? `${type} of ${pendingCurrency} ${targetAmount.toFixed(2)} recorded to ${finalMonthStr}! ⚡`
+          : `${type} of ${pendingCurrency} ${targetAmount.toFixed(2)} recorded! ⚡`,
+        toastOptions
+      );
     }
 
     void (async () => {
@@ -1112,6 +1133,7 @@ export function RecordPaymentModal() {
           }
         }
 
+        queryClient.invalidateQueries({ queryKey: ['months'] });
         queryClient.invalidateQueries({ queryKey: ['overview'] });
       } catch (err: unknown) {
         console.error('Failed to record transaction in background', err);

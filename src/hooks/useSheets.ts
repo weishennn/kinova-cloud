@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { sheetsApi, getApiUrl, getSwrCachedEntry, setSwrCachedData, clearAllSwrCache } from '@/lib/sheets-api';
 import { syncAllGoogleSheets } from '@/lib/sync-engine';
-import { sheetsData } from '@/lib/sheets-data';
+import { sheetsData, collectLocallyKnownMonths } from '@/lib/sheets-data';
 
 export function shouldUseGoogleSheets(): boolean {
   return !!getApiUrl();
@@ -30,14 +30,18 @@ export async function getUnifiedMonthList(): Promise<string[]> {
 
 export function useMonthList() {
   const initial = getSwrCachedEntry<{ success: boolean; data: string[] }>('getMonthList', {});
+  const localMonths = collectLocallyKnownMonths();
+  const initialMonths = initial?.data?.data || localMonths.length > 0
+    ? Array.from(new Set([...(initial?.data?.data || []), ...localMonths])).sort((a, b) => b.localeCompare(a))
+    : undefined;
   return useQuery({
     queryKey: ['months'],
     queryFn: getUnifiedMonthList,
     staleTime: 10 * 1000,
     refetchOnMount: 'always',
     refetchOnWindowFocus: 'always',
-    initialData: initial?.data?.data,
-    initialDataUpdatedAt: initial?.savedAt,
+    initialData: initialMonths,
+    initialDataUpdatedAt: initial?.savedAt || 0,
   });
 }
 
@@ -334,6 +338,14 @@ export function applyOptimisticAddToQueryCache(
   const targetMonth = String(normalizedRow._month || (/^\d{4}-\d{2}$/.test(sheetName) ? sheetName : ''));
   const isTxSheet = sheetName === 'Transactions' || /^\d{4}-\d{2}$/.test(sheetName);
 
+  if (targetMonth && /^\d{4}-\d{2}$/.test(targetMonth)) {
+    queryClient.setQueryData(['months'], (old: string[] | undefined) => {
+      const prev = Array.isArray(old) ? old : [];
+      if (prev.includes(targetMonth)) return prev;
+      return Array.from(new Set([...prev, targetMonth])).sort((a, b) => b.localeCompare(a));
+    });
+  }
+
   const prependRow = (old: { headers?: string[]; rows?: Record<string, unknown>[] } | undefined) => {
     if (!old || !Array.isArray(old.rows)) {
       return { headers: [], rows: [normalizedRow] };
@@ -367,6 +379,14 @@ export function applyOptimisticUpdateToQueryCache(
   const updatedRow = sheetsData.optimisticUpdateRow(sheetName, rowIndex, rowData);
   const rowId = String(updatedRow.Id || updatedRow.id || '');
   const targetMonth = String(updatedRow._month || (/^\d{4}-\d{2}$/.test(sheetName) ? sheetName : ''));
+
+  if (targetMonth && /^\d{4}-\d{2}$/.test(targetMonth)) {
+    queryClient.setQueryData(['months'], (old: string[] | undefined) => {
+      const prev = Array.isArray(old) ? old : [];
+      if (prev.includes(targetMonth)) return prev;
+      return Array.from(new Set([...prev, targetMonth])).sort((a, b) => b.localeCompare(a));
+    });
+  }
 
   queryClient.setQueriesData({ queryKey: ['sheet'] }, (old: unknown) => {
     const prev = old as { headers?: string[]; rows?: Record<string, unknown>[] } | undefined;
@@ -425,6 +445,7 @@ export function useAddRow() {
       if (!isTxSheet) {
         queryClient.invalidateQueries({ queryKey: ['sheet', sheetName] });
       }
+      queryClient.invalidateQueries({ queryKey: ['months'] });
       queryClient.invalidateQueries({ queryKey: ['overview'] });
     },
   });
@@ -447,6 +468,7 @@ export function useUpdateRow() {
           queryClient.invalidateQueries({ queryKey: ['trades'] });
         }
       }
+      queryClient.invalidateQueries({ queryKey: ['months'] });
       queryClient.invalidateQueries({ queryKey: ['overview'] });
     },
   });
