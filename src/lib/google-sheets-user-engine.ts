@@ -1,6 +1,7 @@
 import { GoogleUserSession } from './google-auth';
 import { getAdminUserRegistry, updateUserDriveIds } from './admin-registry';
 import { ensureGoogleApiSuccess } from './google-api-result';
+import { detectConcurrentFieldConflict } from './conflict-policy';
 
 export const DEFAULT_MONTHLY_HEADERS = [
   'Id', 'Date', 'Type', 'Category', 'SubCategory', 'Description',
@@ -1376,6 +1377,36 @@ export async function executeUserGoogleAction(
       }
 
       const existingRow = values[matchedRow - 1] || [];
+      const baseData = rowData._baseData;
+      if (baseData && typeof baseData === 'object' && !Array.isArray(baseData)) {
+        const serverRecord: Record<string, unknown> = {
+          _month: targetSheetName,
+          _rowIndex: matchedRow,
+        };
+        headers.forEach((header, index) => {
+          serverRecord[header] = existingRow[index] ?? '';
+        });
+        const conflict = detectConcurrentFieldConflict(
+          baseData as Record<string, unknown>,
+          serverRecord,
+          rowData
+        );
+        if (conflict.hasConflict) {
+          return wrap({
+            updated: false,
+            verified: false,
+            conflictDetected: true,
+            conflictingFields: conflict.conflictingFields,
+            verifiedId: requestedId,
+            id: requestedId,
+            rowIndex: matchedRow,
+            sheet: targetSheetName,
+            sheetName: targetSheetName,
+            serverRecord,
+          });
+        }
+      }
+
       const newDateStr = String(rowData.Date || rowData.date || '').trim();
       const newMonthStr = /^\d{4}-\d{2}/.test(newDateStr) ? newDateStr.substring(0, 7) : '';
 

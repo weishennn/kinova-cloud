@@ -69,6 +69,7 @@ export const PROTECTED_STORAGE_KEYS = new Set<string>([
   'cashflow_pending_queue',
   // This is the primary database when the app is in local-only mode, not a cache.
   'cashflow_local_store',
+  'cashflow_local_store_scoped:local_only',
   'cashflow_pending_plan_mutations_v2',
   'cashflow_pending_settings_mutations',
   'cashflow_deleted_tombstones_v1',
@@ -542,27 +543,191 @@ export function getPendingQueueSummary(): {
   };
 }
 
-export function backupPendingQueuesForAccount(accountEmail: string): { backedUp: number } {
-  if (typeof window === 'undefined') return { backedUp: 0 };
+/** Resolves the owner identity for an active queue before changing account scope. */
+export function getPendingQueueOwnerScope(
+  activeScope: string | null,
+  storedEmail: string | null,
+  localModeChosen: boolean
+): string | null {
+  if (activeScope === 'local_only') return 'local_only';
+  if (activeScope?.startsWith('google:')) {
+    const scopedEmail = activeScope.slice('google:'.length).trim().toLowerCase();
+    return scopedEmail || null;
+  }
+  if (!activeScope && localModeChosen) return 'local_only';
+  const normalizedEmail = (storedEmail || '').trim().toLowerCase();
+  return normalizedEmail || null;
+}
+
+export function clearDisposableReadCaches(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      if (
+        k.startsWith('cashflow_swr_') ||
+        k.startsWith('swr:') ||
+        k.startsWith('cashflow_month_') ||
+        k.startsWith('cashflow_cache_') ||
+        k.startsWith('cashflow_pre_sync_')
+      ) {
+        keysToRemove.push(k);
+      }
+    }
+    keysToRemove.forEach((k) => localStorage.removeItem(k));
+  } catch {}
+}
+
+const LOCAL_ONLY_STORE_KEY = 'cashflow_local_store';
+const LOCAL_ONLY_STORE_BACKUP_KEY = 'cashflow_local_store_scoped:local_only';
+
+/** Preserve the local-only database before an account switch clears active storage. */
+export function backupLocalStoreForLocalMode(): { success: boolean; preserved: boolean; error?: string } {
+  if (typeof window === 'undefined') {
+    return { success: false, preserved: false, error: 'Window environment is unavailable' };
+  }
+  try {
+    const raw = localStorage.getItem(LOCAL_ONLY_STORE_KEY);
+    if (raw === null) return { success: true, preserved: false };
+    if (localStorage.getItem(LOCAL_ONLY_STORE_BACKUP_KEY) === raw) {
+      return { success: true, preserved: true };
+    }
+
+    const saveAndVerify = () => {
+      localStorage.setItem(LOCAL_ONLY_STORE_BACKUP_KEY, raw);
+      if (localStorage.getItem(LOCAL_ONLY_STORE_BACKUP_KEY) !== raw) {
+        throw new Error('Local-only database backup verification failed');
+      }
+    };
+    try {
+      saveAndVerify();
+    } catch {
+      clearDisposableReadCaches();
+      saveAndVerify();
+    }
+    return { success: true, preserved: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn('[CacheManager] Failed to preserve local-only database:', message);
+    return { success: false, preserved: false, error: message };
+  }
+}
+
+/** Restore the local-only database only after its full value is safely in active storage. */
+export function restoreLocalStoreForLocalMode(): { success: boolean; restored: boolean; error?: string } {
+  if (typeof window === 'undefined') {
+    return { success: false, restored: false, error: 'Window environment is unavailable' };
+  }
+  try {
+    const backup = localStorage.getItem(LOCAL_ONLY_STORE_BACKUP_KEY);
+    if (backup === null) return { success: true, restored: false };
+    const active = localStorage.getItem(LOCAL_ONLY_STORE_KEY);
+    if (active !== null && active !== backup) {
+      return { success: false, restored: false, error: 'Active local database differs from its preserved copy' };
+    }
+
+    if (active === null) {
+      const saveAndVerify = () => {
+        localStorage.setItem(LOCAL_ONLY_STORE_KEY, backup);
+        if (localStorage.getItem(LOCAL_ONLY_STORE_KEY) !== backup) {
+          throw new Error('Local-only database restore verification failed');
+        }
+      };
+      try {
+        saveAndVerify();
+      } catch {
+        clearDisposableReadCaches();
+        saveAndVerify();
+      }
+    }
+    localStorage.removeItem(LOCAL_ONLY_STORE_BACKUP_KEY);
+    return { success: true, restored: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn('[CacheManager] Failed to restore local-only database:', message);
+    return { success: false, restored: false, error: message };
+  }
+}
+
+export function backupPendingQueuesForAccount(
+  accountEmail: string
+): { success: boolean; backedUp: number; error?: string } {
+  if (typeof window === 'undefined') {
+    return { success: false, backedUp: 0, error: 'Window environment is unavailable' };
+  }
   const cleanEmail = (accountEmail || '').trim().toLowerCase();
-  if (!cleanEmail) return { backedUp: 0 };
+  if (!cleanEmail) {
+    return { success: false, backedUp: 0, error: 'No account email available for backup' };
+  }
 
   const summary = getPendingQueueSummary();
-  if (summary.total === 0) return { backedUp: 0 };
+  if (summary.total === 0) return { success: true, backedUp: 0 };
 
-  try {
+  const attemptWrite = () => {
     const txRaw = localStorage.getItem(CACHE_KEYS.PENDING_QUEUE);
     const planRaw = localStorage.getItem(CACHE_KEYS.PENDING_PLAN_QUEUE);
     const settingsRaw = localStorage.getItem(CACHE_KEYS.PENDING_SETTINGS_QUEUE);
 
-    if (txRaw) localStorage.setItem(`cashflow_pending_queue_scoped:${cleanEmail}`, txRaw);
-    if (planRaw) localStorage.setItem(`cashflow_pending_plan_scoped:${cleanEmail}`, planRaw);
-    if (settingsRaw) localStorage.setItem(`cashflow_pending_settings_scoped:${cleanEmail}`, settingsRaw);
+    const txKey = `cashflow_pending_queue_scoped:${cleanEmail}`;
+    const planKey = `cashflow_pending_plan_scoped:${cleanEmail}`;
+    const settingsKey = `cashflow_pending_settings_scoped:${cleanEmail}`;
 
-    return { backedUp: summary.total };
+    const mergeRawArrays = (priorRaw: string | null, incomingRaw: string | null, key: string): string | null => {
+      if (!incomingRaw) return priorRaw;
+      const incoming = JSON.parse(incomingRaw);
+      if (!Array.isArray(incoming)) throw new Error(`Pending queue ${key} is not an array`);
+      if (!priorRaw) return JSON.stringify(incoming);
+      const prior = JSON.parse(priorRaw);
+      if (!Array.isArray(prior)) throw new Error(`Existing scoped queue ${key} is not an array`);
+      const merged = new Map<string, unknown>();
+      [...prior, ...incoming].forEach((item, index) => {
+        const record = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+        const id = String(record.mutationId || record.id || `${key}:${index}`);
+        merged.set(id, item);
+      });
+      return JSON.stringify([...merged.values()]);
+    };
+
+    const mergedTx = txRaw
+      ? JSON.stringify(coalescePendingMutations([
+          ...(localStorage.getItem(txKey) ? JSON.parse(localStorage.getItem(txKey)!) : []),
+          ...JSON.parse(txRaw),
+        ]))
+      : localStorage.getItem(txKey);
+    const mergedPlans = mergeRawArrays(localStorage.getItem(planKey), planRaw, 'plans');
+    const mergedSettings = mergeRawArrays(localStorage.getItem(settingsKey), settingsRaw, 'settings');
+
+    if (mergedTx) localStorage.setItem(txKey, mergedTx);
+    if (mergedPlans) localStorage.setItem(planKey, mergedPlans);
+    if (mergedSettings) localStorage.setItem(settingsKey, mergedSettings);
+
+    // Read-back verification to guarantee zero silent quota or serialization failures
+    if (mergedTx && localStorage.getItem(txKey) !== mergedTx) {
+      throw new Error('Transaction queue verification failed on read-back');
+    }
+    if (mergedPlans && localStorage.getItem(planKey) !== mergedPlans) {
+      throw new Error('Plan queue verification failed on read-back');
+    }
+    if (mergedSettings && localStorage.getItem(settingsKey) !== mergedSettings) {
+      throw new Error('Settings queue verification failed on read-back');
+    }
+  };
+
+  try {
+    try {
+      attemptWrite();
+    } catch {
+      // If first attempt failed (e.g. storage full), prune disposable read caches and retry
+      clearDisposableReadCaches();
+      attemptWrite();
+    }
+    return { success: true, backedUp: summary.total };
   } catch (err) {
-    console.warn('[CacheManager] Failed to backup pending queues for account:', err);
-    return { backedUp: 0 };
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn('[CacheManager] Failed to backup pending queues for account:', msg);
+    return { success: false, backedUp: 0, error: msg };
   }
 }
 
@@ -572,50 +737,45 @@ export function restorePendingQueuesForAccount(accountEmail: string): { restored
   if (!cleanEmail) return { restored: 0 };
 
   try {
-    let restoredCount = 0;
     const txKey = `cashflow_pending_queue_scoped:${cleanEmail}`;
     const planKey = `cashflow_pending_plan_scoped:${cleanEmail}`;
     const settingsKey = `cashflow_pending_settings_scoped:${cleanEmail}`;
-
     const txRaw = localStorage.getItem(txKey);
-    if (txRaw) {
-      const parsed = JSON.parse(txRaw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const current = getPendingMutations();
-        const merged = coalescePendingMutations([...current, ...parsed]);
-        localStorage.setItem(CACHE_KEYS.PENDING_QUEUE, JSON.stringify(merged));
-        restoredCount += parsed.length;
-      }
-      localStorage.removeItem(txKey);
-    }
-
     const planRaw = localStorage.getItem(planKey);
-    if (planRaw) {
-      const parsed = JSON.parse(planRaw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        let currentPlans: unknown[] = [];
-        try {
-          const rawP = localStorage.getItem(CACHE_KEYS.PENDING_PLAN_QUEUE);
-          if (rawP) currentPlans = JSON.parse(rawP);
-        } catch {}
-        const merged = [...(Array.isArray(currentPlans) ? currentPlans : []), ...parsed];
-        localStorage.setItem(CACHE_KEYS.PENDING_PLAN_QUEUE, JSON.stringify(merged));
-        restoredCount += parsed.length;
-      }
-      localStorage.removeItem(planKey);
+    const settingsRaw = localStorage.getItem(settingsKey);
+    const parseQueue = (raw: string | null, key: string): unknown[] => {
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) throw new Error(`Scoped queue ${key} is not an array`);
+      return parsed;
+    };
+    const scopedTx = parseQueue(txRaw, txKey) as PendingMutation[];
+    const scopedPlans = parseQueue(planRaw, planKey);
+    const scopedSettings = parseQueue(settingsRaw, settingsKey) as PendingSettingMutation[];
+    const currentPlans = parseQueue(localStorage.getItem(CACHE_KEYS.PENDING_PLAN_QUEUE), CACHE_KEYS.PENDING_PLAN_QUEUE);
+
+    const nextTx = coalescePendingMutations([...getPendingMutations(), ...scopedTx]);
+    const nextPlans = mergeQueueEntries(currentPlans, scopedPlans);
+    const nextSettings = mergeQueueEntries(getPendingSettingMutations(), scopedSettings);
+
+    // Write all active queues and verify them before deleting any account-scoped backup.
+    if (txRaw) localStorage.setItem(CACHE_KEYS.PENDING_QUEUE, JSON.stringify(nextTx));
+    if (planRaw) localStorage.setItem(CACHE_KEYS.PENDING_PLAN_QUEUE, JSON.stringify(nextPlans));
+    if (settingsRaw) localStorage.setItem(CACHE_KEYS.PENDING_SETTINGS_QUEUE, JSON.stringify(nextSettings));
+    if (txRaw && localStorage.getItem(CACHE_KEYS.PENDING_QUEUE) !== JSON.stringify(nextTx)) {
+      throw new Error('Restored transaction queue verification failed');
+    }
+    if (planRaw && localStorage.getItem(CACHE_KEYS.PENDING_PLAN_QUEUE) !== JSON.stringify(nextPlans)) {
+      throw new Error('Restored plan queue verification failed');
+    }
+    if (settingsRaw && localStorage.getItem(CACHE_KEYS.PENDING_SETTINGS_QUEUE) !== JSON.stringify(nextSettings)) {
+      throw new Error('Restored settings queue verification failed');
     }
 
-    const settingsRaw = localStorage.getItem(settingsKey);
-    if (settingsRaw) {
-      const parsed = JSON.parse(settingsRaw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const current = getPendingSettingMutations();
-        const merged = [...current, ...parsed];
-        localStorage.setItem(CACHE_KEYS.PENDING_SETTINGS_QUEUE, JSON.stringify(merged));
-        restoredCount += parsed.length;
-      }
-      localStorage.removeItem(settingsKey);
-    }
+    const restoredCount = scopedTx.length + scopedPlans.length + scopedSettings.length;
+    if (txRaw) localStorage.removeItem(txKey);
+    if (planRaw) localStorage.removeItem(planKey);
+    if (settingsRaw) localStorage.removeItem(settingsKey);
 
     if (restoredCount > 0) {
       dispatchSyncStatus();
@@ -625,6 +785,16 @@ export function restorePendingQueuesForAccount(accountEmail: string): { restored
     console.warn('[CacheManager] Failed to restore pending queues for account:', err);
     return { restored: 0 };
   }
+}
+
+function mergeQueueEntries<T>(current: T[], incoming: T[]): T[] {
+  const entries = new Map<string, T>();
+  [...current, ...incoming].forEach((item, index) => {
+    const record = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+    const id = String(record.mutationId || record.id || `entry:${index}`);
+    entries.set(id, item);
+  });
+  return [...entries.values()];
 }
 
 export function enqueuePendingMutation(

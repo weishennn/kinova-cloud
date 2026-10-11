@@ -29,6 +29,7 @@ import { CockpitModalHeader } from '@/components/money-cockpit/cockpit-modal';
 import { toast } from 'sonner';
 import { useLockBodyScroll } from '@/hooks/useLockBodyScroll';
 import { confirmAction } from '@/stores/confirm-dialog-store';
+import { buildTransactionBaseRecord } from '@/lib/conflict-policy';
 
 interface TransactionDetailModalProps {
   transaction: Transaction | null;
@@ -242,6 +243,7 @@ function TransactionDetailContent({
       Id: transaction.id,
       id: transaction.id,
       _month: transaction._month,
+      _baseData: buildTransactionBaseRecord(transaction as unknown as Record<string, unknown>),
     };
 
     // Optimistically clear receiptUrl in active queries + local SWR cache immediately (<10ms)
@@ -282,6 +284,7 @@ function TransactionDetailContent({
         _month: transaction._month,
         Id: transaction.id,
         id: transaction.id,
+        _baseData: buildTransactionBaseRecord(transaction as unknown as Record<string, unknown>),
       },
     });
     toast.success(newTrip ? `Tagged to ${newTrip}` : 'Removed from trip');
@@ -311,6 +314,7 @@ function TransactionDetailContent({
         _month: transaction._month,
         Id: transaction.id,
         id: transaction.id,
+        _baseData: buildTransactionBaseRecord(transaction as unknown as Record<string, unknown>),
       },
     });
     const cat = LHDN_TAX_CATEGORIES.find((c) => c.id === newCatId);

@@ -884,6 +884,37 @@ function addRow(sheetName, rowData, options) {
   return result;
 }
 
+function normalizeConflictValue(field, value) {
+  if (value === undefined || value === null) return '';
+  if (String(field).toLowerCase() === 'date') {
+    if (value instanceof Date && !isNaN(value.getTime())) {
+      return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    }
+    const text = String(value).trim();
+    const isoDate = text.match(/^\d{4}-\d{2}-\d{2}/);
+    if (isoDate) return isoDate[0];
+    return text;
+  }
+  const numericFields = ['amount', 'baseamount', 'fxratetobase'];
+  if (numericFields.indexOf(String(field).toLowerCase()) >= 0 && value !== '') {
+    const numeric = Number(value);
+    if (isFinite(numeric)) return 'number:' + numeric;
+  }
+  return String(value).trim();
+}
+
+function findConcurrentFieldConflicts(baseRecord, serverRecord, clientUpdate) {
+  if (!baseRecord || typeof baseRecord !== 'object') return [];
+  return Object.keys(clientUpdate || {}).filter(function(field) {
+    if (field.charAt(0) === '_' || field.toLowerCase() === 'id') return false;
+    if (!Object.prototype.hasOwnProperty.call(serverRecord, field)) return false;
+    const baseValue = normalizeConflictValue(field, baseRecord[field]);
+    const serverValue = normalizeConflictValue(field, serverRecord[field]);
+    const clientValue = normalizeConflictValue(field, clientUpdate[field]);
+    return serverValue !== baseValue && clientValue !== serverValue;
+  });
+}
+
 function updateRow(sheetName, rowIndex, rowData, mutationId, options) {
   const opts = options || {};
   const effMutationId = mutationId || (rowData && rowData._mutationId) || null;
@@ -958,6 +989,33 @@ function updateRow(sheetName, rowIndex, rowData, mutationId, options) {
       throw new Error('Invalid row index: ' + rowIndex);
     }
     targetIndices.push(rowIndex);
+  }
+
+  // doPost wraps updateRow in ScriptLock, so this read/compare/write sequence
+  // is serialized for this Apps Script deployment across devices.
+  const baseRecord = rowData && rowData._baseData;
+  if (baseRecord && typeof baseRecord === 'object' && targetIndices.length > 0) {
+    const currentRowIndex = targetIndices[0];
+    const currentValues = sheet.getRange(currentRowIndex, 1, 1, headers.length).getValues()[0];
+    const serverRecord = { _month: targetSheetName, _rowIndex: currentRowIndex };
+    headers.forEach(function(header, index) {
+      serverRecord[header] = currentValues[index] === undefined || currentValues[index] === null ? '' : currentValues[index];
+    });
+    const conflictingFields = findConcurrentFieldConflicts(baseRecord, serverRecord, rowData);
+    if (conflictingFields.length > 0) {
+      return {
+        updated: false,
+        verified: false,
+        conflictDetected: true,
+        conflictingFields: conflictingFields,
+        verifiedId: requestedId,
+        id: requestedId,
+        rowIndex: currentRowIndex,
+        sheet: targetSheetName,
+        sheetName: targetSheetName,
+        serverRecord: serverRecord,
+      };
+    }
   }
 
   // Check if editing a monthly transaction's Date moves it to a different YYYY-MM month tab

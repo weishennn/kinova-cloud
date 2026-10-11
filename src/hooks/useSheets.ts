@@ -376,7 +376,9 @@ export function applyOptimisticUpdateToQueryCache(
   rowIndex: number | undefined,
   rowData: Record<string, unknown>,
 ) {
-  const updatedRow = sheetsData.optimisticUpdateRow(sheetName, rowIndex, rowData);
+  const cacheRowData = { ...rowData };
+  delete cacheRowData._baseData;
+  const updatedRow = sheetsData.optimisticUpdateRow(sheetName, rowIndex, cacheRowData);
   const rowId = String(updatedRow.Id || updatedRow.id || '');
   const targetMonth = String(updatedRow._month || (/^\d{4}-\d{2}$/.test(sheetName) ? sheetName : ''));
 

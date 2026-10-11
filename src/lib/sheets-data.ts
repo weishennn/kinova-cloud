@@ -1,6 +1,7 @@
 import { sheetsApi, getSwrCachedEntry, setSwrCachedData, getActiveUserCacheScope } from './sheets-api';
 import { 
   getRollingWindowMonths, 
+  clearDisposableReadCaches,
   enqueuePendingMutation, 
   getPendingMutations, 
   removePendingMutation, 
@@ -13,7 +14,7 @@ import {
   isRecordTombstoned,
   recordSyncConflict,
 } from './data-integrity';
-import { resolveNotFoundUpdatePolicy } from './conflict-policy';
+import { persistConflictBeforeTombstone, resolveNotFoundUpdatePolicy } from './conflict-policy';
 import { applyPendingTransactionUpdate } from './transaction-cache-merge';
 import { getPendingMutationDisposition, shouldKeepPendingMutationOnStartup } from './pending-mutation-policy';
 import { toast } from 'sonner';
@@ -32,6 +33,111 @@ function trackActiveWrite<T>(promise: Promise<T>): Promise<T> {
 
 type SheetRow = Record<string, unknown>;
 type SheetDataPayload = { headers: string[]; rows: SheetRow[] };
+
+function recordTransactionUpdateConflict(
+  clientRow: SheetRow,
+  serverRow: SheetRow,
+  conflictingFields: string[],
+  fallbackSheet: string,
+  changedAt = Date.now()
+): boolean {
+  const id = String(clientRow.Id || clientRow.id || '').trim();
+  if (!id) return false;
+
+  const clientRecord = { ...clientRow };
+  delete clientRecord._baseData;
+  const serverMonth = String(
+    serverRow._month || serverRow.Date || serverRow.date || fallbackSheet
+  ).slice(0, 7);
+  const savedServerRow = {
+    ...serverRow,
+    Id: id,
+    id,
+    ...(serverMonth ? { _month: serverMonth } : {}),
+  };
+
+  const conflictRecord = {
+    entityId: id,
+    kind: 'transaction',
+    serverChangedAt: Date.now(),
+    clientMutationChangedAt: changedAt,
+    conflictingFields,
+    serverRecord: savedServerRow,
+    clientRecord,
+    resolution: `Concurrent edits were detected in: ${conflictingFields.join(', ')}. Neither version was overwritten; choose a version in Settings.`,
+  } as const;
+  let saved = recordSyncConflict(conflictRecord);
+  if (!saved) {
+    clearDisposableReadCaches();
+    saved = recordSyncConflict(conflictRecord);
+  }
+  if (!saved) {
+    toast.error('发现并发修改，但本机存储无法保存冲突副本。原更新已保留在待同步队列中，请先释放本机存储空间。');
+    return false;
+  }
+
+  // Remove the rejected optimistic value from cached months and put the server
+  // version back wherever that month is already cached. Do not create a partial
+  // month cache when the month has not been loaded.
+  const targetMonth = /^\d{4}-\d{2}/.test(String(savedServerRow._month || ''))
+    ? String(savedServerRow._month).slice(0, 7)
+    : '';
+  const candidates = new Set<string>([
+    fallbackSheet,
+    ...(targetMonth ? [targetMonth] : []),
+    ...getRollingWindowMonths(12),
+  ]);
+  candidates.forEach((candidate) => {
+    const entry = getSwrCachedEntry<{ success: boolean; data: SheetDataPayload }>('getSheetData', {
+      sheetName: candidate,
+    });
+    const rows = entry?.data?.data?.rows;
+    if (!Array.isArray(rows)) return;
+    const filtered = rows.filter((row) => String(row.Id || row.id || '').trim() !== id);
+    if (candidate === targetMonth) {
+      filtered.push(savedServerRow);
+    }
+    if (filtered.length !== rows.length || candidate === targetMonth) {
+      setSwrCachedData('getSheetData', { sheetName: candidate }, {
+        success: true,
+        data: { headers: entry?.data?.data?.headers || [], rows: filtered },
+      });
+    }
+  });
+
+  toast.warning('此记录在其他设备上也有修改。两份版本均已保留，请到设置中的冲突中心选择要使用的版本。');
+  return true;
+}
+
+function recordDeletedTransactionUpdateConflict(
+  rowId: string,
+  sheetName: string,
+  clientRecord: SheetRow,
+  changedAt: number
+): boolean {
+  const clientSnapshot = { ...clientRecord };
+  delete clientSnapshot._baseData;
+  const conflict = {
+    entityId: rowId,
+    kind: 'transaction',
+    serverChangedAt: Date.now(),
+    clientMutationChangedAt: changedAt,
+    serverRecord: {
+      status: 'deleted_on_server',
+      sheetName,
+      message: 'Record was not found on Google Sheets (deleted on another device or session).',
+    },
+    clientRecord: clientSnapshot,
+    resolution: 'Edit was not applied to avoid resurrecting deleted record. Preserved in Conflict Store.',
+  } as const;
+
+  // Do not mark the row deleted until its losing client version is durable.
+  return persistConflictBeforeTombstone(
+    () => recordSyncConflict(conflict),
+    clearDisposableReadCaches,
+    () => recordDeletedTombstone(rowId, 'transaction', sheetName)
+  );
+}
 
 interface InFlightOptimisticMutation {
   type: 'add' | 'update';
@@ -765,23 +871,40 @@ export const sheetsData = {
   /**
    * Update a row with zero-drop offline queue safety, durable mutationId, and read-back verification.
    */
-  async updateRow(sheetName: string, rowIndex: number, rowData: Record<string, unknown>): Promise<{ success: boolean; pending?: boolean }> {
+  async updateRow(sheetName: string, rowIndex: number, rowData: Record<string, unknown>): Promise<{ success: boolean; pending?: boolean; conflict?: boolean }> {
     const id = String(rowData.Id || rowData.id || '');
     const mutationId = `mut_upd_${id || rowIndex}_${Date.now()}`;
+    const cacheRowData = { ...rowData };
+    delete cacheRowData._baseData;
 
     // Immediately update local SWR cache in 0ms
-    this.optimisticUpdateRow(sheetName, rowIndex, rowData);
+    this.optimisticUpdateRow(sheetName, rowIndex, cacheRowData);
 
     return trackActiveWrite(
       (async () => {
         try {
           const res = await sheetsApi.updateRow(sheetName, rowIndex, rowData, mutationId);
+          if (res.data?.conflictDetected) {
+            if (!res.data.serverRecord) {
+              throw new Error('Server reported a transaction conflict without returning the server record');
+            }
+            const conflictSaved = recordTransactionUpdateConflict(
+              rowData,
+              res.data.serverRecord,
+              res.data.conflictingFields || [],
+              res.data.sheet || sheetName
+            );
+            if (!conflictSaved) {
+              throw new Error('Could not persist both versions of the transaction conflict');
+            }
+            return { success: false, pending: false, conflict: true };
+          }
           const isVerified =
             res.success && res.data?.verified !== false && (!id || !res.data?.verifiedId || res.data.verifiedId === id);
           if (isVerified) {
             if (typeof res.data?.rowIndex === 'number') {
               this.optimisticUpdateRow(res.data.sheet || sheetName, res.data.rowIndex, {
-                ...rowData,
+                ...cacheRowData,
                 _rowIndex: res.data.rowIndex,
               });
             }
@@ -811,16 +934,10 @@ export const sheetsData = {
             } else {
               // Policy: discard_and_tombstone - Record was deleted on server by another device
               if (id) {
-                recordDeletedTombstone(id, 'transaction', sheetName);
-                recordSyncConflict({
-                  entityId: id,
-                  kind: 'transaction',
-                  serverChangedAt: Date.now(),
-                  clientMutationChangedAt: Date.now(),
-                  serverRecord: { status: 'deleted_on_server', sheetName, message: 'Record was not found on Google Sheets (deleted on another device or session).' },
-                  clientRecord: rowData,
-                  resolution: 'Edit was not applied to avoid resurrecting deleted record. Preserved in Conflict Store.'
-                });
+                const conflictSaved = recordDeletedTransactionUpdateConflict(id, sheetName, rowData, Date.now());
+                if (!conflictSaved) {
+                  throw new Error('Could not persist deleted-record conflict');
+                }
                 this.optimisticDeleteRow(sheetName, rowIndex, id);
                 toast.warning('此记录已在云端被删除，未重新创建。您的离线修改已转存至冲突中心。');
               }
@@ -985,20 +1102,16 @@ export const sheetsData = {
 
                 // Policy: discard_and_tombstone - Record was deleted on server by another device
                 if (rowId) {
-                  recordDeletedTombstone(rowId, 'transaction', item.sheetName);
-                  recordSyncConflict({
-                    entityId: rowId,
-                    kind: 'transaction',
-                    serverChangedAt: Date.now(),
-                    clientMutationChangedAt: item.timestamp || Date.now(),
-                    serverRecord: {
-                      status: 'deleted_on_server',
-                      sheetName: item.sheetName,
-                      message: 'Record was not found on Google Sheets during sync (deleted by another device or session).'
-                    },
-                    clientRecord: item.rowData || {},
-                    resolution: 'Edit was not applied to avoid resurrecting deleted record. Preserved in Conflict Store.'
-                  });
+                  const conflictSaved = recordDeletedTransactionUpdateConflict(
+                    rowId,
+                    item.sheetName,
+                    item.rowData || {},
+                    item.timestamp || Date.now()
+                  );
+                  if (!conflictSaved) {
+                    toast.error('云端记录已删除，但本机存储空间不足，无法保存未同步编辑。该编辑仍保留在同步队列中；请释放存储空间后重试。');
+                    return false;
+                  }
                   this.optimisticDeleteRow(item.sheetName, item.rowIndex, rowId);
                   toast.warning('一笔离线修改的目标记录已在云端被删除，未复活该记录。原修改已转存至冲突中心。');
                 }
@@ -1007,7 +1120,21 @@ export const sheetsData = {
 
               try {
                 const res = await sheetsApi.updateRow(item.sheetName, item.rowIndex || 2, item.rowData, mutId);
-                ok = Boolean(res.success && res.data?.verified !== false);
+                if (res.data?.conflictDetected && res.data.serverRecord) {
+                  const conflictSaved = recordTransactionUpdateConflict(
+                    item.rowData,
+                    res.data.serverRecord,
+                    res.data.conflictingFields || [],
+                    res.data.sheet || item.sheetName,
+                    item.timestamp || Date.now()
+                  );
+                  // The mutation is now durably preserved in the Conflict Store;
+                  // remove it from the retry queue so it cannot overwrite either version.
+                  ok = conflictSaved;
+                  if (!ok) errMessage = 'Could not persist both versions of the transaction conflict.';
+                } else {
+                  ok = Boolean(res.success && res.data?.verified !== false);
+                }
                 if (!ok) {
                   const resMsg = String(res.message || '');
                   if (resMsg.includes('not found') || resMsg.includes('Invalid row index')) {

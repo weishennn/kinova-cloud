@@ -24,6 +24,7 @@ import { toast } from 'sonner';
 import { formatClaimFileName } from '@/lib/claim-helper';
 import { ACCOUNTING_BASE_CURRENCY, COMMON_CURRENCIES, getAmountInBaseCurrency, getCachedRatesToMyr } from '@/lib/currency';
 import { isSafeTransactionAmount, isSafeTransactionConversion } from '@/lib/money-validation';
+import { buildTransactionBaseRecord } from '@/lib/conflict-policy';
 import { compressImageFile } from '@/lib/image-compressor';
 import {
   calculateInstallmentPlan,
@@ -1053,6 +1054,7 @@ export function RecordPaymentModal() {
             ReceiptUrl: uploadedReceiptUrl,
             Id: editTxId,
             _month: finalMonthStr,
+            _baseData: buildTransactionBaseRecord(editTransaction),
           });
           if (uploadedReceiptUrl && uploadedReceiptUrl !== targetReceiptUrl) {
             applyOptimisticUpdateToQueryCache(

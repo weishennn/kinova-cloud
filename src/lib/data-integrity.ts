@@ -22,6 +22,7 @@ export interface SyncConflict {
   detectedAt: string;
   serverChangedAt: number;
   clientMutationChangedAt: number;
+  conflictingFields?: string[];
   serverRecord: Record<string, unknown>;
   clientRecord: Record<string, unknown>;
   resolution: string;
@@ -131,8 +132,8 @@ export function getSyncConflicts(): SyncConflict[] {
 
 export function recordSyncConflict(
   conflict: Omit<SyncConflict, 'id' | 'detectedAt'>
-): void {
-  if (typeof window === 'undefined') return;
+): boolean {
+  if (typeof window === 'undefined') return false;
   try {
     const list = getSyncConflicts();
     // Deduplicate by entityId + clientMutationChangedAt
@@ -142,7 +143,7 @@ export function recordSyncConflict(
         c.kind === conflict.kind &&
         c.clientMutationChangedAt === conflict.clientMutationChangedAt
     );
-    if (exists) return;
+    if (exists) return true;
 
     const entry: SyncConflict = {
       ...conflict,
@@ -151,9 +152,12 @@ export function recordSyncConflict(
     };
     list.unshift(entry);
     localStorage.setItem(CONFLICT_STORAGE_KEY, JSON.stringify(list.slice(0, 50)));
+    if (!getSyncConflicts().some((saved) => saved.id === entry.id)) return false;
     window.dispatchEvent(new CustomEvent(CONFLICT_UPDATED_EVENT));
+    return true;
   } catch (e) {
     console.warn('[DataIntegrity] Failed to record sync conflict:', e);
+    return false;
   }
 }
 

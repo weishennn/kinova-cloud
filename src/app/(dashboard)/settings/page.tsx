@@ -60,10 +60,14 @@ import {
   validateLocalIntegrity,
   downloadIndependentBackupJson,
   validateAndImportIndependentBackupJson,
+  clearDeletedTombstone,
+  recordDeletedTombstone,
   CONFLICT_UPDATED_EVENT,
   type SyncConflict,
   type LocalIntegrityReport,
 } from '@/lib/data-integrity';
+import { sheetsData } from '@/lib/sheets-data';
+import { buildConflictResolutionUpdate } from '@/lib/conflict-policy';
 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
@@ -374,6 +378,105 @@ export default function SettingsPage() {
 
   const handleResolveConflict = async (conflict: SyncConflict, choice: 'keep_client' | 'keep_server') => {
     try {
+      // --- TRANSACTION conflicts: restore ledger row, never touch plan storage ---
+      if (conflict.kind === 'transaction') {
+        if (choice === 'keep_client') {
+          const txRecord = conflict.clientRecord as Record<string, unknown>;
+          const serverRecord = conflict.serverRecord as Record<string, unknown>;
+          clearDeletedTombstone(conflict.entityId);
+          const update = buildConflictResolutionUpdate(txRecord, serverRecord, conflict.entityId);
+
+          if (update) {
+            // Update the existing row using its latest server snapshot. This
+            // also lets the normal staged cross-month move remove the old row.
+            const updateResult = await sheetsData.updateRow(update.sheetName, update.rowIndex, update.rowData);
+            if (!updateResult.success) {
+              toast.error('云端记录已再次变化，您的版本仍保留在冲突中心；请重新选择。');
+              return;
+            }
+            toast.success(
+              updateResult.pending
+                ? '本机版本已加入安全同步队列；联网后会重试。'
+                : '已应用本机版本并同步到 Google Sheets！'
+            );
+          } else {
+            // A deleted server row is an explicit restore; ordinary conflicts
+            // must update by ID instead of appending a duplicate transaction.
+            const rowDate = String(txRecord.Date || txRecord.date || '');
+            const dateMonth = /^\d{4}-\d{2}/.test(rowDate) ? rowDate.slice(0, 7) : '';
+            const sheetName = String(txRecord._month || dateMonth || txRecord.sheetName || '');
+            if (!sheetName) {
+              toast.error('无法确定目标工作表，请手动重新添加该记录。');
+              return;
+            }
+            const restoreResult = await sheetsData.addRow(sheetName, {
+              ...txRecord,
+              Id: conflict.entityId,
+              id: conflict.entityId,
+              _forceRestore: true,
+            });
+            if (!restoreResult.success) {
+              toast.error('恢复本机交易版本失败。冲突仍保留，您可以稍后重试。');
+              return;
+            }
+            toast.success(
+              restoreResult.pending
+                ? '本机版本已加入安全同步队列；联网后会重试。'
+                : '已恢复已删除的本机交易版本并同步到 Google Sheets！'
+            );
+          }
+        } else {
+          // User accepts the server state (deleted or a later edit by another device)
+          const serverRecord = conflict.serverRecord as Record<string, unknown>;
+          const serverIsDeleted = Boolean(serverRecord?.status === 'deleted_on_server' || serverRecord?._deleted);
+          if (serverIsDeleted) {
+            // Accept the deletion — ensure tombstone exists so it won't resurface
+            recordDeletedTombstone(conflict.entityId, 'transaction');
+            sheetsData.optimisticDeleteRow(
+              String(serverRecord.sheetName || serverRecord._month || ''),
+              typeof serverRecord._rowIndex === 'number' ? serverRecord._rowIndex : undefined,
+              conflict.entityId
+            );
+          } else {
+            clearDeletedTombstone(conflict.entityId);
+            const serverDate = String(serverRecord.Date || serverRecord.date || '');
+            const serverMonth = String(
+              serverRecord._month || (/^\d{4}-\d{2}/.test(serverDate) ? serverDate.slice(0, 7) : '')
+            );
+            if (serverMonth) {
+              sheetsData.optimisticAddRow(serverMonth, {
+                ...serverRecord,
+                Id: conflict.entityId,
+                id: conflict.entityId,
+                _month: serverMonth,
+              });
+            }
+          }
+          // Nothing else to write — server state is already in effect
+          toast.success('已接受云端版本（已在其他设备同步）。');
+        }
+        dismissSyncConflict(conflict.id);
+        refreshPlanRecovery();
+        queryClient.invalidateQueries();
+        return;
+      }
+
+      // --- SETTING conflicts: update in-memory setting, sync to cloud ---
+      if (conflict.kind === 'setting') {
+        const chosenRecord = choice === 'keep_client' ? conflict.clientRecord : conflict.serverRecord;
+        const settingKey = String(conflict.entityId);
+        const settingValue = String(chosenRecord.value ?? '');
+        if (settingKey) {
+          saveSettingWithCloudSync(settingKey, settingValue);
+        }
+        dismissSyncConflict(conflict.id);
+        refreshPlanRecovery();
+        queryClient.invalidateQueries();
+        toast.success(choice === 'keep_client' ? '已应用本机设置并同步！' : '已恢复云端设置！');
+        return;
+      }
+
+      // --- RECURRING / INSTALLMENTS: update the correct plan storage key ---
       const storageKey =
         conflict.kind === 'recurring'
           ? 'cashflow_recurring_commitments'
@@ -395,7 +498,7 @@ export default function SettingsPage() {
       queryClient.invalidateQueries();
       toast.success(
         choice === 'keep_client'
-          ? 'Applied this device’s version and queued sync to Google Sheets!'
+          ? 'Applied this device\u2019s version and queued sync to Google Sheets!'
           : 'Restored Google Sheets version!'
       );
     } catch (err: any) {
@@ -1029,6 +1132,11 @@ export default function SettingsPage() {
                         </button>
                       </div>
                     </div>
+                    {c.conflictingFields && c.conflictingFields.length > 0 && (
+                      <div className="text-[10px] text-amber-800 dark:text-amber-300">
+                        Conflicting fields: {c.conflictingFields.join(', ')}
+                      </div>
+                    )}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
                       <div className="p-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-800 dark:text-indigo-200">
                         <div className="font-semibold">This Device Edit:</div>

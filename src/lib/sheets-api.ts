@@ -1184,6 +1184,10 @@ export const sheetsApi = {
         verified?: boolean;
         verifiedId?: string;
         deduplicated?: boolean;
+        /** OCC: concurrent field conflict detected between _baseData and existingRow */
+        conflictDetected?: boolean;
+        conflictingFields?: string[];
+        serverRecord?: Record<string, unknown>;
       };
       message?: string;
     }>(

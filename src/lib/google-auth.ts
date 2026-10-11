@@ -1,5 +1,9 @@
 import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
+import { isAdminEmail } from './admin-email-policy';
+import { getConfiguredSessionSecret } from './session-secret-policy';
+
+export { getAdminEmail, isAdminEmail } from './admin-email-policy';
 
 export const GOOGLE_SESSION_COOKIE = 'kinova_google_session';
 
@@ -34,21 +38,11 @@ export function getGoogleOAuthConfig(reqOrigin?: string) {
   };
 }
 
-export function getAdminEmail(): string {
-  return (process.env.ADMIN_EMAIL || 'weishenooi2003@gmail.com').trim().toLowerCase();
-}
-
-export function isAdminEmail(email?: string | null): boolean {
-  if (!email) return false;
-  return email.trim().toLowerCase() === getAdminEmail();
-}
-
 function getSecretKey(): Buffer {
-  const rawSecret =
-    process.env.AUTH_SECRET ||
-    process.env.GOOGLE_CLIENT_SECRET ||
-    process.env.CASHFLOW_PROXY_TOKEN ||
-    'kinova-multiuser-cookie-secret-key-2026';
+  const rawSecret = getConfiguredSessionSecret();
+  if (!rawSecret) {
+    throw new Error('Server authentication secret is not configured. Set AUTH_SECRET before enabling sign-in.');
+  }
   return crypto.createHash('sha256').update(rawSecret).digest();
 }
 

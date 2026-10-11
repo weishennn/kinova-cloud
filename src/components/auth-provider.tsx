@@ -12,6 +12,9 @@ import {
   backupPendingQueuesForAccount,
   restorePendingQueuesForAccount,
   getPendingQueueSummary,
+  getPendingQueueOwnerScope,
+  backupLocalStoreForLocalMode,
+  restoreLocalStoreForLocalMode,
 } from '@/lib/cache-manager';
 import { clearInFlightOptimisticRows, sheetsData } from '@/lib/sheets-data';
 
@@ -33,7 +36,7 @@ interface AuthContextType {
   currentPin: string;
   googleUser: GoogleAccountProfile | null;
   isLocalMode: boolean;
-  signOutGoogle: () => Promise<void>;
+  signOutGoogle: () => Promise<boolean | void>;
   exitLocalMode: () => void;
   refreshGoogleSession: () => Promise<void>;
 }
@@ -47,7 +50,7 @@ const AuthContext = createContext<AuthContextType>({
   currentPin: '0000',
   googleUser: null,
   isLocalMode: false,
-  signOutGoogle: async () => {},
+  signOutGoogle: async () => false,
   exitLocalMode: () => {},
   refreshGoogleSession: async () => {},
 });
@@ -56,7 +59,7 @@ const AuthContext = createContext<AuthContextType>({
  * Completely wipes all cached sheet data, settings, plans, and pending queues from localStorage
  * and in-memory optimistic caches whenever switching accounts or signing out so two accounts can NEVER see each other's data.
  */
-function wipeAccountStorage(includeLocalStore = true) {
+function wipeAccountStorage(includeLocalStore = true, wipePendingQueues = true) {
   if (typeof window === 'undefined') return;
   try {
     clearInFlightOptimisticRows();
@@ -90,9 +93,13 @@ function wipeAccountStorage(includeLocalStore = true) {
       'cashflow_emergency_reserve',
       'cashflow_currency',
       'cashflow_custom_pin',
-      'cashflow_pending_queue',
-      'cashflow_pending_plan_mutations_v2',
-      'cashflow_pending_settings_mutations',
+      ...(wipePendingQueues
+        ? [
+            'cashflow_pending_queue',
+            'cashflow_pending_plan_mutations_v2',
+            'cashflow_pending_settings_mutations',
+          ]
+        : []),
       'cashflow_deleted_tombstones_v1',
       'cashflow_sync_conflicts_v1',
       'cashflow_integrity_baseline_v1',
@@ -122,6 +129,22 @@ function wipeAccountStorage(includeLocalStore = true) {
   }
 }
 
+function preserveActivePendingQueues(): { success: boolean; error?: string } {
+  const summary = getPendingQueueSummary();
+  if (summary.total === 0) return { success: true };
+  const ownerScope = getPendingQueueOwnerScope(
+    localStorage.getItem('cashflow_active_account_scope'),
+    localStorage.getItem('cashflow_google_user_email'),
+    localStorage.getItem('cashflow_local_mode_chosen') === 'true'
+  );
+  if (!ownerScope) return { success: false, error: 'Previous account scope is unknown' };
+  const backup = backupPendingQueuesForAccount(ownerScope);
+  if (!backup.success || backup.backedUp !== summary.total) {
+    return { success: false, error: backup.error || 'Queue count did not match the active outbox' };
+  }
+  return { success: true };
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const queryClient = useQueryClient();
@@ -141,7 +164,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = await res.json();
 
       if (data.blocked) {
-        wipeAccountStorage(true);
+        const queueBackup = preserveActivePendingQueues();
+        const localStoreBackup = backupLocalStoreForLocalMode();
+        wipeAccountStorage(localStoreBackup.success, queueBackup.success);
+        if (!queueBackup.success) {
+          toast.error(`账号已被限制，未同步队列仍保留在本机，但无法写入账号备份（${queueBackup.error}）。`, {
+            duration: 10000,
+          });
+        }
         queryClient.clear();
         setAccountBlocked(true);
         setGoogleUser(data.user || null);
@@ -160,14 +190,58 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const targetScope = `google:${normalizedEmail}`;
         const prevScope = localStorage.getItem('cashflow_active_account_scope');
 
-        // CRITICAL: If switching accounts OR upgrading from pre-OAuth (prevScope === null),
-        // backup the previous account's pending queues before wiping active cache!
+        // Preserve the current account's outbox before changing the active account scope.
         if (prevScope !== targetScope) {
-          const prevEmail = (localStorage.getItem('cashflow_google_user_email') || '').trim().toLowerCase();
-          if (prevEmail && prevEmail !== normalizedEmail) {
-            backupPendingQueuesForAccount(prevEmail);
+          const prevEmail = localStorage.getItem('cashflow_google_user_email');
+          const summary = getPendingQueueSummary();
+          if (summary.total > 0) {
+            const ownerScope = getPendingQueueOwnerScope(
+              prevScope,
+              prevEmail,
+              localStorage.getItem('cashflow_local_mode_chosen') === 'true'
+            );
+            const backupRes = ownerScope
+              ? backupPendingQueuesForAccount(ownerScope)
+              : { success: false, backedUp: 0, error: 'Previous account scope is unknown' };
+            if (!backupRes.success || backupRes.backedUp !== summary.total) {
+              const reason = backupRes.error || 'Queue count did not match the active outbox';
+              console.error('Failed to preserve pending queues during account switch:', reason);
+              try {
+                await fetch('/api/auth/google/logout', { method: 'POST', credentials: 'same-origin' });
+              } catch {}
+              queryClient.clear();
+              localStorage.removeItem('cashflow_google_authenticated');
+              setGoogleUser(null);
+              setIsLocalMode(false);
+              setAuthenticated(false);
+              window.dispatchEvent(new Event('cashflow_api_url_changed'));
+              toast.error(
+                `账号切换已中止，因为未同步队列无法安全备份（${reason}）。原队列已保留；请使用原账号重新登录并同步后再切换。`,
+                { duration: 10000 }
+              );
+              return;
+            }
           }
-          wipeAccountStorage(true);
+          const localStoreBackup = backupLocalStoreForLocalMode();
+          if (!localStoreBackup.success) {
+            const reason = localStoreBackup.error || 'Local-only database backup failed';
+            console.error('Failed to preserve local-only database during account switch:', reason);
+            try {
+              await fetch('/api/auth/google/logout', { method: 'POST', credentials: 'same-origin' });
+            } catch {}
+            queryClient.clear();
+            localStorage.removeItem('cashflow_google_authenticated');
+            setGoogleUser(null);
+            setIsLocalMode(false);
+            setAuthenticated(false);
+            window.dispatchEvent(new Event('cashflow_api_url_changed'));
+            toast.error(
+              `账号切换已中止，因为本地模式数据库无法安全备份（${reason}）。原数据已保留，请释放本机存储空间后重试。`,
+              { duration: 10000 }
+            );
+            return;
+          }
+          wipeAccountStorage(true, true);
           queryClient.clear();
           localStorage.setItem('cashflow_active_account_scope', targetScope);
         }
@@ -194,18 +268,63 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         window.dispatchEvent(new Event('cashflow_api_url_changed'));
         window.dispatchEvent(new CustomEvent(SYNC_STATUS_EVENT));
       } else {
+        const prevEmail = localStorage.getItem('cashflow_google_user_email');
+        const prevScope = localStorage.getItem('cashflow_active_account_scope');
         localStorage.removeItem('cashflow_google_authenticated');
         localStorage.removeItem('cashflow_google_user_email');
         setGoogleUser(null);
 
         // Check if user explicitly opted into Local Storage Only mode
         if (localStorage.getItem('cashflow_local_mode_chosen') === 'true') {
-          const prevScope = localStorage.getItem('cashflow_active_account_scope');
           if (prevScope !== 'local_only') {
-            wipeAccountStorage(false);
+            const summary = getPendingQueueSummary();
+            if (summary.total > 0) {
+              const ownerScope = getPendingQueueOwnerScope(
+                prevScope,
+                prevEmail,
+                localStorage.getItem('cashflow_local_mode_chosen') === 'true'
+              );
+              const backupRes = ownerScope
+                ? backupPendingQueuesForAccount(ownerScope)
+                : { success: false, backedUp: 0, error: 'Previous account scope is unknown' };
+              if (!backupRes.success || backupRes.backedUp !== summary.total) {
+                if (prevEmail) localStorage.setItem('cashflow_google_user_email', prevEmail);
+                setIsLocalMode(false);
+                setAuthenticated(false);
+                toast.error(
+                  `无法切换到本地模式，因为未同步队列无法安全备份（${backupRes.error || '队列数量不一致'}）。队列已保留。`,
+                  { duration: 10000 }
+                );
+                return;
+              }
+            }
+            const localStoreBackup = backupLocalStoreForLocalMode();
+            if (!localStoreBackup.success) {
+              if (prevEmail) localStorage.setItem('cashflow_google_user_email', prevEmail);
+              setIsLocalMode(false);
+              setAuthenticated(false);
+              toast.error(
+                `无法切换到本地模式，因为本地数据库无法安全备份（${localStoreBackup.error || '存储写入失败'}）。原数据已保留。`,
+                { duration: 10000 }
+              );
+              return;
+            }
+            wipeAccountStorage(true, true);
             queryClient.clear();
             localStorage.setItem('cashflow_active_account_scope', 'local_only');
           }
+          const localStoreRestore = restoreLocalStoreForLocalMode();
+          if (!localStoreRestore.success) {
+            setIsLocalMode(false);
+            setAuthenticated(false);
+            toast.error(
+              `本地数据库已安全保留，但暂时无法恢复（${localStoreRestore.error || '存储写入失败'}）。请释放本机存储空间后重试。`,
+              { duration: 10000 }
+            );
+            return;
+          }
+          const { restored } = restorePendingQueuesForAccount('local_only');
+          if (restored > 0) void sheetsData.flushPendingQueue();
           localStorage.setItem('cashflow_apps_script_url', LOCAL_ONLY_ENDPOINT_SENTINEL);
           setIsLocalMode(true);
           setAuthenticated(true);
@@ -219,7 +338,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [queryClient]);
 
-  const signOutGoogle = useCallback(async () => {
+  const signOutGoogle = useCallback(async (): Promise<boolean> => {
     const currentEmail = (googleUser?.email || localStorage.getItem('cashflow_google_user_email') || '')
       .trim()
       .toLowerCase();
@@ -231,18 +350,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // 2. If any mutations remain unsynced (e.g. offline), backup to account-scoped storage
     const summary = getPendingQueueSummary();
-    if (summary.total > 0 && currentEmail) {
-      backupPendingQueuesForAccount(currentEmail);
+    if (summary.total > 0) {
+      if (!currentEmail) {
+        toast.error('无法确认当前账号身份，无法安全备份未同步的离线记录。已中止登出以防止数据丢失，请恢复网络连接并同步后再试。', {
+          duration: 8000,
+        });
+        return false;
+      }
+      const backupRes = backupPendingQueuesForAccount(currentEmail);
+      if (!backupRes.success) {
+        toast.error(
+          `备份未同步记录失败 (${backupRes.error || '写入存储失败'})。已中止登出以防止数据丢失，请稍后重试。`,
+          { duration: 8000 }
+        );
+        return false;
+      }
       toast.warning(
         `您有 ${summary.total} 笔离线记录尚未同步。已为您安全保存在此设备中，下次登录 ${currentEmail} 时将自动恢复并同步。`,
         { duration: 8000 }
       );
     }
 
+    const localStoreBackup = backupLocalStoreForLocalMode();
+    if (!localStoreBackup.success) {
+      toast.error(
+        `无法安全登出：本地模式数据库备份失败（${localStoreBackup.error || '存储写入失败'}）。原数据已保留，请释放存储空间后重试。`,
+        { duration: 8000 }
+      );
+      return false;
+    }
+
     try {
       await fetch('/api/auth/google/logout', { method: 'POST', credentials: 'same-origin' });
     } catch {}
-    wipeAccountStorage(true);
+    wipeAccountStorage(true, true);
     queryClient.clear();
     localStorage.removeItem('cashflow_google_authenticated');
     localStorage.removeItem('cashflow_google_user_email');
@@ -254,6 +395,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setAuthenticated(false);
     window.dispatchEvent(new Event('cashflow_api_url_changed'));
     toast.success('Signed out cleanly');
+    return true;
   }, [googleUser, queryClient]);
 
   const exitLocalMode = useCallback(() => {
@@ -276,7 +418,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     void initAuth();
 
     const onAccountBlocked = () => {
-      wipeAccountStorage(true);
+      const queueBackup = preserveActivePendingQueues();
+      const localStoreBackup = backupLocalStoreForLocalMode();
+      wipeAccountStorage(localStoreBackup.success, queueBackup.success);
+      if (!queueBackup.success) {
+        toast.error(`账号已被限制，未同步队列仍保留在本机，但无法写入账号备份（${queueBackup.error}）。`, {
+          duration: 10000,
+        });
+      }
       queryClient.clear();
       setAccountBlocked(true);
       setAuthenticated(false);
@@ -296,14 +445,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const handleChooseLocalMode = () => {
     const prevScope = localStorage.getItem('cashflow_active_account_scope');
+    const prevEmail = localStorage.getItem('cashflow_google_user_email');
+    const summary = getPendingQueueSummary();
+    if (summary.total > 0) {
+      const ownerScope = getPendingQueueOwnerScope(
+        prevScope,
+        prevEmail,
+        localStorage.getItem('cashflow_local_mode_chosen') === 'true'
+      );
+      const backupRes = ownerScope
+        ? backupPendingQueuesForAccount(ownerScope)
+        : { success: false, backedUp: 0, error: 'Previous account scope is unknown' };
+      if (!backupRes.success || backupRes.backedUp !== summary.total) {
+        toast.error(
+          `无法切换到本地模式，因为未同步队列无法安全备份（${backupRes.error || '队列数量不一致'}）。原队列已保留。`,
+          { duration: 10000 }
+        );
+        return;
+      }
+    }
+
     if (prevScope && prevScope !== 'local_only') {
-      // Wipe any previous Google user's cached data before entering Local Mode
+      const localStoreBackup = backupLocalStoreForLocalMode();
+      if (!localStoreBackup.success) {
+        toast.error(
+          `无法切换到本地模式，因为本地数据库无法安全备份（${localStoreBackup.error || '存储写入失败'}）。原数据已保留。`,
+          { duration: 10000 }
+        );
+        return;
+      }
+      // Wipe the previous account's caches only after its durable local data is preserved.
       wipeAccountStorage(true);
       queryClient.clear();
     } else {
       wipeAccountStorage(false);
       queryClient.clear();
     }
+    const localStoreRestore = restoreLocalStoreForLocalMode();
+    if (!localStoreRestore.success) {
+      toast.error(
+        `本地数据库已安全保留，但暂时无法恢复（${localStoreRestore.error || '存储写入失败'}）。请释放本机存储空间后重试。`,
+        { duration: 10000 }
+      );
+      return;
+    }
+    const { restored } = restorePendingQueuesForAccount('local_only');
+    if (restored > 0) void sheetsData.flushPendingQueue();
     localStorage.setItem('cashflow_active_account_scope', 'local_only');
     localStorage.setItem('cashflow_local_mode_chosen', 'true');
     localStorage.setItem('cashflow_apps_script_url', LOCAL_ONLY_ENDPOINT_SENTINEL);
