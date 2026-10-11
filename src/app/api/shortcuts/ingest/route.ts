@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLocalDateString, parseLocalDate } from '@/lib/date-helper';
 import { getValidGoogleSession } from '@/lib/google-auth';
 import { getActiveShortcutOwnerEmail, setActiveShortcutOwner } from '@/lib/admin-registry';
+import { getLoadBalancedGeminiKeys, reportGeminiKeyFailure } from '@/lib/gemini-key-pool';
 import {
   acknowledgeShortcutDraft,
   claimShortcutDraft,
@@ -234,8 +235,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const geminiKey = process.env.GEMINI_API_KEY;
-    if (!geminiKey) {
+    const geminiKeys = getLoadBalancedGeminiKeys();
+    if (geminiKeys.length === 0) {
       return NextResponse.json(
         {
           success: false,
@@ -270,7 +271,8 @@ Fields:
 Shape: {"amount": number|null, "currency": string, "currencySymbol": string, "currencyAmbiguous": boolean, "merchant": string, "category": string, "categoryConfidence": number, "date": "YYYY-MM-DD", "ocrSummary": string, "notes": string}`;
 
     const { parsedOcr, ocrFallbackNotice } = await runShortcutGeminiOcrWithFastFail({
-      geminiKey,
+      geminiKeys,
+      onKeyFailure: reportGeminiKeyFailure,
       preferredModel,
       prompt,
       mimeType,

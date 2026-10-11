@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLocalDateString, parseLocalDate } from '@/lib/date-helper';
 import { getValidGoogleSession } from '@/lib/google-auth';
 import { recordUserAiCall } from '@/lib/admin-registry';
+import { getLoadBalancedGeminiKeys, reportGeminiKeyFailure } from '@/lib/gemini-key-pool';
 
 const VALID_CURRENCIES = new Set(['MYR', 'USD', 'SGD', 'EUR', 'GBP', 'JPY', 'AUD', 'IDR', 'THB', 'CNY', 'HKD']);
 
@@ -162,8 +163,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'A valid JPEG, PNG, or WebP receipt image is required' }, { status: 400 });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    const apiKeys = getLoadBalancedGeminiKeys();
+    if (apiKeys.length === 0) {
       return NextResponse.json({ success: false, error: 'GEMINI_API_KEY is not configured in environment' }, { status: 500 });
     }
 
@@ -196,39 +197,60 @@ If the amount is unreadable, calculate from the sum of items plus taxes. If no i
 Shape: {"amount": number|null, "currency": string, "category": string, "description": string, "date": "YYYY-MM-DD", "subtotal": number|null, "taxes": [{"label": string, "rate": number|null, "amount": number|null}], "taxAmount": number|null, "taxRate": number|null, "taxIncluded": boolean, "taxLabel": string, "items": [{"name": string, "quantity": number, "unitPrice": number, "amount": number, "category": string}], "notes": string}`;
 
     for (const model of models) {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey,
-        },
-        body: JSON.stringify({
-          contents: [{
-            role: 'user',
-            parts: [
-              { text: prompt },
-              { inline_data: { mime_type: mimeType, data: imageBase64 } },
-            ],
-          }],
-          generationConfig: {
-            responseMimeType: 'application/json',
-            temperature: 0.1,
-            maxOutputTokens: 4096,
-            thinkingConfig: {
-              thinkingBudget: 0,
-            },
-          },
-        }),
-        signal: AbortSignal.timeout(20000),
-      });
+      let res: Response | null = null;
+      let shouldTryNextModel = false;
 
-      if (!res.ok) {
-        if (res.status === 404 && model !== models[models.length - 1]) continue;
-        const userMessage = res.status === 429
-          ? 'Gemini quota is temporarily exhausted. Try again in a moment.'
-          : res.status === 401 || res.status === 403
+      for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx += 1) {
+        const apiKey = apiKeys[keyIdx];
+        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
+          },
+          body: JSON.stringify({
+            contents: [{
+              role: 'user',
+              parts: [
+                { text: prompt },
+                { inline_data: { mime_type: mimeType, data: imageBase64 } },
+              ],
+            }],
+            generationConfig: {
+              responseMimeType: 'application/json',
+              temperature: 0.1,
+              maxOutputTokens: 4096,
+              thinkingConfig: {
+                thinkingBudget: 0,
+              },
+            },
+          }),
+          signal: AbortSignal.timeout(20000),
+        });
+
+        if (res.ok) break;
+
+        if (res.status === 429 || res.status === 401 || res.status === 403) {
+          reportGeminiKeyFailure(apiKey, res.status);
+          if (keyIdx + 1 < apiKeys.length) {
+            continue; // Failover to next configured API key
+          }
+        }
+        if (res.status === 404 && model !== models[models.length - 1]) {
+          shouldTryNextModel = true;
+        }
+        break;
+      }
+
+      if (shouldTryNextModel) continue;
+
+      if (!res || !res.ok) {
+        const status = res?.status ?? 502;
+        const userMessage = status === 429
+          ? 'Gemini quota is temporarily exhausted across all configured keys. Try again in a moment.'
+          : status === 401 || status === 403
             ? 'Gemini rejected the API key. Check GEMINI_API_KEY in environment.'
-            : `Gemini OCR failed (${res.status}). Please try a clearer receipt image.`;
+            : `Gemini OCR failed (${status}). Please try a clearer receipt image.`;
         return NextResponse.json({ success: false, error: userMessage }, { status: 502 });
       }
 

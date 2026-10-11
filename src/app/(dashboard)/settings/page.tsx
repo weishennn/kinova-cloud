@@ -157,14 +157,7 @@ export default function SettingsPage() {
   } | null>(null);
   const [showRecoveryGuide, setShowRecoveryGuide] = useState(false);
   const DEFAULT_SHORTCUT_ICLOUD_URL = 'https://www.icloud.com/shortcuts/69cd83fb429d48c18fa734870f69f3f6';
-  const [shortcutICloudUrl, setShortcutICloudUrl] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('kinova_shortcut_icloud_url') || DEFAULT_SHORTCUT_ICLOUD_URL;
-    }
-    return DEFAULT_SHORTCUT_ICLOUD_URL;
-  });
   const [copiedConfigKey, setCopiedConfigKey] = useState<string | null>(null);
-  const [showShortcutSetupModal, setShowShortcutSetupModal] = useState(false);
 
   const copyTextToClipboard = async (text: string, key: string, label: string) => {
     try {
@@ -1926,24 +1919,14 @@ export default function SettingsPage() {
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <a
-                  href={shortcutICloudUrl || '#'}
+                  href={DEFAULT_SHORTCUT_ICLOUD_URL}
                   target="_blank"
                   rel="noopener noreferrer"
-                  onClick={(e) => {
-                    if (!shortcutICloudUrl) {
-                      e.preventDefault();
-                      setShowShortcutSetupModal(true);
-                    }
-                  }}
-                  className={`px-4 py-2.5 rounded-xl font-bold text-xs text-white shadow-lg transition-all flex items-center gap-2 cursor-pointer active:scale-95 ${
-                    shortcutICloudUrl
-                      ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20'
-                      : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-500/20'
-                  }`}
+                  className="px-4 py-2.5 rounded-xl font-bold text-xs text-white shadow-lg transition-all flex items-center gap-2 cursor-pointer active:scale-95 bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20"
                 >
                   <ExternalLink className="h-4 w-4" />
                   <span>📲 一键添加到 iPhone</span>
-                  {shortcutICloudUrl && <span className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded">已就绪</span>}
+                  <span className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded">已就绪</span>
                 </a>
                 <a
                   href="shortcuts://"
@@ -1952,36 +1935,6 @@ export default function SettingsPage() {
                   <span>打开快捷指令 App</span>
                 </a>
               </div>
-            </div>
-
-            {/* iCloud Link Input & Storage */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-2 border-t border-slate-200/60 dark:border-zinc-800/60">
-              <div className="text-[11px] font-semibold text-slate-700 dark:text-zinc-300 shrink-0">
-                iCloud 分享链接：
-              </div>
-              <input
-                type="url"
-                value={shortcutICloudUrl}
-                onChange={(e) => {
-                  const val = e.target.value.trim();
-                  setShortcutICloudUrl(val);
-                  if (typeof window !== 'undefined') {
-                    localStorage.setItem('kinova_shortcut_icloud_url', val);
-                  }
-                }}
-                placeholder="https://www.icloud.com/shortcuts/..."
-                className="flex-1 px-3 py-1.5 rounded-xl text-xs bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 focus:outline-none focus:border-indigo-500 text-slate-900 dark:text-white font-mono"
-              />
-              {shortcutICloudUrl && (
-                <a
-                  href={shortcutICloudUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/25 transition-colors shrink-0 text-center"
-                >
-                  测试打开 ↗
-                </a>
-              )}
             </div>
 
             {/* Fast Copy Helpers */}
@@ -2070,113 +2023,6 @@ export default function SettingsPage() {
           </div>
         </div>
       </section>
-
-      {/* Shortcut Setup Modal */}
-      {showShortcutSetupModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-lg rounded-3xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="h-9 w-9 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
-                  <Smartphone className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">配置 iPhone 一键安装链接</h3>
-                  <p className="text-[11px] text-slate-500 dark:text-zinc-400">只需生成一次，之后即可在任何设备一键弹窗添加</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowShortcutSetupModal(false)}
-                className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
-              💡 <strong>为什么需要配置？</strong>
-              <br />
-              因为这是你私人的 Kinova 记账系统（拥有你专属的网站域名与隐私密钥），苹果规定所有能在 iPhone 上弹窗安装的快捷指令必须绑定具体的服务器地址。
-            </div>
-
-            <div className="space-y-3 text-xs text-slate-600 dark:text-zinc-400">
-              <div className="font-semibold text-slate-900 dark:text-white">手机端 1 分钟极简配置：</div>
-              <ol className="list-decimal list-inside space-y-2 leading-relaxed bg-slate-50 dark:bg-zinc-950/50 p-3.5 rounded-2xl border border-slate-200/60 dark:border-zinc-800/60">
-                <li>
-                  点击 <a href="shortcuts://" className="font-bold text-indigo-600 dark:text-indigo-400 underline">打开快捷指令 App</a>，点右上角 <strong>「+」</strong> 新建。
-                </li>
-                <li>
-                  搜索添加 <strong>「截屏」</strong>，再添加 <strong>「使用 Base64 编码」</strong>（设为无换行）。
-                </li>
-                <li>
-                  添加 <strong>「获取 URL 内容」</strong>（POST 请求），点击下方按钮一键复制 URL 与请求头直接粘贴：
-                </li>
-                <div className="grid grid-cols-1 gap-2 my-1 pl-4">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const url = typeof window !== 'undefined' ? `${window.location.origin}/api/shortcuts/ingest` : 'https://你的域名/api/shortcuts/ingest';
-                      copyTextToClipboard(url, 'modal_url', 'API URL');
-                    }}
-                    className="p-2 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-between text-[11px] font-mono hover:border-indigo-500 transition-colors"
-                  >
-                    <span className="truncate">{typeof window !== 'undefined' ? `${window.location.origin}/api/shortcuts/ingest` : '/api/shortcuts/ingest'}</span>
-                    <span className="text-indigo-500 font-bold ml-2 shrink-0">{copiedConfigKey === 'modal_url' ? '已复制 ✓' : '复制 URL'}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => copyTextToClipboard('x-shortcut-token', 'modal_token', 'Header Name')}
-                    className="p-2 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center justify-between text-[11px] font-mono hover:border-indigo-500 transition-colors"
-                  >
-                    <span>Header: x-shortcut-token</span>
-                    <span className="text-indigo-500 font-bold ml-2 shrink-0">{copiedConfigKey === 'modal_token' ? '已复制 ✓' : '复制 Header'}</span>
-                  </button>
-                </div>
-                <li>
-                  添加 <strong>「获取词典值」</strong> (键 notificationText) 并 <strong>「显示通知 (Show Notification)」</strong>。
-                </li>
-                <li>
-                  <strong>长按刚刚做好的快捷指令 → 点击「共享」→「拷贝 iCloud 链接」</strong>。
-                </li>
-              </ol>
-            </div>
-
-            <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-zinc-800">
-              <label className="text-xs font-bold text-slate-900 dark:text-white block">
-                将拷贝的 iCloud 链接粘贴在此处：
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="url"
-                  value={shortcutICloudUrl}
-                  onChange={(e) => setShortcutICloudUrl(e.target.value.trim())}
-                  placeholder="https://www.icloud.com/shortcuts/..."
-                  className="flex-1 px-3 py-2 rounded-xl text-xs bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-white font-mono focus:outline-none focus:border-indigo-500"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!shortcutICloudUrl) {
-                      toast.error('请先粘贴你的 iCloud 链接');
-                      return;
-                    }
-                    if (typeof window !== 'undefined') {
-                      localStorage.setItem('kinova_shortcut_icloud_url', shortcutICloudUrl);
-                    }
-                    toast.success('已保存！正在为你弹窗打开快捷指令...');
-                    setShowShortcutSetupModal(false);
-                    window.open(shortcutICloudUrl, '_blank');
-                  }}
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shrink-0 transition-colors cursor-pointer"
-                >
-                  保存并立刻打开 ↗
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

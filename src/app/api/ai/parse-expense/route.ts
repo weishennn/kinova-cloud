@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLocalDateString, parseLocalDate } from '@/lib/date-helper';
 import { getValidGoogleSession } from '@/lib/google-auth';
 import { recordUserAiCall } from '@/lib/admin-registry';
+import { getLoadBalancedGeminiKeys, reportGeminiKeyFailure } from '@/lib/gemini-key-pool';
 import type {
   AiCommand,
   AiInstallmentData,
@@ -355,8 +356,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Text is required and must be 1,000 characters or fewer' }, { status: 400 });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    const apiKeys = getLoadBalancedGeminiKeys();
+    if (apiKeys.length === 0) {
       return NextResponse.json({ success: false, error: 'GEMINI_API_KEY is not configured in environment' }, { status: 500 });
     }
 
@@ -365,52 +366,66 @@ export async function POST(req: NextRequest) {
     let lastError = 'No response from model';
 
     for (const model of models) {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-goog-api-key': apiKey,
-        },
-        body: JSON.stringify({
-          contents: [{
-            role: 'user',
-            parts: [{ text: `${SYSTEM_PROMPT.replace('{{TODAY}}', today)}\n\nUser command: ${text}` }],
-          }],
-          generationConfig: {
-            responseMimeType: 'application/json',
-            temperature: 0.1,
-            maxOutputTokens: 2048,
-            thinkingConfig: {
-              thinkingBudget: 0,
-            },
+      let shouldTryNextModel = false;
+
+      for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx += 1) {
+        const apiKey = apiKeys[keyIdx];
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-goog-api-key': apiKey,
           },
-        }),
-        signal: AbortSignal.timeout(12000),
-      });
+          body: JSON.stringify({
+            contents: [{
+              role: 'user',
+              parts: [{ text: `${SYSTEM_PROMPT.replace('{{TODAY}}', today)}\n\nUser command: ${text}` }],
+            }],
+            generationConfig: {
+              responseMimeType: 'application/json',
+              temperature: 0.1,
+              maxOutputTokens: 2048,
+              thinkingConfig: {
+                thinkingBudget: 0,
+              },
+            },
+          }),
+          signal: AbortSignal.timeout(12000),
+        });
 
-      if (!res.ok) {
-        lastError = `Gemini ${res.status}`;
-        // Only try another model when the configured model is unavailable. Never retry quota errors.
-        if (res.status !== 404) break;
-        continue;
-      }
+        if (!res.ok) {
+          lastError = `Gemini ${res.status}`;
+          if (res.status === 429 || res.status === 401 || res.status === 403) {
+            reportGeminiKeyFailure(apiKey, res.status);
+            if (keyIdx + 1 < apiKeys.length) {
+              continue; // Failover to next configured API key
+            }
+          }
+          if (res.status === 404) {
+            shouldTryNextModel = true;
+          }
+          break;
+        }
 
-      const responseData = await res.json();
-      const rawJson = responseData.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!rawJson) {
-        lastError = 'Empty response from model';
+        const responseData = await res.json();
+        const rawJson = responseData.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!rawJson) {
+          lastError = 'Empty response from model';
+          break;
+        }
+
+        try {
+          const parsed = JSON.parse(rawJson);
+          const command = normalizeCommand(parsed, today, text);
+          if (command) return NextResponse.json({ success: true, data: command, model });
+          lastError = 'Model returned an invalid command shape';
+        } catch {
+          lastError = 'Model returned invalid JSON';
+        }
         break;
       }
 
-      try {
-        const parsed = JSON.parse(rawJson);
-        const command = normalizeCommand(parsed, today, text);
-        if (command) return NextResponse.json({ success: true, data: command, model });
-        lastError = 'Model returned an invalid command shape';
-      } catch {
-        lastError = 'Model returned invalid JSON';
-      }
-      break;
+      if (!shouldTryNextModel) break;
     }
 
     return NextResponse.json({ success: false, error: lastError }, { status: 502 });

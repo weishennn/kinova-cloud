@@ -737,7 +737,9 @@ export function inspectShortcutUrlSafety(urlStr: string): {
  * - Never logs screenshots, transaction details, or API keys.
  */
 export async function runShortcutGeminiOcrWithFastFail(options: {
-  geminiKey: string;
+  geminiKey?: string;
+  geminiKeys?: string[];
+  onKeyFailure?: (key: string, status: number) => void;
   preferredModel?: string;
   prompt: string;
   mimeType: string;
@@ -752,6 +754,19 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
 }> {
   const fetchFn = options.fetchImpl || fetch;
   const timeoutMs = options.timeoutMs ?? 18000;
+  const splitKeys = (raw?: string) =>
+    raw
+      ? String(raw)
+          .split(/[\s,;]+/)
+          .map((k) => k.trim().replace(/^['"]+|['"]+$/g, '').trim())
+          .filter(Boolean)
+      : [];
+  const candidateKeys =
+    options.geminiKeys && options.geminiKeys.length > 0
+      ? options.geminiKeys
+      : splitKeys(options.geminiKey);
+  const effectiveKeys = candidateKeys.length > 0 ? candidateKeys : [''];
+
   const preferred = (options.preferredModel || 'gemini-2.5-flash').trim();
   const candidateModels = [
     preferred,
@@ -768,111 +783,126 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
 
   for (let idx = 0; idx < candidateModels.length; idx += 1) {
     const model = candidateModels[idx];
-    attempts += 1;
-    try {
-      const geminiRes = await fetchFn(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': options.geminiKey,
-          },
-          body: JSON.stringify({
-            contents: [
-              {
-                role: 'user',
-                parts: [
-                  { text: options.prompt },
-                  { inline_data: { mime_type: options.mimeType, data: options.cleanBase64 } },
-                ],
-              },
-            ],
-            generationConfig: {
-              responseMimeType: 'application/json',
-              temperature: 0.1,
-              maxOutputTokens: 512,
-              thinkingConfig: {
-                thinkingBudget: 0,
-              },
-            },
-          }),
-          signal: AbortSignal.timeout(timeoutMs),
-        }
-      );
+    let shouldTryNextModel = false;
 
-      if (geminiRes.ok) {
-        const geminiData = await geminiRes.json();
-        const rawText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-        const cleaned = String(rawText).replace(/```(?:json)?\s*([\s\S]*?)\s*```/, '$1').trim();
-        if (!cleaned) {
-          ocrFallbackNotice = '云端 AI 未返回有效识别内容，请直接手动补充金额与商户';
+    for (let keyIdx = 0; keyIdx < effectiveKeys.length; keyIdx += 1) {
+      const activeKey = effectiveKeys[keyIdx];
+      attempts += 1;
+      try {
+        const geminiRes = await fetchFn(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-goog-api-key': activeKey,
+            },
+            body: JSON.stringify({
+              contents: [
+                {
+                  role: 'user',
+                  parts: [
+                    { text: options.prompt },
+                    { inline_data: { mime_type: options.mimeType, data: options.cleanBase64 } },
+                  ],
+                },
+              ],
+              generationConfig: {
+                responseMimeType: 'application/json',
+                temperature: 0.1,
+                maxOutputTokens: 512,
+                thinkingConfig: {
+                  thinkingBudget: 0,
+                },
+              },
+            }),
+            signal: AbortSignal.timeout(timeoutMs),
+          }
+        );
+
+        if (geminiRes.ok) {
+          const geminiData = await geminiRes.json();
+          const rawText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          const cleaned = String(rawText).replace(/```(?:json)?\s*([\s\S]*?)\s*```/, '$1').trim();
+          if (!cleaned) {
+            ocrFallbackNotice = '云端 AI 未返回有效识别内容，请直接手动补充金额与商户';
+            break;
+          }
+          try {
+            const rawParsed = JSON.parse(cleaned);
+            const unwrapped = Array.isArray(rawParsed) ? rawParsed[0] : rawParsed;
+            if (unwrapped && typeof unwrapped === 'object') {
+              parsedOcr = unwrapped as Record<string, unknown>;
+              modelUsed = model;
+            } else {
+              ocrFallbackNotice = '云端 AI 返回格式无效，请直接手动补充金额与商户';
+            }
+          } catch {
+            ocrFallbackNotice = '云端 AI 响应无法解析，请直接手动补充金额与商户';
+          }
           break;
         }
-        try {
-          const rawParsed = JSON.parse(cleaned);
-          const unwrapped = Array.isArray(rawParsed) ? rawParsed[0] : rawParsed;
-          if (unwrapped && typeof unwrapped === 'object') {
-            parsedOcr = unwrapped as Record<string, unknown>;
-            modelUsed = model;
-          } else {
-            ocrFallbackNotice = '云端 AI 返回格式无效，请直接手动补充金额与商户';
+
+        // Only try the 1 fallback model if the current model explicitly does not exist / is not supported
+        if (geminiRes.status === 404) {
+          if (idx + 1 < candidateModels.length) {
+            shouldTryNextModel = true;
+            break;
           }
-        } catch {
-          ocrFallbackNotice = '云端 AI 响应无法解析，请直接手动补充金额与商户';
+          ocrFallbackNotice = '配置的 AI 识别模型不存在或暂不可用 (HTTP 404)，请直接手动补充金额与商户';
+          break;
         }
-        break;
-      }
 
-      // Only try the 1 fallback model if the current model explicitly does not exist / is not supported
-      if (geminiRes.status === 404) {
-        if (idx + 1 < candidateModels.length) {
-          continue;
-        }
-        ocrFallbackNotice = '配置的 AI 识别模型不存在或暂不可用 (HTTP 404)，请直接手动补充金额与商户';
-        break;
-      }
-
-      if (geminiRes.status === 400) {
-        let isModelNotSupported = false;
-        try {
-          const errBody = await geminiRes.json();
-          const errMsg = String(errBody?.error?.message || '').toLowerCase();
-          if (errMsg.includes('not found') || errMsg.includes('not supported')) {
-            isModelNotSupported = true;
+        if (geminiRes.status === 400) {
+          let isModelNotSupported = false;
+          try {
+            const errBody = await geminiRes.json();
+            const errMsg = String(errBody?.error?.message || '').toLowerCase();
+            if (errMsg.includes('not found') || errMsg.includes('not supported')) {
+              isModelNotSupported = true;
+            }
+          } catch {
+            // ignore parse errors
           }
-        } catch {
-          // ignore parse errors
+          if (isModelNotSupported && idx + 1 < candidateModels.length) {
+            shouldTryNextModel = true;
+            break;
+          }
+          ocrFallbackNotice = 'AI 识别请求参数或模型不受支持，请直接手动补充金额与商户';
+          break;
         }
-        if (isModelNotSupported && idx + 1 < candidateModels.length) {
-          continue;
+
+        // On 429 (Quota/Rate limit) or 401/403 (Invalid key): quarantine this key and failover to next key if available
+        if (geminiRes.status === 429 || geminiRes.status === 401 || geminiRes.status === 403) {
+          options.onKeyFailure?.(activeKey, geminiRes.status);
+          if (keyIdx + 1 < effectiveKeys.length) {
+            continue;
+          }
+          if (geminiRes.status === 429) {
+            ocrFallbackNotice = '云端 AI 识别配额繁忙 (HTTP 429)，已为您生成可补充草稿，请直接手动填写';
+            break;
+          }
         }
-        ocrFallbackNotice = 'AI 识别请求参数或模型不受支持，请直接手动补充金额与商户';
-        break;
-      }
+        if (geminiRes.status === 503 || geminiRes.status >= 500) {
+          ocrFallbackNotice = `云端 AI 服务暂时繁忙 (HTTP ${geminiRes.status})，已为您生成可补充草稿，请直接手动填写`;
+          break;
+        }
 
-      // Fast fail on 429 (Quota/Rate limit) and 503/5xx (Service Unavailable): DO NOT retry other models
-      if (geminiRes.status === 429) {
-        ocrFallbackNotice = '云端 AI 识别配额繁忙 (HTTP 429)，已为您生成可补充草稿，请直接手动填写';
+        ocrFallbackNotice = `云端 AI 识别未完成 (HTTP ${geminiRes.status})，请直接手动补充金额与商户`;
+        break;
+      } catch (err: unknown) {
+        // Immediately stop on timeout or network error — never stack multiple timeouts across models
+        const isTimeout =
+          err instanceof Error &&
+          (err.name === 'TimeoutError' || err.name === 'AbortError' || /timeout|aborted/i.test(err.message));
+        ocrFallbackNotice = isTimeout
+          ? '云端 AI 识别超时，已为您生成可补充草稿，请直接手动填写金额与商户'
+          : '连接云端 AI 网络异常，已为您生成可补充草稿，请直接手动填写金额与商户';
         break;
       }
-      if (geminiRes.status === 503 || geminiRes.status >= 500) {
-        ocrFallbackNotice = `云端 AI 服务暂时繁忙 (HTTP ${geminiRes.status})，已为您生成可补充草稿，请直接手动填写`;
-        break;
-      }
-
-      ocrFallbackNotice = `云端 AI 识别未完成 (HTTP ${geminiRes.status})，请直接手动补充金额与商户`;
-      break;
-    } catch (err: unknown) {
-      // Immediately stop on timeout or network error — never stack multiple timeouts across models
-      const isTimeout =
-        err instanceof Error &&
-        (err.name === 'TimeoutError' || err.name === 'AbortError' || /timeout|aborted/i.test(err.message));
-      ocrFallbackNotice = isTimeout
-        ? '云端 AI 识别超时，已为您生成可补充草稿，请直接手动填写金额与商户'
-        : '连接云端 AI 网络异常，已为您生成可补充草稿，请直接手动填写金额与商户';
-      break;
     }
+
+    if (!shouldTryNextModel) break;
   }
 
   return {
