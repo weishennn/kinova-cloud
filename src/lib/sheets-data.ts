@@ -12,6 +12,8 @@ import {
   clearDeletedTombstone,
   isRecordTombstoned,
 } from './data-integrity';
+import { applyPendingTransactionUpdate } from './transaction-cache-merge';
+import { getPendingMutationDisposition, shouldKeepPendingMutationOnStartup } from './pending-mutation-policy';
 import { toast } from 'sonner';
 
 let flushInFlight: Promise<{ total: number; succeeded: number; failed: number }> | null = null;
@@ -182,13 +184,9 @@ export const sheetsData = {
             try {
               const parsedQ = JSON.parse(rawQ);
               if (Array.isArray(parsedQ)) {
-                const cleaned = parsedQ.filter((item: Record<string, unknown>) => {
-                  if (!item || typeof item !== 'object') return false;
-                  if (item.status === 'failed' || Number(item.retryCount || 0) > 0) return false;
-                  const rId = String(item.rowId || item.entityId || '').trim();
-                  if (rId && isRecordTombstoned(rId) && item.type !== 'delete' && item.action !== 'delete') return false;
-                  return true;
-                });
+                const cleaned = parsedQ.filter((item: unknown) =>
+                  shouldKeepPendingMutationOnStartup(item, isRecordTombstoned)
+                );
                 if (cleaned.length === 0) {
                   localStorage.removeItem(qKey);
                 } else {
@@ -573,12 +571,12 @@ export const sheetsData = {
   optimisticUpdateRow(sheetName: string, rowIndex: number | undefined, rowData: SheetRow): SheetRow {
     const id = String(rowData.Id || rowData.id || '');
     const dateStr = String(rowData.Date || rowData.date || '');
-    const targetMonth = /^\d{4}-\d{2}$/.test(sheetName)
-      ? sheetName
-      : /^\d{4}-\d{2}/.test(String(rowData._month || ''))
-        ? String(rowData._month).substring(0, 7)
-        : /^\d{4}-\d{2}/.test(dateStr)
-          ? dateStr.substring(0, 7)
+    const targetMonth = /^\d{4}-\d{2}/.test(dateStr)
+      ? dateStr.substring(0, 7)
+      : /^\d{4}-\d{2}$/.test(String(rowData._month || ''))
+        ? String(rowData._month)
+        : /^\d{4}-\d{2}$/.test(sheetName)
+          ? sheetName
           : '';
 
     const updatedRow: SheetRow = {
@@ -593,7 +591,9 @@ export const sheetsData = {
       const existingInFlight = inFlightOptimisticRows.get(id);
       inFlightOptimisticRows.set(id, {
         type: existingInFlight?.type === 'add' ? 'add' : 'update',
-        sheetName: swrSheet,
+        // Keep the source sheet for the server update; rowData/_month carries
+        // the destination month when an edit moves a transaction.
+        sheetName: sheetName || swrSheet,
         rowId: id,
         rowData: existingInFlight ? { ...existingInFlight.rowData, ...updatedRow } : updatedRow,
         createdAt: Date.now(),
@@ -989,11 +989,7 @@ export const sheetsData = {
             }
           }
 
-          if (ok) {
-            removePendingMutation(item.id);
-            succeeded++;
-          } else if ((item.retryCount || 0) >= 2 && !errMessage.toLowerCase().includes('timed out')) {
-            // Do not let an unresolvable validation error permanently block the queue
+          if (getPendingMutationDisposition(ok) === 'acknowledged') {
             removePendingMutation(item.id);
             succeeded++;
           } else {
@@ -1006,11 +1002,6 @@ export const sheetsData = {
             item.type === 'delete' &&
             (msg.includes('not found') || msg.includes('No valid ID or rowIndex') || msg.includes('Invalid row index'))
           ) {
-            removePendingMutation(item.id);
-            succeeded++;
-            continue;
-          }
-          if ((item.retryCount || 0) >= 2 && !msg.toLowerCase().includes('timed out')) {
             removePendingMutation(item.id);
             succeeded++;
             continue;
@@ -1086,13 +1077,11 @@ function applyPendingMutations(rows: SheetRow[], targetSheet?: string): SheetRow
   for (const [, inflight] of inFlightOptimisticRows.entries()) {
     const mutDateStr = String(inflight.rowData?.Date || inflight.rowData?.date || '');
     const mutMonth =
-      /^\d{4}-\d{2}$/.test(inflight.sheetName)
-        ? inflight.sheetName
-        : /^\d{4}-\d{2}/.test(String(inflight.rowData?._month || ''))
+      /^\d{4}-\d{2}/.test(mutDateStr)
+        ? mutDateStr.substring(0, 7)
+        : /^\d{4}-\d{2}$/.test(String(inflight.rowData?._month || ''))
           ? String(inflight.rowData?._month).substring(0, 7)
-          : /^\d{4}-\d{2}/.test(mutDateStr)
-            ? mutDateStr.substring(0, 7)
-            : inflight.sheetName;
+          : inflight.sheetName;
 
     if (!matchesTargetSheet(inflight.sheetName, mutMonth)) {
       continue;
@@ -1107,25 +1096,24 @@ function applyPendingMutations(rows: SheetRow[], targetSheet?: string): SheetRow
         });
       }
     } else if (inflight.type === 'update') {
-      result = result.map((r) => {
-        if (String(r.Id || r.id || '') === inflight.rowId) {
-          return { ...r, ...inflight.rowData };
-        }
-        return r;
-      });
+      result = applyPendingTransactionUpdate(
+        result,
+        targetSheet,
+        inflight.sheetName,
+        inflight.rowId,
+        inflight.rowData,
+      );
     }
   }
 
   for (const m of pending) {
     const mutDateStr = String(m.rowData?.Date || m.rowData?.date || '');
     const mutMonth =
-      /^\d{4}-\d{2}$/.test(m.sheetName)
-        ? m.sheetName
-        : /^\d{4}-\d{2}/.test(String(m.rowData?._month || ''))
+      /^\d{4}-\d{2}/.test(mutDateStr)
+        ? mutDateStr.substring(0, 7)
+        : /^\d{4}-\d{2}$/.test(String(m.rowData?._month || ''))
           ? String(m.rowData?._month).substring(0, 7)
-          : /^\d{4}-\d{2}/.test(mutDateStr)
-            ? mutDateStr.substring(0, 7)
-            : m.sheetName;
+          : m.sheetName;
 
     if (!matchesTargetSheet(m.sheetName, mutMonth)) {
       continue;
@@ -1141,13 +1129,15 @@ function applyPendingMutations(rows: SheetRow[], targetSheet?: string): SheetRow
         });
       }
     } else if (m.type === 'update' && m.rowData) {
-      const id = m.rowId || (m.rowData.Id as string);
-      result = result.map((r) => {
-        if ((r.Id || r.id) === id) {
-          return { ...r, ...m.rowData, _pendingSync: true };
-        }
-        return r;
-      });
+      const id = String(m.rowId || m.rowData.Id || m.rowData.id || '');
+      result = applyPendingTransactionUpdate(
+        result,
+        targetSheet,
+        m.sheetName,
+        id,
+        m.rowData,
+        true,
+      );
     } else if (m.type === 'delete') {
       const id = m.rowId;
       if (id) {

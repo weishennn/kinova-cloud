@@ -693,31 +693,6 @@ export function getSyncStatus(): {
         localStorage.removeItem('cashflow_last_sync_error');
         localStorage.removeItem('cashflow_last_sync_error_at');
         localStorage.removeItem('cashflow_pre_migration_backup_error_v1');
-        for (const qKey of [
-          CACHE_KEYS.PENDING_QUEUE,
-          CACHE_KEYS.PENDING_PLAN_QUEUE,
-          CACHE_KEYS.PENDING_SETTINGS_QUEUE,
-        ]) {
-          const rawQ = localStorage.getItem(qKey);
-          if (!rawQ) continue;
-          try {
-            const parsedQ = JSON.parse(rawQ);
-            if (Array.isArray(parsedQ)) {
-              const cleaned = parsedQ.filter((item: Record<string, unknown>) => {
-                if (!item || typeof item !== 'object') return false;
-                if (item.status === 'failed' || Number(item.retryCount || 0) > 0) return false;
-                return true;
-              });
-              if (cleaned.length === 0) {
-                localStorage.removeItem(qKey);
-              } else {
-                localStorage.setItem(qKey, JSON.stringify(cleaned));
-              }
-            }
-          } catch {
-            localStorage.removeItem(qKey);
-          }
-        }
       }
       hasUrl = localStorage.getItem('cashflow_apps_script_url') !== LOCAL_ONLY_ENDPOINT_SENTINEL;
     } catch {}

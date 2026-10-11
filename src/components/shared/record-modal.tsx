@@ -22,6 +22,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { formatClaimFileName } from '@/lib/claim-helper';
 import { ACCOUNTING_BASE_CURRENCY, COMMON_CURRENCIES, getAmountInBaseCurrency, getCachedRatesToMyr } from '@/lib/currency';
+import { isSafeTransactionAmount, isSafeTransactionConversion } from '@/lib/money-validation';
 import { compressImageFile } from '@/lib/image-compressor';
 import {
   calculateInstallmentPlan,
@@ -785,11 +786,11 @@ export function RecordPaymentModal() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+    if (!isSafeTransactionAmount(amount)) {
       toast.error(
         shortcutDraft
-          ? '系统未能从快捷指令获取金额，请补充实际消费金额后再保存'
-          : 'Please enter a valid amount'
+          ? '系统未能从快捷指令获取有效金额，请补充大于 0 且最多两位小数的金额后再保存'
+          : 'Enter an amount greater than zero with at most two decimal places'
       );
       return;
     }
@@ -881,6 +882,10 @@ export function RecordPaymentModal() {
     const finalMonthStr = targetDate.substring(0, 7);
     const baseAmount = getAmountInBaseCurrency(targetAmount, pendingCurrency, undefined, getCachedRatesToMyr());
     const baseRate = targetAmount > 0 ? baseAmount / targetAmount : 1;
+    if (!isSafeTransactionConversion(targetAmount, baseAmount, baseRate)) {
+      toast.error('This amount or its currency conversion is outside the safe numeric range.');
+      return;
+    }
 
     const existingSubCategory = editTransaction
       ? String(editTransaction.SubCategory || editTransaction.subCategory || '')
@@ -936,7 +941,7 @@ export function RecordPaymentModal() {
         receiptUrl: targetReceiptUrl,
         Id: editTxId,
         id: editTxId,
-        _month: editTransaction._month || finalMonthStr,
+        _month: finalMonthStr,
         _rowIndex: editTransaction._rowIndex,
       };
 
@@ -967,7 +972,7 @@ export function RecordPaymentModal() {
             ...rowData,
             ReceiptUrl: uploadedReceiptUrl,
             Id: editTxId,
-            _month: editTransaction._month,
+            _month: finalMonthStr,
           });
           if (uploadedReceiptUrl && uploadedReceiptUrl !== targetReceiptUrl) {
             applyOptimisticUpdateToQueryCache(

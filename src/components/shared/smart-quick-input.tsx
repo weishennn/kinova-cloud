@@ -13,6 +13,7 @@ import {
 import { useTransactions } from '@/hooks/useTransactions';
 import { useQueryClient } from '@tanstack/react-query';
 import { getLocalDateString, normalizeDateString } from '@/lib/date-helper';
+import { isSafeTransactionAmount } from '@/lib/money-validation';
 import { useAppStore } from '@/stores/app-store';
 import type { AiCommand, AiReceiptItem, AiTransactionData } from '@/types/ai-command';
 import { compressImageFile } from '@/lib/image-compressor';
@@ -535,7 +536,11 @@ export function SmartQuickInput() {
     }
 
     const activeParsed = activeCommand.data as AiTransactionData;
-    if (!activeParsed || !activeParsed.amount) return;
+    if (!activeParsed) return;
+    if (!isSafeTransactionAmount(activeParsed.amount)) {
+      toast.error('The parsed amount must be greater than zero and have at most two decimal places.');
+      return;
+    }
 
     setIsSubmitting(true);
     const safeDate = normalizeDateString(activeParsed.date);

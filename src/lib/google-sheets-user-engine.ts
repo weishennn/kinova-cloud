@@ -1,5 +1,6 @@
 import { GoogleUserSession } from './google-auth';
 import { getAdminUserRegistry, updateUserDriveIds } from './admin-registry';
+import { ensureGoogleApiSuccess } from './google-api-result';
 
 export const DEFAULT_MONTHLY_HEADERS = [
   'Id', 'Date', 'Type', 'Category', 'SubCategory', 'Description',
@@ -1393,7 +1394,7 @@ export async function executeUserGoogleAction(
 
         const sheetMeta = meta.sheets.find((s) => s.properties.title === targetSheetName);
         if (sheetMeta) {
-          await googleApiFetch(
+          const deleteResponse = await googleApiFetch(
             `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`,
             accessToken,
             {
@@ -1414,6 +1415,7 @@ export async function executeUserGoogleAction(
               }),
             }
           );
+          await ensureGoogleApiSuccess(deleteResponse, 'source row delete after cross-month move');
         }
 
         return wrap({

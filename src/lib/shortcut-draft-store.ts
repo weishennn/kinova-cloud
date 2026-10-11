@@ -879,6 +879,9 @@ export async function recordShortcutDraftToLedger(
     fallbackNotice?: string;
     fetchImpl?: typeof fetch;
     autoRecord?: boolean;
+    userEmail?: string;
+    scriptUrl?: string;
+    apiSecret?: string;
   } = {}
 ): Promise<{
   autoRecorded: boolean;
@@ -929,8 +932,6 @@ export async function recordShortcutDraftToLedger(
     };
   }
 
-  const fetchFn = options.fetchImpl || fetch;
-  const { url, apiKey } = resolveShortcutSheetsEndpoint();
   const targetDate = String(draft.date || '').trim().slice(0, 10);
   const sheetName = targetDate.slice(0, 7);
   const uniqueSuffix = `${Date.now().toString(36)}_${crypto.randomBytes(3).toString('hex')}`;
@@ -960,59 +961,122 @@ export async function recordShortcutDraftToLedger(
     _forceRestore: true,
   };
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  // Primary Path: Write directly to the user's Google Drive Kinova CashFlow spreadsheet via OAuth refresh token
+  if (!options.fetchImpl) {
     try {
-      const res = await fetchFn(`${url}?apiKey=${encodeURIComponent(apiKey)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          action: 'addRow',
-          sheetName,
-          rowData,
-          mutationId,
-          key: apiKey,
-          apiKey,
-        }),
-        cache: 'no-store',
-        signal: AbortSignal.timeout(20000),
-      });
+      const [{ getAdminUserRegistry }, { getAdminEmail, isAdminEmail, refreshGoogleAccessToken }, { executeUserGoogleAction }] =
+        await Promise.all([
+          import('./admin-registry'),
+          import('./google-auth'),
+          import('./google-sheets-user-engine'),
+        ]);
 
-      if (res.ok) {
-        const json = await res.json();
-        if (json?.data?.deduplicated) {
-          acknowledgeShortcutDraft(draft.draftId);
-          return {
-            autoRecorded: false,
-            duplicateSkipped: true,
-            transactionId: txId,
-            sheetName,
-            notificationTitle: 'ℹ️ 重复账单已跳过',
-            notificationText: `ℹ️ 已跳过重复记录 [${targetDate}]：${curr} ${draft.amount.toFixed(2)} · ${label}`,
+      const registry = await getAdminUserRegistry(false);
+      const preferredEmail = (options.userEmail || getAdminEmail()).trim().toLowerCase();
+      const regUser =
+        registry[preferredEmail] ||
+        Object.values(registry).find((u) => u.role === 'admin' && u.refreshToken && u.status !== 'blocked') ||
+        Object.values(registry).find((u) => u.refreshToken && u.status !== 'blocked');
+
+      if (regUser?.refreshToken) {
+        const refreshed = await refreshGoogleAccessToken(regUser.refreshToken);
+        if (refreshed?.accessToken) {
+          const session = {
+            email: regUser.email,
+            name: regUser.name || regUser.email.split('@')[0],
+            picture: regUser.picture,
+            accessToken: refreshed.accessToken,
+            refreshToken: regUser.refreshToken,
+            expiresAt: refreshed.expiresAt,
+            spreadsheetId: regUser.spreadsheetId,
+            invoicesFolderId: regUser.invoicesFolderId,
+            backupsFolderId: regUser.backupsFolderId,
+            isAdmin: isAdminEmail(regUser.email),
           };
-        }
-        const isSuccess = Boolean(json?.success || json?.status === 'success' || json?.data?.success);
-        const isAdded = json?.data?.added !== false && !json?.data?.tombstoned;
-        if (isSuccess && isAdded) {
-          // Acknowledge draft so opening Kinova later won't pop open the draft modal for an already-recorded transaction
-          acknowledgeShortcutDraft(draft.draftId);
-          return {
-            autoRecorded: true,
-            duplicateSkipped: false,
-            transactionId: txId,
+          const { result } = await executeUserGoogleAction(session, 'addRow', {
             sheetName,
-            notificationTitle: `✅ 已记账 ${curr} ${draft.amount.toFixed(2)} (${targetDate})`,
-            notificationText: `✅ 已记账 [${targetDate}]：${curr} ${draft.amount.toFixed(2)} · ${label} (${draft.category})`,
-          };
-        }
-        if (attempt === 0 && String(json?.message || '').toLowerCase().includes('lock')) {
-          await new Promise((r) => setTimeout(r, 1200));
-          continue;
+            rowData,
+            mutationId,
+          });
+          const resObj = (result || {}) as Record<string, unknown>;
+          if (resObj.added !== false && !resObj.tombstoned) {
+            acknowledgeShortcutDraft(draft.draftId);
+            return {
+              autoRecorded: true,
+              duplicateSkipped: false,
+              transactionId: txId,
+              sheetName,
+              notificationTitle: `✅ 已记账 ${curr} ${draft.amount.toFixed(2)} (${targetDate})`,
+              notificationText: `✅ 已记账 [${targetDate}]：${curr} ${draft.amount.toFixed(2)} · ${label} (${draft.category})`,
+            };
+          }
         }
       }
-    } catch {
-      if (attempt === 0) {
-        await new Promise((r) => setTimeout(r, 800));
-        continue;
+    } catch (oauthErr) {
+      console.warn('[Shortcut] OAuth Drive ledger write fallback:', oauthErr);
+    }
+  }
+
+  const fetchFn = options.fetchImpl || fetch;
+  const endpoint = resolveShortcutSheetsEndpoint();
+  const url = options.scriptUrl || endpoint.url;
+  const apiKey = options.apiSecret || endpoint.apiKey;
+
+  if (url) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const res = await fetchFn(`${url}?apiKey=${encodeURIComponent(apiKey)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'addRow',
+            sheetName,
+            rowData,
+            mutationId,
+            key: apiKey,
+            apiKey,
+          }),
+          cache: 'no-store',
+          signal: AbortSignal.timeout(20000),
+        });
+
+        if (res.ok) {
+          const json = await res.json();
+          if (json?.data?.deduplicated) {
+            acknowledgeShortcutDraft(draft.draftId);
+            return {
+              autoRecorded: false,
+              duplicateSkipped: true,
+              transactionId: txId,
+              sheetName,
+              notificationTitle: 'ℹ️ 重复账单已跳过',
+              notificationText: `ℹ️ 已跳过重复记录 [${targetDate}]：${curr} ${draft.amount.toFixed(2)} · ${label}`,
+            };
+          }
+          const isSuccess = Boolean(json?.success || json?.status === 'success' || json?.data?.success);
+          const isAdded = json?.data?.added !== false && !json?.data?.tombstoned;
+          if (isSuccess && isAdded) {
+            // Acknowledge draft so opening Kinova later won't pop open the draft modal for an already-recorded transaction
+            acknowledgeShortcutDraft(draft.draftId);
+            return {
+              autoRecorded: true,
+              duplicateSkipped: false,
+              transactionId: txId,
+              sheetName,
+              notificationTitle: `✅ 已记账 ${curr} ${draft.amount.toFixed(2)} (${targetDate})`,
+              notificationText: `✅ 已记账 [${targetDate}]：${curr} ${draft.amount.toFixed(2)} · ${label} (${draft.category})`,
+            };
+          }
+          if (attempt === 0 && String(json?.message || '').toLowerCase().includes('lock')) {
+            await new Promise((r) => setTimeout(r, 1200));
+            continue;
+          }
+        }
+      } catch {
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 800));
+          continue;
+        }
       }
     }
   }
