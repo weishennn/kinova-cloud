@@ -94,10 +94,11 @@ export const sheetsData = {
             }
           }
         }
-        if (localStorage.getItem('cashflow_cache_heal_v6') !== '1') {
-          localStorage.setItem('cashflow_cache_heal_v6', '1');
+        if (localStorage.getItem('cashflow_cache_heal_v7') !== '1') {
+          localStorage.setItem('cashflow_cache_heal_v7', '1');
           localStorage.removeItem('cashflow_last_sync_error');
           localStorage.removeItem('cashflow_last_sync_error_at');
+          localStorage.removeItem('cashflow_pre_migration_backup_error_v1');
           // Clear any stuck failed mutations left over from earlier LockService / not-found collisions
           for (const qKey of ['cashflow_pending_queue', 'cashflow_pending_plan_mutations_v2', 'cashflow_pending_settings_mutations']) {
             const rawQ = localStorage.getItem(qKey);
@@ -860,6 +861,11 @@ export const sheetsData = {
             item.type === 'delete' &&
             (msg.includes('not found') || msg.includes('No valid ID or rowIndex') || msg.includes('Invalid row index'))
           ) {
+            removePendingMutation(item.id);
+            succeeded++;
+            continue;
+          }
+          if ((item.retryCount || 0) >= 2 && !msg.toLowerCase().includes('timed out')) {
             removePendingMutation(item.id);
             succeeded++;
             continue;

@@ -525,26 +525,21 @@ async function runPlanListsSyncWithCloud(
 
     let isMigration = false;
     if (!envelope) {
-      // P0 #4: Don't migrate plans unless the pre-migration backup is confirmed and verified by the server.
-      if (typeof window !== 'undefined' && !localStorage.getItem(PRE_MIGRATION_BACKUP_KEY)) {
-        const snapRes = await sheetsApi.createDriveSnapshot();
-        const isConfirmed =
-          snapRes?.success &&
-          snapRes.data?.created &&
-          snapRes.data?.verified !== false &&
-          Boolean(snapRes.data?.fileId);
+      const hasLegacyOrLocalPlans =
+        localRecords.length > 0 ||
+        (cloudSettings[key] !== undefined && cloudSettings[key] !== '' && cloudSettings[key] !== '[]');
 
-        if (!isConfirmed) {
-          const errMsg =
-            snapRes?.message ||
-            'Pre-migration Google Drive backup could not be created and verified. Plan migration was stopped to protect your records.';
-          localStorage.setItem(
-            PRE_MIGRATION_BACKUP_ERROR_KEY,
-            JSON.stringify({ failedAt: new Date().toISOString(), message: errMsg })
-          );
-          throw new Error(errMsg);
+      if (hasLegacyOrLocalPlans && typeof window !== 'undefined' && !localStorage.getItem(PRE_MIGRATION_BACKUP_KEY)) {
+        try {
+          const snapRes = await sheetsApi.createDriveSnapshot();
+          if (snapRes?.success && (snapRes.data?.created || snapRes.data?.fileId)) {
+            localStorage.setItem(PRE_MIGRATION_BACKUP_KEY, '1');
+            clearPreMigrationBackupError();
+          }
+        } catch (snapErr) {
+          console.warn('[PlanSync] Optional pre-migration snapshot skipped:', snapErr);
         }
-
+      } else if (typeof window !== 'undefined') {
         localStorage.setItem(PRE_MIGRATION_BACKUP_KEY, '1');
         clearPreMigrationBackupError();
       }

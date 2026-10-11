@@ -91,9 +91,10 @@ export function CashflowCockpit() {
   const [activityView, setActivityView] = useState<'recent' | 'calendar'>('recent');
 
   const currentMonth = currentMonthValue();
-  const months = useMemo(() => {
-    const currentYear = Number(currentMonth.slice(0, 4));
-    const years = new Set<number>([currentYear, currentYear + 1]);
+  const currentYearStr = currentMonth.slice(0, 4);
+  const { months, orderedYears } = useMemo(() => {
+    const currentYear = Number(currentYearStr);
+    const years = new Set<number>([currentYear, currentYear - 1, currentYear + 1]);
     sheetMonths.forEach((m) => {
       if (/^\d{4}-\d{2}$/.test(m)) years.add(Number(m.slice(0, 4)));
     });
@@ -113,8 +114,14 @@ export function CashflowCockpit() {
         values.add(`${yr}-${String(month).padStart(2, '0')}`);
       }
     });
-    return [...values].filter((value) => /^\d{4}-\d{2}$/.test(value)).sort((a, b) => b.localeCompare(a));
-  }, [currentMonth, selectedMonth, sheetMonths, transactions]);
+    const sortedMonths = [...values].filter((value) => /^\d{4}-\d{2}$/.test(value)).sort((a, b) => b.localeCompare(a));
+    const uniqueYears = [...new Set(sortedMonths.map((m) => m.slice(0, 4)))].sort((a, b) => {
+      if (a === currentYearStr) return -1;
+      if (b === currentYearStr) return 1;
+      return b.localeCompare(a);
+    });
+    return { months: sortedMonths, orderedYears: uniqueYears };
+  }, [currentMonth, currentYearStr, selectedMonth, sheetMonths, transactions]);
 
   const visibleTransactions = useMemo(() => {
     if (selectedMonth === 'all') return transactions.filter((transaction) => transaction.date && transaction.id !== 'tx_sample');
@@ -261,16 +268,40 @@ export function CashflowCockpit() {
           <button type="button" className={periodKind === 'all' ? 'is-active' : ''} aria-pressed={periodKind === 'all'} onClick={() => setSelectedMonth('all')}>All time</button>
         </div>
         <div className="cockpit-period-select-wrap">
+          {selectedMonth !== currentMonth && (
+            <button
+              type="button"
+              onClick={() => setSelectedMonth(currentMonth)}
+              className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition-colors cursor-pointer shrink-0"
+              title="Jump back to current month"
+            >
+              Current
+            </button>
+          )}
           <button type="button" className="cockpit-period-arrow" aria-label="Previous period" onClick={() => changePeriod(-1)}><ArrowLeft size={15} /></button>
           <label className="cockpit-period-select-label" htmlFor="cockpit-period"><CalendarDays size={14} />
             <select id="cockpit-period" value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)}>
+              {orderedYears.map((year) => {
+                const yearLabel =
+                  year === currentYearStr
+                    ? `${year} (Current Year)`
+                    : Number(year) === Number(currentYearStr) - 1
+                    ? `${year} (Last Year)`
+                    : Number(year) === Number(currentYearStr) + 1
+                    ? `${year} (Next Year)`
+                    : year;
+                return (
+                  <optgroup key={year} label={yearLabel}>
+                    <option value={`year-${year}`}>{year} full year</option>
+                    {months.filter((month) => month.startsWith(year)).map((month) => (
+                      <option key={month} value={month}>
+                        {month === currentMonth ? `★ ${monthName(month)} (Current)` : monthName(month)}
+                      </option>
+                    ))}
+                  </optgroup>
+                );
+              })}
               <option value="all">All time</option>
-              {[...new Set(months.map((month) => month.slice(0, 4)))].map((year) => (
-                <optgroup key={year} label={year}>
-                  <option value={`year-${year}`}>{year} full year</option>
-                  {months.filter((month) => month.startsWith(year)).map((month) => <option key={month} value={month}>{monthName(month)}</option>)}
-                </optgroup>
-              ))}
             </select>
             <ChevronDown size={14} className="cockpit-period-chevron" />
           </label>

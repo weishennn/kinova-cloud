@@ -688,10 +688,11 @@ export function getSyncStatus(): {
   let hasUrl = true;
   if (typeof window !== 'undefined') {
     try {
-      if (localStorage.getItem('cashflow_cache_heal_v6') !== '1') {
-        localStorage.setItem('cashflow_cache_heal_v6', '1');
+      if (localStorage.getItem('cashflow_cache_heal_v7') !== '1') {
+        localStorage.setItem('cashflow_cache_heal_v7', '1');
         localStorage.removeItem('cashflow_last_sync_error');
         localStorage.removeItem('cashflow_last_sync_error_at');
+        localStorage.removeItem('cashflow_pre_migration_backup_error_v1');
         for (const qKey of [
           CACHE_KEYS.PENDING_QUEUE,
           CACHE_KEYS.PENDING_PLAN_QUEUE,

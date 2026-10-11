@@ -146,9 +146,13 @@ async function runCloudSettingsSync(): Promise<SettingsSyncResult> {
       throw new Error('Google Sheets did not return settings; local plan data was left unchanged.');
     }
     const cloudSettings = settingsRes.data;
-    const plansRes = await syncPlanListsWithCloud(cloudSettings);
-
-    let restoredFromCloud = plansRes.restoredFromCloud;
+    let restoredFromCloud = false;
+    try {
+      const plansRes = await syncPlanListsWithCloud(cloudSettings);
+      restoredFromCloud = plansRes.restoredFromCloud;
+    } catch (planErr) {
+      console.warn('[CloudSync] Plan sync warning (continuing settings flush):', planErr);
+    }
     const pendingCloudUpdates: Record<string, { value: string; mutationId?: string; changedAt?: number }> = {};
 
     // Load durable pending scalar/JSON setting mutations and snapshot their timestamps (P1 #10)

@@ -61,7 +61,8 @@ export default function TransactionsPage() {
   // Extract all available years and months from transactions + current year/month
   const { availableYears, monthsByYear } = useMemo(() => {
     const [curY] = currentMonthStr.split('-').map(Number);
-    const activeYears = new Set<number>([curY, curY + 1]);
+    const curYStr = String(curY);
+    const activeYears = new Set<number>([curY, curY - 1, curY + 1]);
 
     // Add years from sheets query
     months.forEach(m => {
@@ -103,7 +104,11 @@ export default function TransactionsPage() {
       byYear[y].push(m);
     });
 
-    const sortedYears = Array.from(yearSet).sort((a, b) => b.localeCompare(a));
+    const sortedYears = Array.from(yearSet).sort((a, b) => {
+      if (a === curYStr) return -1;
+      if (b === curYStr) return 1;
+      return b.localeCompare(a);
+    });
 
     return {
       availableYears: sortedYears,
@@ -513,24 +518,32 @@ export default function TransactionsPage() {
               className="flex-1 sm:flex-initial h-11 min-w-[165px] rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/90 px-3.5 py-2 text-base sm:text-xs font-mono text-slate-950 dark:text-white outline-none focus:border-indigo-400 cursor-pointer transition-colors shadow-inner"
               aria-label="Filter transactions by month or year"
             >
-              <option value={currentMonthStr} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono font-semibold">
-                {formatPeriodLabel(currentMonthStr)}
-              </option>
+              {availableYears.map(year => {
+                const curYStr = currentMonthStr.substring(0, 4);
+                const yLabel =
+                  year === curYStr
+                    ? `── ${year} (Current Year) ──`
+                    : Number(year) === Number(curYStr) - 1
+                    ? `── ${year} (Last Year) ──`
+                    : Number(year) === Number(curYStr) + 1
+                    ? `── ${year} (Next Year) ──`
+                    : `── Year ${year} ──`;
+                return (
+                  <optgroup key={year} label={yLabel} className="bg-white dark:bg-zinc-950 text-indigo-800 dark:text-indigo-400 font-bold">
+                    <option value={`year-${year}`} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono font-semibold">
+                      Full Year {year} (All {year})
+                    </option>
+                    {monthsByYear[year]?.map(m => (
+                      <option key={m} value={m} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono">
+                        {m === currentMonthStr ? `★ ${formatPeriodLabel(m)} (Current)` : formatPeriodLabel(m)}
+                      </option>
+                    ))}
+                  </optgroup>
+                );
+              })}
               <option value="all" className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono">
                 All Time (All Transactions)
               </option>
-              {availableYears.map(year => (
-                <optgroup key={year} label={`── Year ${year} ──`} className="bg-white dark:bg-zinc-950 text-indigo-800 dark:text-indigo-400 font-bold">
-                  <option value={`year-${year}`} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono font-semibold">
-                    Full Year {year} (All {year})
-                  </option>
-                  {monthsByYear[year]?.map(m => (
-                    <option key={m} value={m} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono">
-                      {formatPeriodLabel(m)}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
             </select>
 
             <button
@@ -542,6 +555,17 @@ export default function TransactionsPage() {
             >
               <ChevronRight className="h-4 w-4" />
             </button>
+
+            {selectedMonth !== currentMonthStr && (
+              <button
+                type="button"
+                onClick={() => setSelectedMonth(currentMonthStr)}
+                className="h-11 px-3 shrink-0 inline-flex items-center justify-center rounded-xl border border-emerald-500/30 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 active:scale-[0.96] transition-all cursor-pointer touch-manipulation"
+                title="Jump back to current month"
+              >
+                Current
+              </button>
+            )}
           </div>
 
           {/* Search Field (16px text-base on mobile to prevent iOS Safari auto-zoom) */}

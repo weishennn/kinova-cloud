@@ -37,7 +37,8 @@ export default function BudgetPage() {
   // Extract all available years and months from transactions + current year/month
   const { availableYears, monthsByYear, allAvailableMonths } = useMemo(() => {
     const [curY] = currentMonthStr.split('-').map(Number);
-    const activeYears = new Set<number>([curY, curY + 1]);
+    const curYStr = String(curY);
+    const activeYears = new Set<number>([curY, curY - 1, curY + 1]);
 
     sheetMonths.forEach(m => {
       if (/^\d{4}-\d{2}$/.test(m)) activeYears.add(Number(m.substring(0, 4)));
@@ -76,7 +77,11 @@ export default function BudgetPage() {
       byYear[y].push(m);
     });
 
-    const sortedYears = Array.from(yearSet).sort((a, b) => b.localeCompare(a));
+    const sortedYears = Array.from(yearSet).sort((a, b) => {
+      if (a === curYStr) return -1;
+      if (b === curYStr) return 1;
+      return b.localeCompare(a);
+    });
 
     return {
       availableYears: sortedYears,
@@ -315,24 +320,32 @@ export default function BudgetPage() {
             className="min-h-[40px] flex-1 min-w-0 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/90 px-3 py-1.5 text-xs font-semibold text-slate-950 dark:text-white outline-none focus:border-indigo-500 cursor-pointer transition-colors font-mono text-center truncate"
             aria-label="Select month or year"
           >
-            <option value={currentMonthStr} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono font-semibold">
-              {formatMonthLabel(currentMonthStr)}
-            </option>
+            {availableYears.map(year => {
+              const curYStr = currentMonthStr.substring(0, 4);
+              const yLabel =
+                year === curYStr
+                  ? `── ${year} (Current Year) ──`
+                  : Number(year) === Number(curYStr) - 1
+                  ? `── ${year} (Last Year) ──`
+                  : Number(year) === Number(curYStr) + 1
+                  ? `── ${year} (Next Year) ──`
+                  : `── Year ${year} ──`;
+              return (
+                <optgroup key={year} label={yLabel} className="bg-white dark:bg-zinc-950 text-indigo-800 dark:text-indigo-400 font-bold">
+                  <option value={`year-${year}`} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono font-semibold">
+                    Full Year {year} (Annual Target)
+                  </option>
+                  {monthsByYear[year]?.map(m => (
+                    <option key={m} value={m} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono">
+                      {m === currentMonthStr ? `★ ${formatMonthLabel(m)} (Current)` : formatMonthLabel(m)}
+                    </option>
+                  ))}
+                </optgroup>
+              );
+            })}
             <option value="all" className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono">
               All Time (Accumulated)
             </option>
-            {availableYears.map(year => (
-              <optgroup key={year} label={`── Year ${year} ──`} className="bg-white dark:bg-zinc-950 text-indigo-800 dark:text-indigo-400 font-bold">
-                <option value={`year-${year}`} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono font-semibold">
-                  Full Year {year} (Annual Target)
-                </option>
-                {monthsByYear[year]?.map(m => (
-                  <option key={m} value={m} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono">
-                    {formatMonthLabel(m)}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
           </select>
 
           <button
@@ -344,6 +357,16 @@ export default function BudgetPage() {
           >
             <ChevronRight className="h-4 w-4" />
           </button>
+          {selectedMonth !== currentMonthStr && (
+            <button
+              type="button"
+              onClick={() => setSelectedMonth(currentMonthStr)}
+              className="min-h-[40px] px-3 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 text-xs font-bold transition-colors cursor-pointer active:scale-95 shrink-0"
+              title="Jump back to current month"
+            >
+              Current
+            </button>
+          )}
         </div>
       </div>
 
