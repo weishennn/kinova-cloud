@@ -5,7 +5,7 @@ import {
   isAdminEmail,
   setSessionCookie,
 } from '@/lib/google-auth';
-import { getAdminUserRegistry, recordUserLogin } from '@/lib/admin-registry';
+import { getAdminUserRegistry, recordUserLogin, setActiveShortcutOwner } from '@/lib/admin-registry';
 import { ensureUserWorkspace } from '@/lib/google-sheets-user-engine';
 
 export async function GET(req: NextRequest) {
@@ -122,6 +122,10 @@ export async function GET(req: NextRequest) {
       invoicesFolderId: session.invoicesFolderId,
       backupsFolderId: session.backupsFolderId,
     });
+
+    if (recordedUser.status !== 'blocked' || isAdmin) {
+      await setActiveShortcutOwner(email, req.headers.get('user-agent'));
+    }
 
     const redirectTarget =
       recordedUser.status === 'blocked' && !isAdmin

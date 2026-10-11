@@ -195,7 +195,11 @@ async function runCloudSettingsSync(): Promise<SettingsSyncResult> {
         window.dispatchEvent(new CustomEvent(SETTINGS_UPDATED_EVENT, { detail: { key, value: cloudVal } }));
         restoredFromCloud = true;
       } else if (localVal && !cloudVal) {
-        pendingCloudUpdates[key] = { value: localVal };
+        // Never push an unqueued local setting to a cloud account that doesn't have it;
+        // explicit user changes are already tracked in queuedByKey.
+        localStorage.removeItem(key);
+        window.dispatchEvent(new CustomEvent(SETTINGS_UPDATED_EVENT, { detail: { key, value: '' } }));
+        restoredFromCloud = true;
       } else if (cloudVal && localVal && cloudVal !== localVal) {
         // No pending local edit on this device -> cloud value from another device is newer
         localStorage.setItem(key, cloudVal);

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getValidGoogleSession, setSessionCookie } from '@/lib/google-auth';
-import { isUserBlocked } from '@/lib/admin-registry';
+import { isUserBlocked, setActiveShortcutOwner } from '@/lib/admin-registry';
 import { ensureUserWorkspace } from '@/lib/google-sheets-user-engine';
 
 export async function GET(req: NextRequest) {
@@ -14,6 +14,10 @@ export async function GET(req: NextRequest) {
 
   const blocked = await isUserBlocked(session.email);
   let workspaceChanged = false;
+
+  if (!blocked) {
+    void setActiveShortcutOwner(session.email, req.headers.get('user-agent'));
+  }
 
   if (!blocked && !session.isAdmin) {
     try {

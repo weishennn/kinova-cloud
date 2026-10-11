@@ -42,6 +42,11 @@ interface InFlightOptimisticMutation {
 const inFlightOptimisticRows = new Map<string, InFlightOptimisticMutation>();
 const IN_FLIGHT_RETENTION_MS = 30_000;
 
+export function clearInFlightOptimisticRows(): void {
+  inFlightOptimisticRows.clear();
+  backgroundPrefetchScheduled = false;
+}
+
 export function ensureMonthInLocalMonthList(month: string): void {
   if (!/^\d{4}-\d{2}$/.test(month) || typeof window === 'undefined') return;
   try {
@@ -197,6 +202,18 @@ export const sheetsData = {
               localStorage.removeItem(qKey);
             }
           }
+        }
+        if (localStorage.getItem('cashflow_cache_heal_v8') !== '1') {
+          localStorage.setItem('cashflow_cache_heal_v8', '1');
+          localStorage.removeItem('kinova_synced_shortcut_tx_ids');
+          const keysToPurge: string[] = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith('cashflow_swr_')) {
+              keysToPurge.push(k);
+            }
+          }
+          keysToPurge.forEach((k) => localStorage.removeItem(k));
         }
       } catch {
         // Ignore storage errors

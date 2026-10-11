@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getValidGoogleSession, setSessionCookie } from '@/lib/google-auth';
-import { getAdminAppsScriptEndpoint, isUserBlocked } from '@/lib/admin-registry';
+import { getAdminAppsScriptEndpoint, isUserBlocked, setActiveShortcutOwner } from '@/lib/admin-registry';
 import { executeUserGoogleAction } from '@/lib/google-sheets-user-engine';
 
 const SERVER_TIMEOUT_MS = 25000;
@@ -36,6 +36,8 @@ export async function GET(req: NextRequest) {
         { status: 403 }
       );
     }
+
+    void setActiveShortcutOwner(session.email, req.headers.get('user-agent'));
 
     // Non-admin Google users always read/write their own personal Google Drive
     if (!session.isAdmin) {
@@ -159,6 +161,8 @@ export async function POST(req: NextRequest) {
         { status: 403 }
       );
     }
+
+    void setActiveShortcutOwner(session.email, req.headers.get('user-agent'));
 
     // Non-admin Google users always read/write their own personal Google Drive
     if (!session.isAdmin) {

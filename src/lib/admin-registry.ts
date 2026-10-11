@@ -1,6 +1,13 @@
 import { getAdminEmail, isAdminEmail } from './google-auth';
 
 export const ADMIN_REGISTRY_SETTING_KEY = 'kinova_admin_user_registry';
+export const ACTIVE_SHORTCUT_OWNER_SETTING_KEY = 'kinova_active_shortcut_owner_v1';
+
+export interface ActiveShortcutOwnerState {
+  iosEmail: string;
+  anyEmail: string;
+  updatedAt: string;
+}
 
 export interface RegisteredUser {
   email: string;
@@ -28,6 +35,7 @@ interface RegistryCache {
 }
 
 let memoryRegistryCache: RegistryCache | null = null;
+let memoryShortcutOwner: ActiveShortcutOwnerState | null = null;
 const CACHE_TTL_MS = 15_000;
 
 export function getAdminAppsScriptEndpoint(): { targetUrl: string; apiKey: string } | null {
@@ -147,7 +155,74 @@ export async function getAdminUserRegistry(forceFresh = false): Promise<Record<s
     fetchedAt: now,
   };
 
+  if (res?.success && res.data && res.data[ACTIVE_SHORTCUT_OWNER_SETTING_KEY]) {
+    try {
+      const parsedOwner = JSON.parse(String(res.data[ACTIVE_SHORTCUT_OWNER_SETTING_KEY]));
+      if (parsedOwner && typeof parsedOwner === 'object') {
+        memoryShortcutOwner = {
+          iosEmail: String(parsedOwner.iosEmail || '').trim().toLowerCase(),
+          anyEmail: String(parsedOwner.anyEmail || '').trim().toLowerCase(),
+          updatedAt: String(parsedOwner.updatedAt || ''),
+        };
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   return users;
+}
+
+export async function setActiveShortcutOwner(
+  email: string | null,
+  userAgent?: string | null
+): Promise<void> {
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  const isIos = /iPhone|iPad|iPod|Macintosh.*Mobile/i.test(String(userAgent || ''));
+
+  const current: ActiveShortcutOwnerState = memoryShortcutOwner || {
+    iosEmail: '',
+    anyEmail: '',
+    updatedAt: '',
+  };
+
+  const nextIosEmail = isIos || !cleanEmail ? cleanEmail : current.iosEmail || cleanEmail;
+  const nextAnyEmail = cleanEmail;
+
+  if (
+    memoryShortcutOwner &&
+    memoryShortcutOwner.iosEmail === nextIosEmail &&
+    memoryShortcutOwner.anyEmail === nextAnyEmail
+  ) {
+    return;
+  }
+
+  const nextState: ActiveShortcutOwnerState = {
+    iosEmail: nextIosEmail,
+    anyEmail: nextAnyEmail,
+    updatedAt: new Date().toISOString(),
+  };
+  memoryShortcutOwner = nextState;
+
+  await fetchAdminAppsScript('POST', 'updateSettings', {
+    key: ACTIVE_SHORTCUT_OWNER_SETTING_KEY,
+    value: JSON.stringify(nextState),
+    mutationId: `sc_owner_${Date.now()}`,
+  });
+}
+
+export async function getActiveShortcutOwnerEmail(forceFresh = true): Promise<string | null> {
+  const users = await getAdminUserRegistry(forceFresh || !memoryShortcutOwner);
+  if (memoryShortcutOwner) {
+    const resolved = (memoryShortcutOwner.iosEmail || memoryShortcutOwner.anyEmail || '')
+      .trim()
+      .toLowerCase();
+    return resolved || null;
+  }
+  const latestUser = Object.values(users)
+    .filter((u) => u.status !== 'blocked' && u.lastActiveAt)
+    .sort((a, b) => new Date(b.lastActiveAt).getTime() - new Date(a.lastActiveAt).getTime())[0];
+  return latestUser ? latestUser.email.trim().toLowerCase() : null;
 }
 
 async function saveAdminUserRegistry(users: Record<string, RegisteredUser>): Promise<boolean> {

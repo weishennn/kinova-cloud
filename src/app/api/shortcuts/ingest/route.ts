@@ -1,6 +1,8 @@
 import crypto from 'crypto';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getLocalDateString, parseLocalDate } from '@/lib/date-helper';
+import { getValidGoogleSession } from '@/lib/google-auth';
+import { getActiveShortcutOwnerEmail, setActiveShortcutOwner } from '@/lib/admin-registry';
 import {
   acknowledgeShortcutDraft,
   claimShortcutDraft,
@@ -52,7 +54,7 @@ function getMalaysiaTodayDateString(): string {
 
 export const maxDuration = 60;
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const origin = new URL(req.url).origin;
 
@@ -128,7 +130,7 @@ export async function POST(req: Request) {
     }
 
     const body = (await req.json()) as Record<string, unknown>;
-    const userEmail = (
+    const explicitEmail = (
       req.headers.get('x-shortcut-email') ||
       (typeof body?.email === 'string' ? body.email : '') ||
       (typeof body?.userEmail === 'string' ? body.userEmail : '') ||
@@ -136,6 +138,16 @@ export async function POST(req: Request) {
     )
       .trim()
       .toLowerCase();
+    const { session } = await getValidGoogleSession(req);
+    const userEmail = (
+      explicitEmail ||
+      session?.email ||
+      (await getActiveShortcutOwnerEmail(true)) ||
+      ''
+    )
+      .trim()
+      .toLowerCase();
+
     const today = sanitizeDate(body?.today) || getMalaysiaTodayDateString();
     const rawMode = typeof body?.mode === 'string' ? body.mode.trim().toLowerCase() : '';
     const hasScreenshot = typeof body?.imageBase64 === 'string' && body.imageBase64.trim().length > 0;
@@ -147,7 +159,10 @@ export async function POST(req: Request) {
     // Mode A: Apple Pay (iOS Shortcuts Wallet / Transaction Trigger)
     if (mode === 'apple_pay') {
       const normalizedDraft = normalizeApplePayTransactionInput(body, today);
-      const saved = saveShortcutQuickDraft(normalizedDraft);
+      const saved = saveShortcutQuickDraft({
+        ...normalizedDraft,
+        ownerEmail: userEmail || undefined,
+      });
       const ledgerRes = await recordShortcutDraftToLedger(saved, {
         autoRecord: shouldAutoRecord,
         userEmail,
@@ -350,6 +365,7 @@ Shape: {"amount": number|null, "currency": string, "currencySymbol": string, "cu
     });
 
     const saved = saveShortcutQuickDraft({
+      ownerEmail: userEmail || undefined,
       source: 'back_tap_screenshot',
       amount: moneyRes.amount,
       currency: moneyRes.currency,
@@ -425,7 +441,7 @@ Shape: {"amount": number|null, "currency": string, "currencySymbol": string, "cu
   }
 }
 
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const ackId = (searchParams.get('ack') || '').trim();
@@ -437,9 +453,20 @@ export async function GET(req: Request) {
       );
     }
 
+    const { session } = await getValidGoogleSession(req);
+    const callerEmail = (session?.email || '').trim().toLowerCase();
+    if (!callerEmail) {
+      return NextResponse.json(
+        { success: false, draft: null, recentAutoRecorded: [] },
+        { status: 200, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
+    void setActiveShortcutOwner(callerEmail, req.headers.get('user-agent')).catch(() => {});
+
     const id = (searchParams.get('id') || 'latest').trim();
-    const draft = claimShortcutDraft(id, Date.now(), false);
-    const recentAutoRecorded = await getRecentShortcutAutoRecorded();
+    const draft = claimShortcutDraft(id, Date.now(), false, callerEmail);
+    const recentAutoRecorded = await getRecentShortcutAutoRecorded(callerEmail);
 
     return NextResponse.json(
       {

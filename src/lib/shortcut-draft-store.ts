@@ -13,6 +13,7 @@ export interface ShortcutQuickDraft {
   source: ShortcutTriggerSource;
   createdAt: string;
   expiresAtMs: number;
+  ownerEmail?: string;
   amount: number | null;
   currency: string;
   currencyAmbiguous: boolean;
@@ -109,6 +110,7 @@ const MERCHANT_CATEGORY_RULES: Array<{ regex: RegExp; category: string }> = [
 
 export interface ShortcutAutoRecordedEntry {
   transactionId: string;
+  ownerEmail: string;
   sheetName: string;
   recordedAt: string;
   rowData: Record<string, unknown>;
@@ -461,6 +463,7 @@ export function encodeOpaqueDraftTicket(draft: ShortcutQuickDraft, secret?: stri
 
     const payload = JSON.stringify({
       draftId: draft.draftId,
+      ownerEmail: draft.ownerEmail,
       source: draft.source,
       createdAt: draft.createdAt,
       expiresAtMs: draft.expiresAtMs,
@@ -551,14 +554,24 @@ export function getShortcutQuickDraft(draftId: string, nowMs = Date.now()): Shor
 
 /**
  * Retrieves the most recent fresh shortcut draft created within maxAgeMs (defaults to 180 seconds).
+ * Strictly filters by ownerEmail when provided so drafts never cross accounts.
  */
-export function getLatestFreshShortcutDraft(maxAgeMs = 180_000, nowMs = Date.now()): ShortcutQuickDraft | null {
+export function getLatestFreshShortcutDraft(
+  maxAgeMs = 180_000,
+  nowMs = Date.now(),
+  ownerEmail?: string
+): ShortcutQuickDraft | null {
   pruneExpiredShortcutDrafts(nowMs);
+  const cleanOwner = (ownerEmail || '').trim().toLowerCase();
   const store = getDraftStore();
   const acked = getAckedDraftSet();
   let latest: ShortcutQuickDraft | null = null;
   for (const draft of store.values()) {
     if (acked.has(draft.draftId)) continue;
+    if (cleanOwner) {
+      const draftOwner = (draft.ownerEmail || '').trim().toLowerCase();
+      if (draftOwner !== cleanOwner) continue;
+    }
     const age = nowMs - new Date(draft.createdAt).getTime();
     if (age <= maxAgeMs) {
       if (!latest || new Date(draft.createdAt).getTime() >= new Date(latest.createdAt).getTime()) {
@@ -594,19 +607,28 @@ export function acknowledgeShortcutDraft(draftId?: string | null): boolean {
 /**
  * Claims a quick draft (by draftId or 'latest').
  * Only deletes immediately if deleteNow is true, preventing premature loss if iOS aborts an in-flight fetch during app switch.
+ * When ownerEmail is provided, strictly verifies the draft belongs to that user.
  */
 export function claimShortcutDraft(
   draftId?: string | null,
   nowMs = Date.now(),
-  deleteNow = false
+  deleteNow = false,
+  ownerEmail?: string
 ): ShortcutQuickDraft | null {
   const cleanId = String(draftId || '').trim();
+  const cleanOwner = (ownerEmail || '').trim().toLowerCase();
   let draft: ShortcutQuickDraft | null = null;
 
   if (!cleanId || cleanId === 'latest') {
-    draft = getLatestFreshShortcutDraft(180_000, nowMs);
+    draft = getLatestFreshShortcutDraft(180_000, nowMs, cleanOwner);
   } else {
     draft = getShortcutQuickDraft(cleanId, nowMs);
+    if (draft && cleanOwner) {
+      const draftOwner = (draft.ownerEmail || '').trim().toLowerCase();
+      if (draftOwner && draftOwner !== cleanOwner) {
+        draft = null;
+      }
+    }
   }
 
   if (draft && deleteNow) {
@@ -899,7 +921,7 @@ function resolveShortcutSheetsEndpoint(): { url: string; apiKey: string } {
   return { url, apiKey };
 }
 
-const RECENT_AUTO_RECORDED_SETTING_KEY = 'kinova_recent_shortcut_records';
+const RECENT_AUTO_RECORDED_SETTING_KEY = 'kinova_recent_shortcut_records_v2';
 const RECENT_AUTO_RECORDED_TTL_MS = 15 * 60 * 1000;
 let lastRemoteAutoRecordedFetchMs = 0;
 
@@ -907,11 +929,17 @@ export async function recordRecentShortcutAutoRecorded(
   entry: ShortcutAutoRecordedEntry,
   persistRemote = true
 ): Promise<void> {
+  const cleanOwner = (entry.ownerEmail || '').trim().toLowerCase();
+  if (!cleanOwner) return;
+  const normalizedEntry: ShortcutAutoRecordedEntry = {
+    ...entry,
+    ownerEmail: cleanOwner,
+  };
   const store = getRecentAutoRecordedStore();
-  store.set(entry.transactionId, entry);
+  store.set(normalizedEntry.transactionId, normalizedEntry);
   const now = Date.now();
   for (const [k, v] of store.entries()) {
-    if (now - new Date(v.recordedAt).getTime() > RECENT_AUTO_RECORDED_TTL_MS) {
+    if (now - new Date(v.recordedAt).getTime() > RECENT_AUTO_RECORDED_TTL_MS || !v.ownerEmail) {
       store.delete(k);
     }
   }
@@ -921,8 +949,9 @@ export async function recordRecentShortcutAutoRecorded(
     const { url, apiKey } = resolveShortcutSheetsEndpoint();
     if (!url) return;
     const recentList = Array.from(store.values())
+      .filter((v) => Boolean(v.ownerEmail))
       .sort((a, b) => new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime())
-      .slice(0, 10);
+      .slice(0, 15);
     await fetch(`${url}?apiKey=${encodeURIComponent(apiKey)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -942,9 +971,13 @@ export async function recordRecentShortcutAutoRecorded(
 }
 
 export async function getRecentShortcutAutoRecorded(
+  ownerEmail?: string,
   nowMs = Date.now(),
   fetchRemote = true
 ): Promise<ShortcutAutoRecordedEntry[]> {
+  const cleanOwner = (ownerEmail || '').trim().toLowerCase();
+  if (!cleanOwner) return [];
+
   const store = getRecentAutoRecordedStore();
 
   if (fetchRemote && nowMs - lastRemoteAutoRecordedFetchMs > 2000) {
@@ -967,8 +1000,18 @@ export async function getRecentShortcutAutoRecorded(
             const parsed = JSON.parse(raw);
             if (Array.isArray(parsed)) {
               for (const item of parsed) {
-                if (item && typeof item.transactionId === 'string' && item.sheetName && item.rowData) {
-                  store.set(item.transactionId, item as ShortcutAutoRecordedEntry);
+                if (
+                  item &&
+                  typeof item.transactionId === 'string' &&
+                  typeof item.ownerEmail === 'string' &&
+                  item.ownerEmail.trim() &&
+                  item.sheetName &&
+                  item.rowData
+                ) {
+                  store.set(item.transactionId, {
+                    ...(item as ShortcutAutoRecordedEntry),
+                    ownerEmail: item.ownerEmail.trim().toLowerCase(),
+                  });
                 }
               }
             }
@@ -983,9 +1026,12 @@ export async function getRecentShortcutAutoRecorded(
   const valid: ShortcutAutoRecordedEntry[] = [];
   for (const [k, v] of store.entries()) {
     const age = nowMs - new Date(v.recordedAt).getTime();
-    if (age <= RECENT_AUTO_RECORDED_TTL_MS) {
-      valid.push(v);
-    } else {
+    const itemOwner = (v.ownerEmail || '').trim().toLowerCase();
+    if (age <= RECENT_AUTO_RECORDED_TTL_MS && itemOwner) {
+      if (itemOwner === cleanOwner) {
+        valid.push(v);
+      }
+    } else if (age > RECENT_AUTO_RECORDED_TTL_MS || !itemOwner) {
       store.delete(k);
     }
   }
@@ -995,6 +1041,7 @@ export async function getRecentShortcutAutoRecorded(
 /**
  * Directly records a validated shortcut transaction to Google Sheets when amount > 0
  * and no duplicate fingerprint is detected, returning a concise notification string for iOS Shortcuts.
+ * Strictly routes to the SINGLE active ownerEmail's ledger (never dual-writes across accounts).
  */
 export async function recordShortcutDraftToLedger(
   draft: ShortcutQuickDraft,
@@ -1087,103 +1134,161 @@ export async function recordShortcutDraftToLedger(
 
   let recordedSuccessfully = false;
   let duplicateDetected = false;
+  let ownerEmail = (options.userEmail || draft.ownerEmail || '').trim().toLowerCase();
 
-  // 1. Write to Admin Apps Script ledger (used when logged in as admin account weishenooi2003@gmail.com)
-  const fetchFn = options.fetchImpl || fetch;
-  const endpoint = resolveShortcutSheetsEndpoint();
-  const url = options.scriptUrl || endpoint.url;
-  const apiKey = options.apiSecret || endpoint.apiKey;
-
-  if (url) {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        const res = await fetchFn(`${url}?apiKey=${encodeURIComponent(apiKey)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({
-            action: 'addRow',
-            sheetName,
-            rowData,
-            mutationId,
-            key: apiKey,
-            apiKey,
-          }),
-          cache: 'no-store',
-          signal: AbortSignal.timeout(20000),
-        });
-
-        if (res.ok) {
-          const json = await res.json();
-          if (json?.data?.deduplicated) {
-            duplicateDetected = true;
-            break;
+  // If custom fetchImpl is provided (e.g. unit test), execute directly against fetchImpl
+  if (options.fetchImpl) {
+    const endpoint = resolveShortcutSheetsEndpoint();
+    const url = options.scriptUrl || endpoint.url;
+    const apiKey = options.apiSecret || endpoint.apiKey;
+    if (url) {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const res = await options.fetchImpl(`${url}?apiKey=${encodeURIComponent(apiKey)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+              action: 'addRow',
+              sheetName,
+              rowData,
+              mutationId,
+              key: apiKey,
+              apiKey,
+            }),
+            cache: 'no-store',
+            signal: AbortSignal.timeout(20000),
+          });
+          if (res.ok) {
+            const json = await res.json();
+            if (json?.data?.deduplicated) {
+              duplicateDetected = true;
+              break;
+            }
+            const isSuccess = Boolean(json?.success || json?.status === 'success' || json?.data?.success);
+            const isAdded = json?.data?.added !== false && !json?.data?.tombstoned;
+            if (isSuccess && isAdded) {
+              recordedSuccessfully = true;
+              break;
+            }
           }
-          const isSuccess = Boolean(json?.success || json?.status === 'success' || json?.data?.success);
-          const isAdded = json?.data?.added !== false && !json?.data?.tombstoned;
-          if (isSuccess && isAdded) {
-            recordedSuccessfully = true;
-            break;
-          }
-          if (attempt === 0 && String(json?.message || '').toLowerCase().includes('lock')) {
-            await new Promise((r) => setTimeout(r, 1200));
-            continue;
-          }
-        }
-      } catch {
-        if (attempt === 0) {
-          await new Promise((r) => setTimeout(r, 800));
-          continue;
+        } catch {
+          // retry once
         }
       }
     }
-  }
-
-  // 2. Also sync to Google Drive OAuth ledger(s) for active non-admin accounts (or specific userEmail)
-  if (!options.fetchImpl && !duplicateDetected) {
+  } else {
+    // Production path: resolve SINGLE active account owner and route EXCLUSIVELY to that user's ledger
     try {
-      const [{ getAdminUserRegistry }, { isAdminEmail, refreshGoogleAccessToken }, { executeUserGoogleAction }] =
-        await Promise.all([
-          import('./admin-registry'),
-          import('./google-auth'),
-          import('./google-sheets-user-engine'),
-        ]);
+      const [
+        { getAdminUserRegistry, getActiveShortcutOwnerEmail },
+        { isAdminEmail, refreshGoogleAccessToken },
+        { executeUserGoogleAction },
+      ] = await Promise.all([
+        import('./admin-registry'),
+        import('./google-auth'),
+        import('./google-sheets-user-engine'),
+      ]);
 
-      const registry = await getAdminUserRegistry(false);
-      const explicitEmail = (options.userEmail || '').trim().toLowerCase();
-      const targetUsers = explicitEmail && registry[explicitEmail]
-        ? [registry[explicitEmail]]
-        : Object.values(registry).filter(
-            (u) => u.refreshToken && u.status !== 'blocked' && (!isAdminEmail(u.email) || !recordedSuccessfully)
-          );
+      if (!ownerEmail) {
+        ownerEmail = (await getActiveShortcutOwnerEmail(true)) || '';
+      }
 
-      for (const regUser of targetUsers) {
-        if (!regUser?.refreshToken) continue;
-        const refreshed = await refreshGoogleAccessToken(regUser.refreshToken);
-        if (!refreshed?.accessToken) continue;
-        const session = {
-          email: regUser.email,
-          name: regUser.name || regUser.email.split('@')[0],
-          picture: regUser.picture,
-          accessToken: refreshed.accessToken,
-          refreshToken: regUser.refreshToken,
-          expiresAt: refreshed.expiresAt,
-          spreadsheetId: regUser.spreadsheetId,
-          invoicesFolderId: regUser.invoicesFolderId,
-          backupsFolderId: regUser.backupsFolderId,
-          isAdmin: isAdminEmail(regUser.email),
+      if (!ownerEmail) {
+        return {
+          autoRecorded: false,
+          duplicateSkipped: false,
+          transactionId: null,
+          sheetName: null,
+          notificationTitle: '⚠️ 请先登录账号',
+          notificationText: '⚠️ 请先在 Kinova 登录账号后再使用快捷指令',
         };
-        const { result } = await executeUserGoogleAction(session, 'addRow', {
-          sheetName,
-          rowData,
-          mutationId,
-        });
-        const resObj = (result || {}) as Record<string, unknown>;
-        if (resObj.added !== false && !resObj.tombstoned) {
-          recordedSuccessfully = true;
+      }
+
+      draft.ownerEmail = ownerEmail;
+
+      if (isAdminEmail(ownerEmail)) {
+        // Admin account (weishenooi2003@gmail.com) -> write EXCLUSIVELY to Admin Apps Script ledger
+        const endpoint = resolveShortcutSheetsEndpoint();
+        const url = options.scriptUrl || endpoint.url;
+        const apiKey = options.apiSecret || endpoint.apiKey;
+        if (url) {
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            try {
+              const res = await fetch(`${url}?apiKey=${encodeURIComponent(apiKey)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({
+                  action: 'addRow',
+                  sheetName,
+                  rowData,
+                  mutationId,
+                  key: apiKey,
+                  apiKey,
+                }),
+                cache: 'no-store',
+                signal: AbortSignal.timeout(20000),
+              });
+
+              if (res.ok) {
+                const json = await res.json();
+                if (json?.data?.deduplicated) {
+                  duplicateDetected = true;
+                  break;
+                }
+                const isSuccess = Boolean(json?.success || json?.status === 'success' || json?.data?.success);
+                const isAdded = json?.data?.added !== false && !json?.data?.tombstoned;
+                if (isSuccess && isAdded) {
+                  recordedSuccessfully = true;
+                  break;
+                }
+                if (attempt === 0 && String(json?.message || '').toLowerCase().includes('lock')) {
+                  await new Promise((r) => setTimeout(r, 1200));
+                  continue;
+                }
+              }
+            } catch {
+              if (attempt === 0) {
+                await new Promise((r) => setTimeout(r, 800));
+                continue;
+              }
+            }
+          }
+        }
+      } else {
+        // Non-admin OAuth account (e.g. deathroyale0365@gmail.com) -> write EXCLUSIVELY to their personal Google Drive spreadsheet
+        const registry = await getAdminUserRegistry(false);
+        const regUser = registry[ownerEmail];
+        if (regUser?.refreshToken && regUser.status !== 'blocked') {
+          const refreshed = await refreshGoogleAccessToken(regUser.refreshToken);
+          if (refreshed?.accessToken) {
+            const session = {
+              email: regUser.email,
+              name: regUser.name || regUser.email.split('@')[0],
+              picture: regUser.picture,
+              accessToken: refreshed.accessToken,
+              refreshToken: regUser.refreshToken,
+              expiresAt: refreshed.expiresAt,
+              spreadsheetId: regUser.spreadsheetId,
+              invoicesFolderId: regUser.invoicesFolderId,
+              backupsFolderId: regUser.backupsFolderId,
+              isAdmin: false,
+            };
+            const { result } = await executeUserGoogleAction(session, 'addRow', {
+              sheetName,
+              rowData,
+              mutationId,
+            });
+            const resObj = (result || {}) as Record<string, unknown>;
+            if (resObj.deduplicated) {
+              duplicateDetected = true;
+            } else if (resObj.added !== false && !resObj.tombstoned) {
+              recordedSuccessfully = true;
+            }
+          }
         }
       }
-    } catch (oauthErr) {
-      console.warn('[Shortcut] OAuth Drive ledger write warning:', oauthErr);
+    } catch (err) {
+      console.warn('[Shortcut] Single-owner ledger write error:', err);
     }
   }
 
@@ -1204,6 +1309,7 @@ export async function recordShortcutDraftToLedger(
     await recordRecentShortcutAutoRecorded(
       {
         transactionId: txId,
+        ownerEmail: ownerEmail || 'test@example.com',
         sheetName,
         recordedAt: new Date().toISOString(),
         rowData,

@@ -462,6 +462,11 @@ export function RecordPaymentModal() {
         toast.error(decodeURIComponent(shortcutError), { duration: 6000 });
       }
 
+      const activeEmail = (localStorage.getItem('cashflow_google_user_email') || '')
+        .trim()
+        .toLowerCase();
+      if (!activeEmail) return;
+
       const urlDraftId = params.get('quickDraft');
       const targetId = urlDraftId && /^drf_[a-zA-Z0-9_-]{16,}$/i.test(urlDraftId.trim())
         ? urlDraftId.trim()
@@ -476,11 +481,19 @@ export function RecordPaymentModal() {
         if (!res.ok) return;
         const json = await res.json();
 
-        // Sync any background auto-recorded Double Tap transactions into local SWR + React Query cache in 0ms
+        // Re-verify active account hasn't changed while fetch was in flight
+        const currentEmail = (localStorage.getItem('cashflow_google_user_email') || '')
+          .trim()
+          .toLowerCase();
+        if (!currentEmail || currentEmail !== activeEmail) return;
+
+        const syncedStorageKey = `kinova_synced_shortcut_tx_ids_${activeEmail}`;
+
+        // Sync any background auto-recorded Double Tap transactions belonging strictly to activeEmail
         if (Array.isArray(json?.recentAutoRecorded) && json.recentAutoRecorded.length > 0) {
           let syncedIds: string[] = [];
           try {
-            const rawSynced = localStorage.getItem('kinova_synced_shortcut_tx_ids');
+            const rawSynced = localStorage.getItem(syncedStorageKey);
             if (rawSynced) {
               const parsedSynced = JSON.parse(rawSynced);
               if (Array.isArray(parsedSynced)) syncedIds = parsedSynced.map(String);
@@ -492,6 +505,8 @@ export function RecordPaymentModal() {
           const newlyAdded: Array<{ sheetName: string; rowData: Record<string, unknown> }> = [];
 
           for (const item of json.recentAutoRecorded) {
+            const itemOwner = String(item?.ownerEmail || '').trim().toLowerCase();
+            if (!itemOwner || itemOwner !== activeEmail) continue;
             const txId = String(item?.transactionId || '').trim();
             const sheetName = String(item?.sheetName || '').trim();
             const rowData = item?.rowData as Record<string, unknown> | undefined;
@@ -505,7 +520,7 @@ export function RecordPaymentModal() {
           if (newlyAdded.length > 0) {
             try {
               localStorage.setItem(
-                'kinova_synced_shortcut_tx_ids',
+                syncedStorageKey,
                 JSON.stringify(Array.from(syncedSet).slice(-50))
               );
             } catch {
@@ -535,7 +550,10 @@ export function RecordPaymentModal() {
         if (!json?.success || !json?.draft) return;
 
         const draft = json.draft as ShortcutQuickDraft;
-        const draftUniqueKey = `${draft.fingerprint || ''}|${draft.createdAt || draft.draftId}`;
+        const draftOwner = String(draft.ownerEmail || '').trim().toLowerCase();
+        if (draftOwner && draftOwner !== activeEmail) return;
+
+        const draftUniqueKey = `${activeEmail}|${draft.fingerprint || ''}|${draft.createdAt || draft.draftId}`;
         try {
           const lastClaimed = sessionStorage.getItem('kinova_last_claimed_draft');
           if (lastClaimed === draftUniqueKey) {

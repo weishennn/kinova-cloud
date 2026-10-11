@@ -7,6 +7,7 @@ import { motion } from 'framer-motion';
 import { ShieldAlert, ShieldCheck, LogOut, HardDrive, Smartphone, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { LOCAL_ONLY_ENDPOINT_SENTINEL, SYNC_STATUS_EVENT } from '@/lib/cache-manager';
+import { clearInFlightOptimisticRows } from '@/lib/sheets-data';
 
 export interface GoogleAccountProfile {
   email: string;
@@ -47,11 +48,12 @@ const AuthContext = createContext<AuthContextType>({
 
 /**
  * Completely wipes all cached sheet data, settings, plans, and pending queues from localStorage
- * whenever switching accounts or signing out so two accounts can NEVER see each other's data.
+ * and in-memory optimistic caches whenever switching accounts or signing out so two accounts can NEVER see each other's data.
  */
 function wipeAccountStorage(includeLocalStore = true) {
   if (typeof window === 'undefined') return;
   try {
+    clearInFlightOptimisticRows();
     const keysToRemove: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
@@ -62,7 +64,8 @@ function wipeAccountStorage(includeLocalStore = true) {
         k.startsWith('cashflow_month_') ||
         k.startsWith('cashflow_cache_') ||
         k.startsWith('cashflow_pre_sync_') ||
-        k.startsWith('cashflow_sync_')
+        k.startsWith('cashflow_sync_') ||
+        k.startsWith('kinova_synced_shortcut_tx_ids')
       ) {
         keysToRemove.push(k);
       }
@@ -86,6 +89,10 @@ function wipeAccountStorage(includeLocalStore = true) {
       'cashflow_pending_settings_mutations',
       'cashflow_deleted_tombstones_v1',
       'cashflow_sync_conflicts_v1',
+      'cashflow_integrity_baseline_v1',
+      'cashflow_plan_versions_v1',
+      'cashflow_pre_migration_backup_done_v1',
+      'cashflow_last_backup_check_at',
       'cashflow_last_synced_at',
       'cashflow_last_sync_error',
       'cashflow_last_sync_error_at',
@@ -98,6 +105,11 @@ function wipeAccountStorage(includeLocalStore = true) {
 
     if (includeLocalStore) {
       localStorage.removeItem('cashflow_local_store');
+    }
+    try {
+      sessionStorage.removeItem('kinova_last_claimed_draft');
+    } catch {
+      // ignore
     }
   } catch (e) {
     console.warn('Failed to wipe account storage:', e);
