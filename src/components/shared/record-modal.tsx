@@ -24,6 +24,7 @@ import { toast } from 'sonner';
 import { formatClaimFileName } from '@/lib/claim-helper';
 import { ACCOUNTING_BASE_CURRENCY, COMMON_CURRENCIES, getAmountInBaseCurrency, getCachedRatesToMyr } from '@/lib/currency';
 import { isSafeTransactionAmount, isSafeTransactionConversion } from '@/lib/money-validation';
+import { acquireSubmitLock, releaseSubmitLock } from '@/lib/submit-lock';
 import { buildTransactionBaseRecord } from '@/lib/conflict-policy';
 import { compressImageFile } from '@/lib/image-compressor';
 import {
@@ -131,6 +132,7 @@ export function RecordPaymentModal() {
   const [shortcutCurrencyConfirmed, setShortcutCurrencyConfirmed] = useState<boolean>(true);
   const [shortcutDuplicateConfirmed, setShortcutDuplicateConfirmed] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const submitLockRef = useRef(false);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
   const [showReceiptModal, setShowReceiptModal] = useState<boolean>(false);
@@ -154,6 +156,12 @@ export function RecordPaymentModal() {
       setFirstPaymentDate(today);
     }
   }, [isQuickAddOpen, editTransaction, shortcutDraft]);
+
+  useEffect(() => {
+    if (!isQuickAddOpen) {
+      releaseSubmitLock(submitLockRef);
+    }
+  }, [isQuickAddOpen]);
 
   useEffect(() => {
     if (!firstPaymentDate) {
@@ -685,6 +693,7 @@ export function RecordPaymentModal() {
   }, [shortcutDraft, amount, transactionCurrency, date, description, yearTransactions]);
 
   const closeModal = () => {
+    setIsSubmitting(false);
     setEditTransaction(null);
     setShortcutDraft(null);
     setShortcutCurrencyConfirmed(true);
@@ -867,22 +876,31 @@ export function RecordPaymentModal() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!acquireSubmitLock(submitLockRef)) return;
+    setIsSubmitting(true);
+
     if (!isSafeTransactionAmount(amount)) {
       toast.error(
         shortcutDraft
           ? '系统未能从快捷指令获取有效金额，请补充大于 0 且最多两位小数的金额后再保存'
           : 'Enter an amount greater than zero with at most two decimal places'
       );
+      releaseSubmitLock(submitLockRef);
+      setIsSubmitting(false);
       return;
     }
 
     if (shortcutDraft && !description.trim()) {
       toast.error('系统未能识别商家/消费描述，请补充商家或说明后再保存');
+      releaseSubmitLock(submitLockRef);
+      setIsSubmitting(false);
       return;
     }
 
     if (shortcutDraft && !shortcutCurrencyConfirmed) {
       toast.error('货币符号存在歧义，请先在上方草稿提示框中点击确认实际币种后再保存');
+      releaseSubmitLock(submitLockRef);
+      setIsSubmitting(false);
       return;
     }
 
@@ -892,6 +910,8 @@ export function RecordPaymentModal() {
 
     if (hasShortcutDuplicates && !shortcutDuplicateConfirmed) {
       toast.error('检测到同日同金额疑似重复交易，请核对上方提示并点击「确认这是另一笔真实消费」后再保存');
+      releaseSubmitLock(submitLockRef);
+      setIsSubmitting(false);
       return;
     }
 
@@ -903,6 +923,8 @@ export function RecordPaymentModal() {
         effectiveInstallmentMonths > MAX_INSTALLMENT_MONTHS)
     ) {
       toast.error(`Installment duration must be a whole number from ${MIN_INSTALLMENT_MONTHS} to ${MAX_INSTALLMENT_MONTHS} months`);
+      releaseSubmitLock(submitLockRef);
+      setIsSubmitting(false);
       return;
     }
 
@@ -965,6 +987,8 @@ export function RecordPaymentModal() {
     const baseRate = targetAmount > 0 ? baseAmount / targetAmount : 1;
     if (!isSafeTransactionConversion(targetAmount, baseAmount, baseRate)) {
       toast.error('This amount or its currency conversion is outside the safe numeric range.');
+      releaseSubmitLock(submitLockRef);
+      setIsSubmitting(false);
       return;
     }
 
@@ -1138,7 +1162,6 @@ export function RecordPaymentModal() {
     }
 
     // Close immediately so the next expense can be entered while cloud sync runs.
-    setIsSubmitting(false);
     setShortcutDraft(null);
     setShortcutCurrencyConfirmed(true);
     setShortcutDuplicateConfirmed(false);
@@ -1152,6 +1175,7 @@ export function RecordPaymentModal() {
     setPayslipEpf('');
     setPayslipSocso('');
     setTransactionCurrency('MYR');
+    setIsSubmitting(false);
     setIsInstallment(false);
     setInstallmentMonths(12);
     setCustomInstallmentMonths('');

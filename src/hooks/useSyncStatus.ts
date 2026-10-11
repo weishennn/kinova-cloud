@@ -6,11 +6,26 @@ import { sheetsData } from '@/lib/sheets-data';
 import { syncCloudSettingsWithLocal } from '@/lib/cloud-settings-sync';
 import { getApiUrl } from '@/lib/sheets-api';
 
+const INITIAL_SYNC_STATUS: ReturnType<typeof getSyncStatus> = {
+  isOnline: true,
+  hasCloudEndpoint: true,
+  isConnected: false,
+  pendingCount: 0,
+  failedCount: 0,
+  conflictCount: 0,
+  lastSyncedAt: null,
+  lastSyncError: null,
+};
+
 export function useSyncStatus() {
-  const [status, setStatus] = useState(() => getSyncStatus());
+  // Keep the server render and the client's first render identical. Browser
+  // connectivity and localStorage are only read after hydration.
+  const [status, setStatus] = useState(INITIAL_SYNC_STATUS);
+  const [isReady, setIsReady] = useState(false);
 
   const update = useCallback(() => {
     setStatus(getSyncStatus());
+    setIsReady(true);
   }, []);
 
   const flushAllPending = useCallback(async (): Promise<{ succeeded: number; failed: number }> => {
@@ -38,6 +53,7 @@ export function useSyncStatus() {
   }, [update]);
 
   useEffect(() => {
+    const initialUpdateTimeout = window.setTimeout(update, 0);
     window.addEventListener(SYNC_STATUS_EVENT, update);
     window.addEventListener('online', update);
     window.addEventListener('offline', update);
@@ -57,9 +73,9 @@ export function useSyncStatus() {
     window.addEventListener('cashflow_api_url_changed', handleConnectionChanged);
 
     // If mounted while online with pending items, flush immediately
-    if (getApiUrl() && navigator.onLine && getSyncStatus().pendingCount > 0) {
-      void flushAllPending().catch(() => {});
-    }
+    const initialFlushTimeout = getApiUrl() && navigator.onLine && getSyncStatus().pendingCount > 0
+      ? window.setTimeout(() => { void flushAllPending().catch(() => {}); }, 0)
+      : undefined;
 
     const interval = setInterval(() => {
       update();
@@ -69,6 +85,8 @@ export function useSyncStatus() {
     }, 30000); // Check every 30s for time formatting & pending outbox drain
 
     return () => {
+      window.clearTimeout(initialUpdateTimeout);
+      if (initialFlushTimeout !== undefined) window.clearTimeout(initialFlushTimeout);
       window.removeEventListener(SYNC_STATUS_EVENT, update);
       window.removeEventListener('online', update);
       window.removeEventListener('offline', update);
@@ -82,6 +100,7 @@ export function useSyncStatus() {
 
   return {
     ...status,
+    isReady,
     formattedLastSync,
     flushPending: flushAllPending,
   };

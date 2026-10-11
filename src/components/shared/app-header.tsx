@@ -8,9 +8,11 @@ import { ThemeToggle } from './theme-toggle';
 
 export function AppHeader() {
   const { isRefreshing, justRefreshed, syncAndRefresh } = useSyncAndRefresh();
-  const { isOnline, hasCloudEndpoint, isConnected, pendingCount, formattedLastSync, lastSyncError } = useSyncStatus();
+  const { isOnline, hasCloudEndpoint, isConnected, pendingCount, formattedLastSync, lastSyncError, isReady } = useSyncStatus();
 
-  const statusLabel = pendingCount > 0
+  const statusLabel = !isReady
+    ? 'Checking sync…'
+    : pendingCount > 0
     ? `${pendingCount} pending`
     : !isOnline
       ? 'Offline'
@@ -23,7 +25,13 @@ export function AppHeader() {
             : isConnected
               ? 'Connected'
               : `Cached · ${formattedLastSync}`;
-  const statusClass = pendingCount > 0 || !isOnline || lastSyncError ? 'is-warning' : isConnected ? 'is-healthy' : '';
+  const statusClass = !isReady
+    ? ''
+    : pendingCount > 0 || !isOnline || lastSyncError
+      ? 'is-warning'
+      : isConnected
+        ? 'is-healthy'
+        : '';
 
   return (
     <header className="cockpit-topbar">
