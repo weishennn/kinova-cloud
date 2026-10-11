@@ -30,6 +30,7 @@ import { toast } from 'sonner';
 import { useLockBodyScroll } from '@/hooks/useLockBodyScroll';
 import { confirmAction } from '@/stores/confirm-dialog-store';
 import { buildTransactionBaseRecord } from '@/lib/conflict-policy';
+import { getTransactionRecordedInfo } from '@/lib/date-helper';
 
 interface TransactionDetailModalProps {
   transaction: Transaction | null;
@@ -411,7 +412,24 @@ function TransactionDetailContent({
                   : `Original Currency: ${transaction.currency}`}
               </p>
             )}
-            <p className="text-xs text-slate-600 dark:text-zinc-400 mt-1 font-medium">{transaction.date}</p>
+            <div className="flex items-center justify-center gap-2 mt-1 flex-wrap">
+              <p className="text-xs text-slate-600 dark:text-zinc-400 font-medium">{transaction.date}</p>
+              {(() => {
+                const recInfo = getTransactionRecordedInfo(transaction);
+                if (!recInfo) return null;
+                return (
+                  <span
+                    className={`text-[11px] font-mono px-2 py-0.5 rounded-full border ${
+                      recInfo.isDifferentDay
+                        ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/25'
+                        : 'bg-slate-100 dark:bg-zinc-800/80 text-slate-500 dark:text-zinc-400 border-slate-200 dark:border-zinc-700/60'
+                    }`}
+                  >
+                    {recInfo.detailLabel}
+                  </span>
+                );
+              })()}
+            </div>
           </div>
 
           {/* Installment Badge Banner */}

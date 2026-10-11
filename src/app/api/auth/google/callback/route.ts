@@ -5,7 +5,12 @@ import {
   isAdminEmail,
   setSessionCookie,
 } from '@/lib/google-auth';
-import { getAdminUserRegistry, recordUserLogin, setActiveShortcutOwner } from '@/lib/admin-registry';
+import {
+  getAdminUserRegistry,
+  recordUserLogin,
+  resolveAdminSpreadsheetId,
+  setActiveShortcutOwner,
+} from '@/lib/admin-registry';
 import { ensureUserWorkspace } from '@/lib/google-sheets-user-engine';
 
 export async function GET(req: NextRequest) {
@@ -94,7 +99,7 @@ export async function GET(req: NextRequest) {
       accessToken,
       refreshToken,
       expiresAt: Date.now() + expiresInSec * 1000,
-      spreadsheetId: existingEntry?.spreadsheetId,
+      spreadsheetId: isAdmin ? resolveAdminSpreadsheetId() : existingEntry?.spreadsheetId,
       invoicesFolderId: existingEntry?.invoicesFolderId,
       backupsFolderId: existingEntry?.backupsFolderId,
       isAdmin,

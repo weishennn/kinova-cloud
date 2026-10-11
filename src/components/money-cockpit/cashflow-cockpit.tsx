@@ -10,7 +10,7 @@ import { useAppStore } from '@/stores/app-store';
 import { Transaction, useTransactions } from '@/hooks/useTransactions';
 import { useMonthList } from '@/hooks/useSheets';
 import { getAmountInBaseCurrency, ACCOUNTING_BASE_CURRENCY } from '@/lib/currency';
-import { getLocalDateString, parseLocalDate } from '@/lib/date-helper';
+import { getLocalDateString, getTransactionRecordedInfo, parseLocalDate } from '@/lib/date-helper';
 import { MoneyOrbit } from './money-orbit';
 import { SmartQuickInput } from '@/components/shared/smart-quick-input';
 import { TransactionDetailModal } from '@/components/shared/transaction-detail-modal';
@@ -447,7 +447,18 @@ export function CashflowCockpit() {
                         <span className={`cockpit-tx-icon ${transaction.type}`}>
                           {transaction.type === 'income' ? <ArrowDownLeft size={16} aria-hidden="true" /> : transaction.type === 'investment' ? <TrendingUp size={16} aria-hidden="true" /> : <ArrowUpRight size={16} aria-hidden="true" />}
                         </span>
-                        <span className="cockpit-tx-copy"><strong>{transaction.description || transaction.category}</strong><small>{transaction.category}{transaction.account ? ` · ${transaction.account}` : ''}{transaction.receiptUrl ? ' · Receipt attached' : ''}</small></span>
+                        <span className="cockpit-tx-copy">
+                          <strong>{transaction.description || transaction.category}</strong>
+                          <small>
+                            {transaction.category}
+                            {transaction.account ? ` · ${transaction.account}` : ''}
+                            {(() => {
+                              const rec = getTransactionRecordedInfo(transaction);
+                              return rec ? ` · ${rec.compactLabel}` : '';
+                            })()}
+                            {transaction.receiptUrl ? ' · Receipt attached' : ''}
+                          </small>
+                        </span>
                         <span className={`cockpit-tx-amount ${transaction.type}`}>{signedAmount(transaction, formatMoney)}</span>
                       </motion.button>
                     ))}

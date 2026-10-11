@@ -2,6 +2,11 @@ import { getAdminEmail, isAdminEmail } from './google-auth';
 
 export const ADMIN_REGISTRY_SETTING_KEY = 'kinova_admin_user_registry';
 export const ACTIVE_SHORTCUT_OWNER_SETTING_KEY = 'kinova_active_shortcut_owner_v1';
+export const DEFAULT_ADMIN_SPREADSHEET_ID = '1RcOND80RHFFiWnK4YbbGm4Brnekjg5q2LXk4rWl0lMU';
+
+export function resolveAdminSpreadsheetId(): string {
+  return (process.env.ADMIN_SPREADSHEET_ID || DEFAULT_ADMIN_SPREADSHEET_ID).trim();
+}
 
 export interface ActiveShortcutOwnerState {
   iosEmail: string;

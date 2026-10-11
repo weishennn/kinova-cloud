@@ -25,7 +25,7 @@ import { SmartQuickInput } from "@/components/shared/smart-quick-input"
 import { toast } from "sonner"
 import { confirmAction } from "@/stores/confirm-dialog-store"
 import { getAmountInBaseCurrency } from "@/lib/currency"
-import { getLocalDateString, getRelativeDateString, parseLocalDate } from "@/lib/date-helper"
+import { getLocalDateString, getRelativeDateString, getTransactionRecordedInfo, parseLocalDate } from "@/lib/date-helper"
 import { getTransactionTaxRelief } from "@/lib/lhdn-tax-helper"
 import { AnimatedNumber } from "@/components/shared/animated-number"
 import { CockpitPageHeading } from "@/components/money-cockpit/cockpit-page-heading"
@@ -381,6 +381,21 @@ export default function TransactionsPage() {
               {!isGrouped && (
                 <span className="text-[11px] text-slate-600 dark:text-zinc-400">{t.date}</span>
               )}
+              {(() => {
+                const rec = getTransactionRecordedInfo(t);
+                if (!rec) return null;
+                return (
+                  <span
+                    className={`text-[10px] font-mono ${
+                      rec.isDifferentDay
+                        ? 'px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20'
+                        : 'text-slate-400 dark:text-zinc-500'
+                    }`}
+                  >
+                    {rec.compactLabel}
+                  </span>
+                );
+              })()}
               {taxCat && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border border-emerald-500/25 text-[11px] font-semibold">
                   🇲🇾 LHDN: {taxCat.shortName}

@@ -164,3 +164,77 @@ export function getMonthDateRange(targetStr?: string): { from: string; to: strin
     to: `${y}-${padM}-${String(lastDay).padStart(2, '0')}`,
   };
 }
+
+export interface TransactionRecordedInfo {
+  timestampMs: number;
+  recordedDateStr: string; // YYYY-MM-DD
+  shortDate: string; // D/M or DD/MM, e.g. 12/10
+  timeStr: string; // HH:mm, e.g. 00:52
+  isDifferentDay: boolean;
+  compactLabel: string; // e.g. "12/10 00:52 记" (if different day) or "00:52 记" (if same day)
+  detailLabel: string; // e.g. "补记于 12/10 00:52" or "记录于 12/10 00:52"
+}
+
+const MIN_VALID_TX_MS = 1577836800000; // 2020-01-01
+const MAX_VALID_TX_MS = 4102444800000; // 2100-01-01
+
+/**
+ * Extracts the exact timestamp when a transaction was recorded from its ID
+ * (supports both base-10 epoch ms `tx_1728...` and base-36 epoch ms `tx_mv3q...` / `tx_sc_mv3q...`).
+ */
+export function getTransactionRecordedInfo(tx: {
+  id?: string;
+  date?: string;
+}): TransactionRecordedInfo | null {
+  const rawId = String(tx?.id || '').trim();
+  if (!rawId) return null;
+
+  let ts: number | null = null;
+
+  // 1. Check 13-digit decimal millisecond timestamp (e.g. tx_1728665520000)
+  const decMatch = rawId.match(/(?:^|_)(1[5-9]\d{11}|2\d{12}|3\d{12})(?:_|$)/);
+  if (decMatch) {
+    const parsed = Number(decMatch[1]);
+    if (Number.isFinite(parsed) && parsed >= MIN_VALID_TX_MS && parsed <= MAX_VALID_TX_MS) {
+      ts = parsed;
+    }
+  }
+
+  // 2. Check base-36 millisecond timestamp (e.g. tx_mv3q8egd or tx_sc_mv3q8egd_431df2)
+  if (ts === null) {
+    const b36Match = rawId.match(/^tx_(?:sc_|inst_|rec_|trade_)?([0-9a-z]{8,9})(?:_|$)/i);
+    if (b36Match) {
+      const parsed = parseInt(b36Match[1], 36);
+      if (Number.isFinite(parsed) && parsed >= MIN_VALID_TX_MS && parsed <= MAX_VALID_TX_MS) {
+        ts = parsed;
+      }
+    }
+  }
+
+  if (ts === null) return null;
+
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return null;
+
+  const recordedDateStr = getLocalDateString(d);
+  const day = d.getDate();
+  const month = d.getMonth() + 1;
+  const shortDate = `${day}/${month}`;
+  const hours = String(d.getHours()).padStart(2, '0');
+  const mins = String(d.getMinutes()).padStart(2, '0');
+  const timeStr = `${hours}:${mins}`;
+
+  const txDateClean = String(tx?.date || '').trim().slice(0, 10);
+  const isDifferentDay = Boolean(txDateClean && /^\d{4}-\d{2}-\d{2}$/.test(txDateClean) && txDateClean !== recordedDateStr);
+
+  return {
+    timestampMs: ts,
+    recordedDateStr,
+    shortDate,
+    timeStr,
+    isDifferentDay,
+    compactLabel: isDifferentDay ? `${shortDate} ${timeStr} 记` : `${timeStr} 记`,
+    detailLabel: isDifferentDay ? `补记于 ${shortDate} ${timeStr}` : `记录于 ${shortDate} ${timeStr}`,
+  };
+}
+
