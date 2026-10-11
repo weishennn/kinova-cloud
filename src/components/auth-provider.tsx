@@ -6,8 +6,14 @@ import { useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { ShieldAlert, ShieldCheck, LogOut, HardDrive, Smartphone, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
-import { LOCAL_ONLY_ENDPOINT_SENTINEL, SYNC_STATUS_EVENT } from '@/lib/cache-manager';
-import { clearInFlightOptimisticRows } from '@/lib/sheets-data';
+import {
+  LOCAL_ONLY_ENDPOINT_SENTINEL,
+  SYNC_STATUS_EVENT,
+  backupPendingQueuesForAccount,
+  restorePendingQueuesForAccount,
+  getPendingQueueSummary,
+} from '@/lib/cache-manager';
+import { clearInFlightOptimisticRows, sheetsData } from '@/lib/sheets-data';
 
 export interface GoogleAccountProfile {
   email: string;
@@ -155,8 +161,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const prevScope = localStorage.getItem('cashflow_active_account_scope');
 
         // CRITICAL: If switching accounts OR upgrading from pre-OAuth (prevScope === null),
-        // wipe all un-namespaced / previous account caches before rendering!
+        // backup the previous account's pending queues before wiping active cache!
         if (prevScope !== targetScope) {
+          const prevEmail = (localStorage.getItem('cashflow_google_user_email') || '').trim().toLowerCase();
+          if (prevEmail && prevEmail !== normalizedEmail) {
+            backupPendingQueuesForAccount(prevEmail);
+          }
           wipeAccountStorage(true);
           queryClient.clear();
           localStorage.setItem('cashflow_active_account_scope', targetScope);
@@ -169,6 +179,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem('cashflow_use_server_proxy', 'true');
         if (data.user.spreadsheetId) {
           localStorage.setItem(`cashflow_sheet_id_${normalizedEmail}`, String(data.user.spreadsheetId));
+        }
+
+        // Restore any offline pending mutations that were queued specifically for this user
+        const { restored } = restorePendingQueuesForAccount(normalizedEmail);
+        if (restored > 0) {
+          void sheetsData.flushPendingQueue();
+          toast.info(`已为您恢复此账号上次未同步的 ${restored} 笔离线记录，正在同步...`);
         }
 
         setGoogleUser(data.user);
@@ -203,6 +220,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [queryClient]);
 
   const signOutGoogle = useCallback(async () => {
+    const currentEmail = (googleUser?.email || localStorage.getItem('cashflow_google_user_email') || '')
+      .trim()
+      .toLowerCase();
+
+    // 1. Try to sync pending offline mutations before signing out
+    try {
+      await sheetsData.flushPendingQueue();
+    } catch {}
+
+    // 2. If any mutations remain unsynced (e.g. offline), backup to account-scoped storage
+    const summary = getPendingQueueSummary();
+    if (summary.total > 0 && currentEmail) {
+      backupPendingQueuesForAccount(currentEmail);
+      toast.warning(
+        `您有 ${summary.total} 笔离线记录尚未同步。已为您安全保存在此设备中，下次登录 ${currentEmail} 时将自动恢复并同步。`,
+        { duration: 8000 }
+      );
+    }
+
     try {
       await fetch('/api/auth/google/logout', { method: 'POST', credentials: 'same-origin' });
     } catch {}
@@ -218,7 +254,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setAuthenticated(false);
     window.dispatchEvent(new Event('cashflow_api_url_changed'));
     toast.success('Signed out cleanly');
-  }, [queryClient]);
+  }, [googleUser, queryClient]);
 
   const exitLocalMode = useCallback(() => {
     localStorage.removeItem('cashflow_local_mode_chosen');

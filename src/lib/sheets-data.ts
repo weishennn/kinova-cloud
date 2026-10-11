@@ -11,7 +11,9 @@ import {
   getDeletedTombstones,
   clearDeletedTombstone,
   isRecordTombstoned,
+  recordSyncConflict,
 } from './data-integrity';
+import { resolveNotFoundUpdatePolicy } from './conflict-policy';
 import { applyPendingTransactionUpdate } from './transaction-cache-merge';
 import { getPendingMutationDisposition, shouldKeepPendingMutationOnStartup } from './pending-mutation-policy';
 import { toast } from 'sonner';
@@ -788,19 +790,39 @@ export const sheetsData = {
 
           const resMsg = String(res.message || '');
           if (resMsg.includes('not found') || resMsg.includes('Invalid row index')) {
-            if (id && isRecordTombstoned(id)) {
-              return { success: true, pending: false };
-            }
-            const fallbackPayload = id
-              ? { ...rowData, Id: id, id, _forceRestore: true }
-              : { ...rowData, _forceRestore: true };
-            const fallbackAdd = await sheetsApi.addRow(sheetName, fallbackPayload, mutationId);
-            if (fallbackAdd.success && fallbackAdd.data?.verified !== false) {
-              if (typeof fallbackAdd.data?.rowIndex === 'number') {
-                this.optimisticUpdateRow(fallbackAdd.data.sheet || sheetName, fallbackAdd.data.rowIndex, {
-                  ...rowData,
-                  _rowIndex: fallbackAdd.data.rowIndex,
+            const isTombstoned = Boolean(id && isRecordTombstoned(id));
+            const isExplicitRestore = Boolean(rowData && rowData._forceRestore);
+            const policy = resolveNotFoundUpdatePolicy(id, isTombstoned, isExplicitRestore);
+
+            if (policy.action === 'force_restore') {
+              const fallbackPayload = id
+                ? { ...rowData, Id: id, id, _forceRestore: true }
+                : { ...rowData, _forceRestore: true };
+              const fallbackAdd = await sheetsApi.addRow(sheetName, fallbackPayload, mutationId);
+              if (fallbackAdd.success && fallbackAdd.data?.verified !== false) {
+                if (typeof fallbackAdd.data?.rowIndex === 'number') {
+                  this.optimisticUpdateRow(fallbackAdd.data.sheet || sheetName, fallbackAdd.data.rowIndex, {
+                    ...rowData,
+                    _rowIndex: fallbackAdd.data.rowIndex,
+                  });
+                }
+                return { success: true, pending: false };
+              }
+            } else {
+              // Policy: discard_and_tombstone - Record was deleted on server by another device
+              if (id) {
+                recordDeletedTombstone(id, 'transaction', sheetName);
+                recordSyncConflict({
+                  entityId: id,
+                  kind: 'transaction',
+                  serverChangedAt: Date.now(),
+                  clientMutationChangedAt: Date.now(),
+                  serverRecord: { status: 'deleted_on_server', sheetName, message: 'Record was not found on Google Sheets (deleted on another device or session).' },
+                  clientRecord: rowData,
+                  resolution: 'Edit was not applied to avoid resurrecting deleted record. Preserved in Conflict Store.'
                 });
+                this.optimisticDeleteRow(sheetName, rowIndex, id);
+                toast.warning('此记录已在云端被删除，未重新创建。您的离线修改已转存至冲突中心。');
               }
               return { success: true, pending: false };
             }
@@ -948,26 +970,39 @@ export const sheetsData = {
                 if (!rowId && (!item.rowIndex || item.rowIndex <= 1)) {
                   return true;
                 }
-                if (rowId && isRecordTombstoned(rowId)) {
-                  return true;
+                const isTombstoned = Boolean(rowId && isRecordTombstoned(rowId));
+                const isExplicitRestore = Boolean(item.rowData && item.rowData._forceRestore);
+                const policy = resolveNotFoundUpdatePolicy(rowId, isTombstoned, isExplicitRestore);
+
+                if (policy.action === 'force_restore') {
+                  const fallbackAdd = await sheetsApi.addRow(
+                    item.sheetName,
+                    { ...item.rowData, ...(rowId ? { Id: rowId, id: rowId } : {}), _forceRestore: true },
+                    mutId
+                  );
+                  return Boolean(fallbackAdd.success && fallbackAdd.data?.verified !== false);
                 }
-                const swrEntry = getSwrCachedEntry<{ success: boolean; data: SheetDataPayload }>('getSheetData', {
-                  sheetName: item.sheetName,
-                });
-                const cachedRows = swrEntry?.data?.data?.rows;
-                const existsInLocalCache = Array.isArray(cachedRows)
-                  ? Boolean(rowId && cachedRows.some((r) => String(r.Id || r.id || '').trim() === rowId))
-                  : true;
-                // If the row was already deleted / absent from local cache, discard the stale update
-                if (!existsInLocalCache) {
-                  return true;
+
+                // Policy: discard_and_tombstone - Record was deleted on server by another device
+                if (rowId) {
+                  recordDeletedTombstone(rowId, 'transaction', item.sheetName);
+                  recordSyncConflict({
+                    entityId: rowId,
+                    kind: 'transaction',
+                    serverChangedAt: Date.now(),
+                    clientMutationChangedAt: item.timestamp || Date.now(),
+                    serverRecord: {
+                      status: 'deleted_on_server',
+                      sheetName: item.sheetName,
+                      message: 'Record was not found on Google Sheets during sync (deleted by another device or session).'
+                    },
+                    clientRecord: item.rowData || {},
+                    resolution: 'Edit was not applied to avoid resurrecting deleted record. Preserved in Conflict Store.'
+                  });
+                  this.optimisticDeleteRow(item.sheetName, item.rowIndex, rowId);
+                  toast.warning('一笔离线修改的目标记录已在云端被删除，未复活该记录。原修改已转存至冲突中心。');
                 }
-                const fallbackAdd = await sheetsApi.addRow(
-                  item.sheetName,
-                  { ...item.rowData, ...(rowId ? { Id: rowId, id: rowId } : {}), _forceRestore: true },
-                  mutId
-                );
-                return Boolean(fallbackAdd.success && fallbackAdd.data?.verified !== false);
+                return true;
               };
 
               try {

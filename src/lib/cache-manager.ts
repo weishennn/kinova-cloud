@@ -158,7 +158,10 @@ export function pruneExpiredCache(): { prunedKeys: string[] } {
       if (
         PROTECTED_STORAGE_KEYS.has(key) ||
         key.startsWith('cashflow_pre_sync_plan_backup_v2_') ||
-        key.startsWith('cashflow_sync_v3_device_checked_')
+        key.startsWith('cashflow_sync_v3_device_checked_') ||
+        key.startsWith('cashflow_pending_queue_scoped:') ||
+        key.startsWith('cashflow_pending_plan_scoped:') ||
+        key.startsWith('cashflow_pending_settings_scoped:')
       ) {
         return;
       }
@@ -514,6 +517,116 @@ export function removePendingSettingMutations(
   }
 }
 
+export function getPendingQueueSummary(): {
+  total: number;
+  transactions: number;
+  plans: number;
+  settings: number;
+} {
+  if (typeof window === 'undefined') return { total: 0, transactions: 0, plans: 0, settings: 0 };
+  const txCount = getPendingMutations().length;
+  let planCount = 0;
+  try {
+    const raw = localStorage.getItem(CACHE_KEYS.PENDING_PLAN_QUEUE);
+    if (raw) {
+      const p = JSON.parse(raw);
+      if (Array.isArray(p)) planCount = p.length;
+    }
+  } catch {}
+  const settingsCount = getPendingSettingMutations().length;
+  return {
+    total: txCount + planCount + settingsCount,
+    transactions: txCount,
+    plans: planCount,
+    settings: settingsCount,
+  };
+}
+
+export function backupPendingQueuesForAccount(accountEmail: string): { backedUp: number } {
+  if (typeof window === 'undefined') return { backedUp: 0 };
+  const cleanEmail = (accountEmail || '').trim().toLowerCase();
+  if (!cleanEmail) return { backedUp: 0 };
+
+  const summary = getPendingQueueSummary();
+  if (summary.total === 0) return { backedUp: 0 };
+
+  try {
+    const txRaw = localStorage.getItem(CACHE_KEYS.PENDING_QUEUE);
+    const planRaw = localStorage.getItem(CACHE_KEYS.PENDING_PLAN_QUEUE);
+    const settingsRaw = localStorage.getItem(CACHE_KEYS.PENDING_SETTINGS_QUEUE);
+
+    if (txRaw) localStorage.setItem(`cashflow_pending_queue_scoped:${cleanEmail}`, txRaw);
+    if (planRaw) localStorage.setItem(`cashflow_pending_plan_scoped:${cleanEmail}`, planRaw);
+    if (settingsRaw) localStorage.setItem(`cashflow_pending_settings_scoped:${cleanEmail}`, settingsRaw);
+
+    return { backedUp: summary.total };
+  } catch (err) {
+    console.warn('[CacheManager] Failed to backup pending queues for account:', err);
+    return { backedUp: 0 };
+  }
+}
+
+export function restorePendingQueuesForAccount(accountEmail: string): { restored: number } {
+  if (typeof window === 'undefined') return { restored: 0 };
+  const cleanEmail = (accountEmail || '').trim().toLowerCase();
+  if (!cleanEmail) return { restored: 0 };
+
+  try {
+    let restoredCount = 0;
+    const txKey = `cashflow_pending_queue_scoped:${cleanEmail}`;
+    const planKey = `cashflow_pending_plan_scoped:${cleanEmail}`;
+    const settingsKey = `cashflow_pending_settings_scoped:${cleanEmail}`;
+
+    const txRaw = localStorage.getItem(txKey);
+    if (txRaw) {
+      const parsed = JSON.parse(txRaw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const current = getPendingMutations();
+        const merged = coalescePendingMutations([...current, ...parsed]);
+        localStorage.setItem(CACHE_KEYS.PENDING_QUEUE, JSON.stringify(merged));
+        restoredCount += parsed.length;
+      }
+      localStorage.removeItem(txKey);
+    }
+
+    const planRaw = localStorage.getItem(planKey);
+    if (planRaw) {
+      const parsed = JSON.parse(planRaw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        let currentPlans: unknown[] = [];
+        try {
+          const rawP = localStorage.getItem(CACHE_KEYS.PENDING_PLAN_QUEUE);
+          if (rawP) currentPlans = JSON.parse(rawP);
+        } catch {}
+        const merged = [...(Array.isArray(currentPlans) ? currentPlans : []), ...parsed];
+        localStorage.setItem(CACHE_KEYS.PENDING_PLAN_QUEUE, JSON.stringify(merged));
+        restoredCount += parsed.length;
+      }
+      localStorage.removeItem(planKey);
+    }
+
+    const settingsRaw = localStorage.getItem(settingsKey);
+    if (settingsRaw) {
+      const parsed = JSON.parse(settingsRaw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const current = getPendingSettingMutations();
+        const merged = [...current, ...parsed];
+        localStorage.setItem(CACHE_KEYS.PENDING_SETTINGS_QUEUE, JSON.stringify(merged));
+        restoredCount += parsed.length;
+      }
+      localStorage.removeItem(settingsKey);
+    }
+
+    if (restoredCount > 0) {
+      dispatchSyncStatus();
+    }
+    return { restored: restoredCount };
+  } catch (err) {
+    console.warn('[CacheManager] Failed to restore pending queues for account:', err);
+    return { restored: 0 };
+  }
+}
+
 export function enqueuePendingMutation(
   mutation: Omit<PendingMutation, 'id' | 'timestamp' | 'retryCount'>
 ): PendingMutation {
@@ -757,6 +870,6 @@ export function getSyncStatus(): {
 }
 
 function dispatchSyncStatus(): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return;
   window.dispatchEvent(new CustomEvent(SYNC_STATUS_EVENT, { detail: getSyncStatus() }));
 }

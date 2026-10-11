@@ -20,6 +20,15 @@ export const COMMON_CURRENCIES = [
  * The app displays its cross-currency summaries in MYR. Keep the accounting
  * base explicit so a transaction's entered currency is never mistaken for a
  * MYR amount when it is included in a total.
+ *
+ * ACCOUNTING CONVENTION (Standard Line-Item Conversion Rule):
+ * In accordance with standard financial accounting principles (such as IFRS / IAS 21),
+ * each individual foreign-currency transaction is converted to MYR at its entry/transaction
+ * date and stored with its line-item BaseAmount rounded to 2 decimal places (cents),
+ * along with the FxRateToBase used.
+ * Aggregate reports and month/category totals calculate the sum of these recorded BaseAmount values.
+ * This guarantees that summing rows in any filtered view matches the individual line-item
+ * MYR values displayed on screen, preventing discrepancies between line views and aggregate reports.
  */
 export const ACCOUNTING_BASE_CURRENCY = 'MYR';
 
