@@ -92,7 +92,6 @@ function wipeAccountStorage(includeLocalStore = true, wipePendingQueues = true) 
       'cashflow_baseline_income',
       'cashflow_emergency_reserve',
       'cashflow_currency',
-      'cashflow_custom_pin',
       ...(wipePendingQueues
         ? [
             'cashflow_pending_queue',

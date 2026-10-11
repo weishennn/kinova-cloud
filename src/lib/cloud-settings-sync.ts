@@ -18,7 +18,6 @@ export const CLOUD_SYNC_KEYS = {
   BASELINE_INCOME: 'cashflow_baseline_income',
   EMERGENCY_RESERVE: 'cashflow_emergency_reserve',
   CURRENCY: 'cashflow_currency',
-  CUSTOM_PIN: 'cashflow_custom_pin',
 } as const;
 
 export const SETTINGS_UPDATED_EVENT = 'cashflow_cloud_settings_synced';
@@ -174,7 +173,6 @@ async function runCloudSettingsSync(): Promise<SettingsSyncResult> {
       CLOUD_SYNC_KEYS.BASELINE_INCOME,
       CLOUD_SYNC_KEYS.EMERGENCY_RESERVE,
       CLOUD_SYNC_KEYS.CURRENCY,
-      CLOUD_SYNC_KEYS.CUSTOM_PIN,
     ] as const;
 
     managedSettingKeys.forEach((key) => {
@@ -184,12 +182,9 @@ async function runCloudSettingsSync(): Promise<SettingsSyncResult> {
       }
       const localVal = localStorage.getItem(key);
       const rawCloudVal = cloudSettings[key];
-      let cloudVal = rawCloudVal !== undefined && rawCloudVal !== null && String(rawCloudVal) !== ''
+      const cloudVal = rawCloudVal !== undefined && rawCloudVal !== null && String(rawCloudVal) !== ''
         ? String(rawCloudVal)
         : '';
-      if (key === CLOUD_SYNC_KEYS.CUSTOM_PIN && cloudVal && /^\d{1,4}$/.test(cloudVal.trim())) {
-        cloudVal = cloudVal.trim().padStart(4, '0');
-      }
       if (cloudVal && !localVal) {
         localStorage.setItem(key, cloudVal);
         window.dispatchEvent(new CustomEvent(SETTINGS_UPDATED_EVENT, { detail: { key, value: cloudVal } }));

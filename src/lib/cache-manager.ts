@@ -88,7 +88,6 @@ export const PROTECTED_STORAGE_KEYS = new Set<string>([
   'cashflow_lhdn_tax_caps',
   'cashflow_lhdn_tax_rate',
   'cashflow_lhdn_tax_profile',
-  'cashflow_custom_pin',
   'cashflow_trusted_device',
   'cashflow_banner_dismissed',
   'cashflow_test_mode',

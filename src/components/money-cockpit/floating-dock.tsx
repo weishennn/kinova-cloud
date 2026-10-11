@@ -82,7 +82,7 @@ export function FloatingDock() {
         </nav>
       )}
       <nav className="cockpit-dock" aria-label="Main navigation">
-        <Link href="/" onClick={() => { setMenuOpen(false); setInvestmentTradeMenuOpen(false); }} aria-current={pathname === '/' || pathname === '/redesign' ? 'page' : undefined} className={`cockpit-dock-link ${pathname === '/' || pathname === '/redesign' ? 'is-active' : ''}`}>
+        <Link href="/" onClick={() => { setMenuOpen(false); setInvestmentTradeMenuOpen(false); }} aria-current={pathname === '/' ? 'page' : undefined} className={`cockpit-dock-link ${pathname === '/' ? 'is-active' : ''}`}>
           <LayoutDashboard size={19} aria-hidden="true" /><span>Home</span>
         </Link>
         <Link href="/transactions" onClick={() => { setMenuOpen(false); setInvestmentTradeMenuOpen(false); }} aria-current={pathname === '/transactions' ? 'page' : undefined} className={`cockpit-dock-link ${pathname === '/transactions' ? 'is-active' : ''}`}>

@@ -42,13 +42,11 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
 
-  // Never cache dynamic API routes or external cloud APIs (Google Sheets, MSAL, Gemini)
+  // Never cache dynamic API routes or external cloud APIs (Google Sheets, Gemini)
   if (
     url.pathname.startsWith('/api/') ||
     url.hostname.includes('google.com') ||
-    url.hostname.includes('googleapis.com') ||
-    url.hostname.includes('microsoftonline.com') ||
-    url.hostname.includes('microsoft.com')
+    url.hostname.includes('googleapis.com')
   ) {
     return;
   }

@@ -12,7 +12,7 @@ import { FloatingDock } from '@/components/money-cockpit/floating-dock';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isCockpit = pathname === '/' || pathname === '/redesign';
+  const isCockpit = pathname === '/';
 
   // Global non-blocking Cloud SOT sync (zero latency, zero data loss)
   useCloudSettingsSync();
