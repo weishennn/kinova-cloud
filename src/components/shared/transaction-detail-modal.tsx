@@ -377,7 +377,7 @@ function TransactionDetailContent({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.92, y: 20 }}
             transition={{ type: 'spring' as const, stiffness: 380, damping: 28 }}
-            className="relative z-10 w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain touch-pan-y [-webkit-overflow-scrolling:touch] custom-scrollbar rounded-3xl border border-slate-200 dark:border-white/[0.12] bg-white/95 dark:bg-[#090d16]/95 backdrop-blur-2xl p-6 shadow-2xl space-y-5"
+            className="cockpit-modal-frame relative z-10 w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain touch-pan-y [-webkit-overflow-scrolling:touch] custom-scrollbar rounded-3xl border border-slate-200 dark:border-white/[0.12] bg-white/95 dark:bg-[#090d16]/95 backdrop-blur-2xl px-5 pt-3.5 pb-5 shadow-2xl space-y-3.5"
           >
             <CockpitModalHeader
               title={transaction.description || transaction.category}
@@ -390,7 +390,7 @@ function TransactionDetailContent({
             />
 
           {/* Amount Hero */}
-          <div className="text-center py-2">
+          <div className="text-center py-0.5">
             <div
               className={`text-3xl sm:text-4xl font-black font-mono tabular-nums tracking-tight ${
                 isIncome
@@ -430,7 +430,7 @@ function TransactionDetailContent({
           )}
 
           {/* Details Breakdown */}
-          <div className="space-y-3 rounded-2xl bg-white/90 dark:bg-zinc-900/40 border border-slate-200 dark:border-zinc-800/80 p-4 text-xs">
+          <div className="space-y-2.5 rounded-2xl bg-white/90 dark:bg-zinc-900/40 border border-slate-200 dark:border-zinc-800/80 px-3.5 py-3 text-xs">
             <div>
               <span className="text-slate-500 dark:text-zinc-400 block mb-0.5 font-medium">Description</span>
               <p className="text-sm font-semibold text-slate-950 dark:text-white break-words">
