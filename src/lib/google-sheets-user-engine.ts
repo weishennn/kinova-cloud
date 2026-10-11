@@ -1,5 +1,5 @@
 import { GoogleUserSession } from './google-auth';
-import { updateUserDriveIds } from './admin-registry';
+import { getAdminUserRegistry, updateUserDriveIds } from './admin-registry';
 
 export const DEFAULT_MONTHLY_HEADERS = [
   'Id', 'Date', 'Type', 'Category', 'SubCategory', 'Description',
@@ -96,7 +96,7 @@ async function findDriveItemByName(
   mimeType: string
 ): Promise<string | null> {
   const q = `name = '${name.replace(/'/g, "\\'")}' and mimeType = '${mimeType}' and trashed = false`;
-  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=5`;
+  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&orderBy=createdTime&fields=files(id,name,createdTime)&pageSize=20`;
   const res = await googleApiFetch(url, accessToken);
   if (!res.ok) return null;
   const data = await res.json();
@@ -104,6 +104,70 @@ async function findDriveItemByName(
     return String(data.files[0].id);
   }
   return null;
+}
+
+/**
+ * Finds all 'Kinova CashFlow' spreadsheets created by this app in the user's Drive,
+ * keeps the primary one (oldest or preferredId), and moves any extra empty duplicate
+ * spreadsheets to Google Drive Trash so the user's Drive stays clean with only 1 file.
+ */
+async function findAndDeduplicateUserSpreadsheets(
+  accessToken: string,
+  preferredId?: string
+): Promise<string | null> {
+  const q = `name = 'Kinova CashFlow' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`;
+  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&orderBy=createdTime&fields=files(id,name,createdTime)&pageSize=50`;
+  const res = await googleApiFetch(url, accessToken);
+  if (!res.ok) return null;
+  const data = await res.json();
+  const files: Array<{ id: string; name: string; createdTime?: string }> = Array.isArray(data.files)
+    ? data.files
+    : [];
+
+  if (files.length === 0) {
+    return findDriveItemByName(accessToken, 'CashFlow 记账', 'application/vnd.google-apps.spreadsheet');
+  }
+
+  const keepFile = (preferredId && files.find((f) => f.id === preferredId)) || files[0];
+  const keepId = String(keepFile.id);
+
+  if (files.length > 1) {
+    const currentMonth = getCurrentYearMonth();
+    const duplicates = files.filter((f) => f.id !== keepId);
+    // Clean up empty duplicate spreadsheets in the background
+    void (async () => {
+      for (const dup of duplicates) {
+        try {
+          // Verify duplicate has no user transaction rows before moving to Trash
+          const checkUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
+            dup.id
+          )}/values/${encodeURIComponent(`'${currentMonth}'!A2:A5`)}`;
+          const checkRes = await googleApiFetch(checkUrl, accessToken);
+          let isEmpty = true;
+          if (checkRes.ok) {
+            const valData = await checkRes.json();
+            if (Array.isArray(valData.values) && valData.values.length > 0) {
+              isEmpty = false;
+            }
+          }
+          if (isEmpty) {
+            await googleApiFetch(
+              `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(dup.id)}`,
+              accessToken,
+              {
+                method: 'PATCH',
+                body: JSON.stringify({ trashed: true }),
+              }
+            );
+          }
+        } catch {
+          // Ignore individual cleanup errors
+        }
+      }
+    })();
+  }
+
+  return keepId;
 }
 
 async function ensureDriveFolder(accessToken: string, folderName: string, existingId?: string): Promise<string> {
@@ -315,27 +379,46 @@ export async function ensureUserWorkspace(session: GoogleUserSession): Promise<{
 
   const initPromise = (async (): Promise<ResolvedWorkspace> => {
     let spreadsheetId = session.spreadsheetId || cached?.spreadsheetId || '';
+    let invoicesFolderId = session.invoicesFolderId || cached?.invoicesFolderId || '';
+    let backupsFolderId = session.backupsFolderId || cached?.backupsFolderId || '';
     let meta: SpreadsheetMetadata | null = null;
     let changed = false;
 
-    if (spreadsheetId) {
-      meta = await getSpreadsheetMetadata(spreadsheetId, session.accessToken);
+    // 1. If session cookie didn't have spreadsheetId yet, check Admin Registry first
+    if (!spreadsheetId) {
+      try {
+        const registry = await getAdminUserRegistry(false);
+        const regEntry = registry[emailKey];
+        if (regEntry?.spreadsheetId) {
+          spreadsheetId = regEntry.spreadsheetId;
+          invoicesFolderId = invoicesFolderId || regEntry.invoicesFolderId || '';
+          backupsFolderId = backupsFolderId || regEntry.backupsFolderId || '';
+          changed = true;
+        }
+      } catch {
+        // Ignore registry read errors
+      }
     }
 
-    if (!meta) {
-      const foundId =
-        (await findDriveItemByName(session.accessToken, 'Kinova CashFlow', 'application/vnd.google-apps.spreadsheet')) ||
-        (await findDriveItemByName(session.accessToken, 'CashFlow 记账', 'application/vnd.google-apps.spreadsheet'));
+    // 2. Also run Drive search + duplicate cleanup if possible
+    const driveFoundId = await findAndDeduplicateUserSpreadsheets(session.accessToken, spreadsheetId);
+    if (driveFoundId && !spreadsheetId) {
+      spreadsheetId = driveFoundId;
+      changed = true;
+    }
 
-      if (foundId) {
-        meta = await getSpreadsheetMetadata(foundId, session.accessToken);
+    if (spreadsheetId) {
+      meta = await getSpreadsheetMetadata(spreadsheetId, session.accessToken);
+      if (!meta && driveFoundId && driveFoundId !== spreadsheetId) {
+        meta = await getSpreadsheetMetadata(driveFoundId, session.accessToken);
         if (meta) {
-          spreadsheetId = foundId;
+          spreadsheetId = driveFoundId;
           changed = true;
         }
       }
     }
 
+    // 3. Only create a new spreadsheet if none exists in session, Registry, or Drive
     if (!meta) {
       spreadsheetId = await createAndInitializeUserSpreadsheet(session.accessToken);
       meta = await getSpreadsheetMetadata(spreadsheetId, session.accessToken);
@@ -346,29 +429,42 @@ export async function ensureUserWorkspace(session: GoogleUserSession): Promise<{
       throw new Error('Could not open or initialize Google Sheet in your Google Drive.');
     }
 
-    const invoicesFolderId = await ensureDriveFolder(
-      session.accessToken,
-      'CashFlow Invoices',
-      session.invoicesFolderId || cached?.invoicesFolderId
-    );
-    const backupsFolderId = await ensureDriveFolder(
-      session.accessToken,
-      'CashFlow Backups',
-      session.backupsFolderId || cached?.backupsFolderId
-    );
+    // 4. Immediately lock spreadsheetId onto session BEFORE optional Drive folder creation
+    session.spreadsheetId = spreadsheetId;
 
-    if (invoicesFolderId !== session.invoicesFolderId || backupsFolderId !== session.backupsFolderId) {
-      changed = true;
+    // 5. Make Drive folder creation non-fatal (so if Drive API is still propagating/disabled,
+    // it NEVER throws or loses spreadsheetId or triggers duplicate sheet creation!)
+    try {
+      const resolvedInvoices = await ensureDriveFolder(
+        session.accessToken,
+        'CashFlow Invoices',
+        invoicesFolderId
+      );
+      if (resolvedInvoices && resolvedInvoices !== session.invoicesFolderId) {
+        invoicesFolderId = resolvedInvoices;
+        changed = true;
+      }
+    } catch (folderErr) {
+      console.warn('[Workspace] Optional Invoices folder init skipped:', folderErr);
+    }
+
+    try {
+      const resolvedBackups = await ensureDriveFolder(
+        session.accessToken,
+        'CashFlow Backups',
+        backupsFolderId
+      );
+      if (resolvedBackups && resolvedBackups !== session.backupsFolderId) {
+        backupsFolderId = resolvedBackups;
+        changed = true;
+      }
+    } catch (folderErr) {
+      console.warn('[Workspace] Optional Backups folder init skipped:', folderErr);
     }
 
     session.spreadsheetId = spreadsheetId;
     session.invoicesFolderId = invoicesFolderId;
     session.backupsFolderId = backupsFolderId;
-    void updateUserDriveIds(session.email, {
-      spreadsheetId,
-      invoicesFolderId,
-      backupsFolderId,
-    });
 
     const result: ResolvedWorkspace = {
       spreadsheetId,
@@ -379,6 +475,15 @@ export async function ensureUserWorkspace(session: GoogleUserSession): Promise<{
       cachedAt: Date.now(),
     };
     userWorkspaceCache.set(emailKey, result);
+
+    if (changed) {
+      await updateUserDriveIds(session.email, {
+        spreadsheetId,
+        invoicesFolderId,
+        backupsFolderId,
+      });
+    }
+
     return result;
   })();
 
