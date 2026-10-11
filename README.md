@@ -80,8 +80,7 @@ APPS_SCRIPT_API_KEY=your_apps_script_api_key
 CASHFLOW_PROXY_TOKEN=your_proxy_token
 KINOVA_SHORTCUT_TOKEN=your_shortcut_token
 
-# 4. Optional App Lock PIN & Trixpense Integration
-NEXT_PUBLIC_APP_PIN=0000
+# 4. Optional Trixpense Integration
 NEXT_PUBLIC_SPLITWISE_APP_URL=https://your-trixpense-url.vercel.app
 ```
 

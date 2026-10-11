@@ -910,7 +910,7 @@ export default function SettingsPage() {
                   <span>Permanent Expiry Exemption</span>
                 </div>
                 <p className="text-slate-600 dark:text-zinc-400 text-[11px] leading-relaxed">
-                  Recurring commitments, installment plans, budgets, currency preferences, and your 4-digit PIN are permanently exempt from cache cleanup and synced with Google Sheets.
+                  Recurring commitments, installment plans, budgets, and currency preferences are permanently exempt from cache cleanup and synced with Google Sheets.
                 </p>
               </div>
 
