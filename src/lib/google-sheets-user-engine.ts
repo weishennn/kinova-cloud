@@ -128,44 +128,104 @@ async function findAndDeduplicateUserSpreadsheets(
     return findDriveItemByName(accessToken, 'CashFlow 记账', 'application/vnd.google-apps.spreadsheet');
   }
 
-  const keepFile = (preferredId && files.find((f) => f.id === preferredId)) || files[0];
-  const keepId = String(keepFile.id);
-
-  if (files.length > 1) {
-    const currentMonth = getCurrentYearMonth();
-    const duplicates = files.filter((f) => f.id !== keepId);
-    // Clean up empty duplicate spreadsheets in the background
-    void (async () => {
-      for (const dup of duplicates) {
-        try {
-          // Verify duplicate has no user transaction rows before moving to Trash
-          const checkUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
-            dup.id
-          )}/values/${encodeURIComponent(`'${currentMonth}'!A2:A5`)}`;
-          const checkRes = await googleApiFetch(checkUrl, accessToken);
-          let isEmpty = true;
-          if (checkRes.ok) {
-            const valData = await checkRes.json();
-            if (Array.isArray(valData.values) && valData.values.length > 0) {
-              isEmpty = false;
-            }
-          }
-          if (isEmpty) {
-            await googleApiFetch(
-              `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(dup.id)}`,
-              accessToken,
-              {
-                method: 'PATCH',
-                body: JSON.stringify({ trashed: true }),
-              }
-            );
-          }
-        } catch {
-          // Ignore individual cleanup errors
-        }
-      }
-    })();
+  if (files.length === 1) {
+    return String(files[0].id);
   }
+
+  // Multiple 'Kinova CashFlow' sheets exist: inspect current month rows across all of them so
+  // we NEVER pick an empty duplicate over a sheet with recorded transactions, and merge any
+  // transactions from duplicates into the single kept sheet before trashing duplicates.
+  const currentMonth = getCurrentYearMonth();
+  const inspected = await Promise.all(
+    files.map(async (f) => {
+      try {
+        const checkUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
+          f.id
+        )}/values/${encodeURIComponent(`'${currentMonth}'!A1:N200`)}?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING`;
+        const checkRes = await googleApiFetch(checkUrl, accessToken);
+        if (!checkRes.ok) return { id: String(f.id), dataRows: [] as unknown[][] };
+        const valData = await checkRes.json();
+        const rawVals: unknown[][] = Array.isArray(valData.values) ? valData.values : [];
+        if (rawVals.length === 0) return { id: String(f.id), dataRows: [] as unknown[][] };
+        const firstCell = String(rawVals[0]?.[0] ?? '').trim().toLowerCase();
+        const startIdx = firstCell === 'id' ? 1 : 0;
+        const dataRows = rawVals
+          .slice(startIdx)
+          .filter((r) => Array.isArray(r) && r.some((cell) => String(cell ?? '').trim() !== ''));
+        return { id: String(f.id), dataRows };
+      } catch {
+        return { id: String(f.id), dataRows: [] as unknown[][] };
+      }
+    })
+  );
+
+  const preferredEntry = preferredId ? inspected.find((e) => e.id === preferredId) : undefined;
+  const nonEmptyEntries = inspected.filter((e) => e.dataRows.length > 0);
+
+  let keepEntry = preferredEntry && preferredEntry.dataRows.length > 0 ? preferredEntry : undefined;
+  if (!keepEntry && nonEmptyEntries.length > 0) {
+    keepEntry = nonEmptyEntries.reduce((best, curr) =>
+      curr.dataRows.length >= best.dataRows.length ? curr : best
+    );
+  }
+  if (!keepEntry) {
+    keepEntry = preferredEntry || inspected[0];
+  }
+
+  const keepId = keepEntry.id;
+  const seenIds = new Set<string>(
+    keepEntry.dataRows.map((r) => String(r?.[0] ?? '').trim()).filter(Boolean)
+  );
+
+  // Rescue any transactions from other duplicate sheets into keepId, then trash all duplicates
+  const rowsToRescue: unknown[][] = [];
+  for (const entry of nonEmptyEntries) {
+    if (entry.id === keepId) continue;
+    for (const r of entry.dataRows) {
+      const rowId = String(r?.[0] ?? '').trim();
+      if (rowId && !seenIds.has(rowId)) {
+        seenIds.add(rowId);
+        rowsToRescue.push(r);
+      } else if (!rowId) {
+        rowsToRescue.push(r);
+      }
+    }
+  }
+
+  if (rowsToRescue.length > 0) {
+    try {
+      await googleApiFetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
+          keepId
+        )}/values/${encodeURIComponent(`'${currentMonth}'!A1`)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+        accessToken,
+        {
+          method: 'POST',
+          body: JSON.stringify({ values: rowsToRescue }),
+        }
+      );
+    } catch {
+      // Ignore merge error
+    }
+  }
+
+  const duplicates = inspected.filter((e) => e.id !== keepId);
+  void (async () => {
+    for (const dup of duplicates) {
+      try {
+        await googleApiFetch(
+          `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(dup.id)}`,
+          accessToken,
+          {
+            method: 'PATCH',
+            body: JSON.stringify({ trashed: true }),
+          }
+        );
+      } catch {
+        // Ignore individual cleanup errors
+      }
+    }
+  })();
 
   return keepId;
 }
@@ -349,7 +409,7 @@ export async function ensureUserWorkspace(session: GoogleUserSession): Promise<{
 }> {
   const emailKey = session.email.trim().toLowerCase();
   const cached = userWorkspaceCache.get(emailKey);
-  if (cached && Date.now() - cached.cachedAt < 45_000) {
+  if (cached && Date.now() - cached.cachedAt < 10 * 60 * 1000) {
     const changed =
       session.spreadsheetId !== cached.spreadsheetId ||
       session.invoicesFolderId !== cached.invoicesFolderId ||
@@ -402,7 +462,7 @@ export async function ensureUserWorkspace(session: GoogleUserSession): Promise<{
 
     // 2. Also run Drive search + duplicate cleanup if possible
     const driveFoundId = await findAndDeduplicateUserSpreadsheets(session.accessToken, spreadsheetId);
-    if (driveFoundId && !spreadsheetId) {
+    if (driveFoundId && driveFoundId !== spreadsheetId) {
       spreadsheetId = driveFoundId;
       changed = true;
     }
@@ -476,13 +536,11 @@ export async function ensureUserWorkspace(session: GoogleUserSession): Promise<{
     };
     userWorkspaceCache.set(emailKey, result);
 
-    if (changed) {
-      await updateUserDriveIds(session.email, {
-        spreadsheetId,
-        invoicesFolderId,
-        backupsFolderId,
-      });
-    }
+    await updateUserDriveIds(session.email, {
+      spreadsheetId,
+      invoicesFolderId,
+      backupsFolderId,
+    });
 
     return result;
   })();
@@ -585,11 +643,21 @@ function parseValuesToRows(sheetName: string, values: unknown[][], fallbackHeade
   if (!values || values.length === 0) {
     return { headers: fallbackHeaders, rows: [] as Record<string, unknown>[] };
   }
-  const headers = (values[0] || []).map((h) => String(h ?? '').trim()).filter(Boolean);
-  const effectiveHeaders = headers.length > 0 ? headers : fallbackHeaders;
+  const firstRow = (values[0] || []).map((h) => String(h ?? '').trim()).filter(Boolean);
+  const firstCellLower = (firstRow[0] || '').toLowerCase();
+  const isHeaderRow =
+    firstRow.length > 0 &&
+    (fallbackHeaders.some((fh) => fh.toLowerCase() === firstCellLower) ||
+      firstCellLower === 'id' ||
+      firstCellLower === 'ticker' ||
+      firstCellLower === 'month' ||
+      firstCellLower === 'key');
+
+  const effectiveHeaders = isHeaderRow ? firstRow : fallbackHeaders;
+  const startIdx = isHeaderRow ? 1 : 0;
   const rows: Record<string, unknown>[] = [];
 
-  for (let i = 1; i < values.length; i++) {
+  for (let i = startIdx; i < values.length; i++) {
     const rowArr = values[i] || [];
     const rowObj: Record<string, unknown> = {
       _rowIndex: i + 1,
@@ -1001,10 +1069,18 @@ export async function executeUserGoogleAction(
 
       await ensureSheetExists(spreadsheetId, accessToken, meta, targetSheetName);
       const values = await readSheetValues(spreadsheetId, accessToken, targetSheetName);
-      const headers =
-        values.length > 0 && values[0].length > 0
-          ? values[0].map((h) => String(h).trim()).filter(Boolean)
-          : getDefaultHeadersForSheet(targetSheetName);
+      const defaultHeaders = getDefaultHeadersForSheet(targetSheetName);
+      const firstRow = values.length > 0 ? values[0].map((h) => String(h ?? '').trim()).filter(Boolean) : [];
+      const firstCellLower = (firstRow[0] || '').toLowerCase();
+      const hasValidHeader =
+        firstRow.length > 0 &&
+        (defaultHeaders.some((dh) => dh.toLowerCase() === firstCellLower) ||
+          firstCellLower === 'id' ||
+          firstCellLower === 'ticker' ||
+          firstCellLower === 'month' ||
+          firstCellLower === 'key');
+
+      const headers = hasValidHeader ? firstRow : defaultHeaders;
 
       const idIndex = headers.findIndex((h) => h.toLowerCase() === 'id');
       if (idIndex >= 0 && !rowData.Id && !rowData.id) {
@@ -1021,19 +1097,20 @@ export async function executeUserGoogleAction(
             verified: true,
             verifiedId: requestedId,
             id: requestedId,
+            sheet: targetSheetName,
             sheetName: targetSheetName,
           });
         }
       }
 
-      if (idIndex >= 0 && requestedId && values.length > 1) {
-        for (let i = 1; i < values.length; i++) {
+      if (idIndex >= 0 && requestedId && values.length > (hasValidHeader ? 1 : 0)) {
+        for (let i = hasValidHeader ? 1 : 0; i < values.length; i++) {
           if (String(values[i]?.[idIndex] ?? '').trim() === requestedId) {
             const existingRowIndex = i + 1;
             const updatedValues = headers.map((h, idx) =>
               Object.prototype.hasOwnProperty.call(rowData, h) ? rowData[h] : (values[i]?.[idx] ?? '')
             );
-            await googleApiFetch(
+            const putRes = await googleApiFetch(
               `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${targetSheetName}'!A${existingRowIndex}`)}?valueInputOption=USER_ENTERED`,
               accessToken,
               {
@@ -1041,6 +1118,10 @@ export async function executeUserGoogleAction(
                 body: JSON.stringify({ values: [updatedValues] }),
               }
             );
+            if (!putRes.ok) {
+              const errText = await putRes.text();
+              throw new Error(`Google Sheets PUT failed: ${errText}`);
+            }
             return wrap({
               added: true,
               duplicatePrevented: true,
@@ -1048,6 +1129,7 @@ export async function executeUserGoogleAction(
               verifiedId: requestedId,
               id: requestedId,
               rowIndex: existingRowIndex,
+              sheet: targetSheetName,
               sheetName: targetSheetName,
             });
           }
@@ -1059,7 +1141,34 @@ export async function executeUserGoogleAction(
       }
 
       const newRow = headers.map((h) => (rowData[h] !== undefined ? rowData[h] : ''));
-      await googleApiFetch(
+
+      if (!hasValidHeader) {
+        const rowsToWrite = values.length > 0 ? [headers, ...values, newRow] : [headers, newRow];
+        const initPutRes = await googleApiFetch(
+          `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${targetSheetName}'!A1`)}?valueInputOption=USER_ENTERED`,
+          accessToken,
+          {
+            method: 'PUT',
+            body: JSON.stringify({ values: rowsToWrite }),
+          }
+        );
+        if (!initPutRes.ok) {
+          const errText = await initPutRes.text();
+          throw new Error(`Google Sheets header+row write failed: ${errText}`);
+        }
+        return wrap({
+          added: true,
+          verified: true,
+          verifiedId: requestedId,
+          rowIndex: rowsToWrite.length,
+          sheet: targetSheetName,
+          sheetName: targetSheetName,
+          id: requestedId,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+
+      const appendRes = await googleApiFetch(
         `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${targetSheetName}'!A1`)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
         accessToken,
         {
@@ -1068,11 +1177,17 @@ export async function executeUserGoogleAction(
         }
       );
 
+      if (!appendRes.ok) {
+        const errText = await appendRes.text();
+        throw new Error(`Google Sheets append failed: ${errText}`);
+      }
+
       return wrap({
         added: true,
         verified: true,
         verifiedId: requestedId,
         rowIndex: values.length + 1,
+        sheet: targetSheetName,
         sheetName: targetSheetName,
         id: requestedId,
         updatedAt: new Date().toISOString(),
@@ -1181,6 +1296,7 @@ export async function executeUserGoogleAction(
           verified: true,
           verifiedId: requestedId,
           fromSheet: targetSheetName,
+          sheet: newMonthStr,
           sheetName: newMonthStr,
           id: requestedId,
           updatedAt: new Date().toISOString(),
@@ -1191,7 +1307,7 @@ export async function executeUserGoogleAction(
         Object.prototype.hasOwnProperty.call(rowData, h) ? rowData[h] : (existingRow[idx] ?? '')
       );
 
-      await googleApiFetch(
+      const updateRes = await googleApiFetch(
         `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${targetSheetName}'!A${matchedRow}`)}?valueInputOption=USER_ENTERED`,
         accessToken,
         {
@@ -1199,6 +1315,11 @@ export async function executeUserGoogleAction(
           body: JSON.stringify({ values: [updatedRow] }),
         }
       );
+
+      if (!updateRes.ok) {
+        const errText = await updateRes.text();
+        throw new Error(`Google Sheets update failed: ${errText}`);
+      }
 
       if (targetSheetName === 'Trades') {
         await syncPortfolioFromTradesUser(spreadsheetId, accessToken, meta);
@@ -1210,6 +1331,7 @@ export async function executeUserGoogleAction(
         verifiedId: requestedId || String(matchedRow),
         id: requestedId || undefined,
         rowIndex: matchedRow,
+        sheet: targetSheetName,
         sheetName: targetSheetName,
         updatedAt: new Date().toISOString(),
       });

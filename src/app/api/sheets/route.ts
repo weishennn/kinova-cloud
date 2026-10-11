@@ -40,6 +40,11 @@ export async function GET(req: NextRequest) {
     // Non-admin Google users always read/write their own personal Google Drive
     if (!session.isAdmin) {
       try {
+        const cookieHadSheetId = Boolean(session.spreadsheetId);
+        const headerSheetId = (req.headers.get('x-kinova-spreadsheet-id') || '').trim();
+        if (!session.spreadsheetId && headerSheetId) {
+          session.spreadsheetId = headerSheetId;
+        }
         const action = req.nextUrl.searchParams.get('action') || 'ping';
         const params: Record<string, unknown> = {};
         req.nextUrl.searchParams.forEach((val, key) => {
@@ -53,9 +58,10 @@ export async function GET(req: NextRequest) {
             proxied: true,
             mode: 'google_oauth_user_drive',
             userEmail: session.email,
+            spreadsheetId: session.spreadsheetId,
           },
         });
-        if (refreshed || sessionChanged) {
+        if (!cookieHadSheetId || refreshed || sessionChanged || (headerSheetId && session.spreadsheetId !== headerSheetId)) {
           setSessionCookie(res, session);
         }
         return res;
@@ -157,6 +163,11 @@ export async function POST(req: NextRequest) {
     // Non-admin Google users always read/write their own personal Google Drive
     if (!session.isAdmin) {
       try {
+        const cookieHadSheetId = Boolean(session.spreadsheetId);
+        const headerSheetId = (req.headers.get('x-kinova-spreadsheet-id') || '').trim();
+        if (!session.spreadsheetId && headerSheetId) {
+          session.spreadsheetId = headerSheetId;
+        }
         const body = await req.json();
         const action = String(body.action || req.nextUrl.searchParams.get('action') || '');
         const { result, sessionChanged } = await executeUserGoogleAction(session, action, body);
@@ -167,9 +178,10 @@ export async function POST(req: NextRequest) {
             proxied: true,
             mode: 'google_oauth_user_drive',
             userEmail: session.email,
+            spreadsheetId: session.spreadsheetId,
           },
         });
-        if (refreshed || sessionChanged) {
+        if (!cookieHadSheetId || refreshed || sessionChanged || (headerSheetId && session.spreadsheetId !== headerSheetId)) {
           setSessionCookie(res, session);
         }
         return res;

@@ -17,6 +17,14 @@ import { toast } from 'sonner';
 let flushInFlight: Promise<{ total: number; succeeded: number; failed: number }> | null = null;
 let flushFollowUpNeeded = false;
 let backgroundPrefetchScheduled = false;
+const activeWritePromises = new Set<Promise<unknown>>();
+
+function trackActiveWrite<T>(promise: Promise<T>): Promise<T> {
+  activeWritePromises.add(promise);
+  return promise.finally(() => {
+    activeWritePromises.delete(promise);
+  });
+}
 
 type SheetRow = Record<string, unknown>;
 type SheetDataPayload = { headers: string[]; rows: SheetRow[] };
@@ -74,7 +82,6 @@ export const sheetsData = {
         if (localStorage.getItem('cashflow_cache_heal_v5') !== '1') {
           localStorage.setItem('cashflow_cache_heal_v5', '1');
           localStorage.removeItem('cashflow_api_key');
-          localStorage.removeItem('cashflow_apps_script_url');
           localStorage.removeItem('cashflow_last_sync_error');
           localStorage.removeItem('cashflow_last_sync_error_at');
           localStorage.removeItem('cashflow_use_server_proxy');
@@ -529,6 +536,12 @@ export const sheetsData = {
     const tempId = String(rowData.Id || rowData.id || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
     const wasPreviouslyTombstoned = isRecordTombstoned(tempId);
     const mutationId = `mut_add_${tempId}_${Date.now()}`;
+    const dateStr = String(rowData.Date || rowData.date || '');
+    const effectiveSheetName =
+      (!sheetName || sheetName === 'Transactions') && /^\d{4}-\d{2}/.test(dateStr)
+        ? dateStr.substring(0, 7)
+        : sheetName;
+
     const payload: Record<string, unknown> = {
       ...rowData,
       Id: tempId,
@@ -537,46 +550,51 @@ export const sheetsData = {
     };
 
     // Immediately update local SWR cache so UI and subsequent reads see the new row in 0ms
-    this.optimisticAddRow(sheetName, payload);
+    this.optimisticAddRow(effectiveSheetName, payload);
 
-    try {
-      const res = await sheetsApi.addRow(sheetName, payload, mutationId);
-      // If the user deleted this row while addRow was in flight, immediately clean it up on the server
-      // and never re-insert it into the local cache.
-      if (isRecordTombstoned(tempId)) {
-        void sheetsApi.deleteRow(res.data?.sheet || sheetName, res.data?.rowIndex, tempId).catch(() => {});
-        return { success: true, id: tempId, pending: false };
-      }
+    return trackActiveWrite(
+      (async () => {
+        try {
+          const res = await sheetsApi.addRow(effectiveSheetName, payload, mutationId);
+          // If the user deleted this row while addRow was in flight, immediately clean it up on the server
+          // and never re-insert it into the local cache.
+          if (isRecordTombstoned(tempId)) {
+            void sheetsApi.deleteRow(res.data?.sheet || effectiveSheetName, res.data?.rowIndex, tempId).catch(() => {});
+            return { success: true, id: tempId, pending: false };
+          }
 
-      const isVerified = res.success && res.data?.verified !== false && (!res.data?.verifiedId || res.data.verifiedId === tempId);
-      if (isVerified) {
-        if (typeof res.data?.rowIndex === 'number') {
-          this.optimisticUpdateRow(res.data.sheet || sheetName, res.data.rowIndex, {
-            ...payload,
-            _rowIndex: res.data.rowIndex,
+          const isVerified =
+            res.success && res.data?.verified !== false && (!res.data?.verifiedId || res.data.verifiedId === tempId);
+          if (isVerified) {
+            if (typeof res.data?.rowIndex === 'number') {
+              this.optimisticUpdateRow(res.data.sheet || effectiveSheetName, res.data.rowIndex, {
+                ...payload,
+                _rowIndex: res.data.rowIndex,
+              });
+            }
+            return { success: true, id: tempId, pending: false };
+          }
+          throw new Error(res.message || 'Google Sheets addRow was not verified on read-back');
+        } catch (err) {
+          // If the user already deleted this row while addRow was in flight, do not queue a stale add!
+          if (isRecordTombstoned(tempId)) {
+            return { success: true, id: tempId, pending: false };
+          }
+          console.warn(`[SheetsData] Add row failed, enqueuing to offline queue:`, err);
+          enqueuePendingMutation({
+            mutationId,
+            type: 'add',
+            sheetName: effectiveSheetName,
+            rowId: tempId,
+            rowData: payload,
           });
+          toast.info('Saved offline. Will sync to Google Sheets when connected.', {
+            duration: 4000,
+          });
+          return { success: true, id: tempId, pending: true };
         }
-        return { success: true, id: tempId, pending: false };
-      }
-      throw new Error(res.message || 'Google Sheets addRow was not verified on read-back');
-    } catch (err) {
-      // If the user already deleted this row while addRow was in flight, do not queue a stale add!
-      if (isRecordTombstoned(tempId)) {
-        return { success: true, id: tempId, pending: false };
-      }
-      console.warn(`[SheetsData] Add row failed, enqueuing to offline queue:`, err);
-      enqueuePendingMutation({
-        mutationId,
-        type: 'add',
-        sheetName,
-        rowId: tempId,
-        rowData: payload,
-      });
-      toast.info('Saved offline. Will sync to Google Sheets when connected.', {
-        duration: 4000,
-      });
-      return { success: true, id: tempId, pending: true };
-    }
+      })()
+    );
   },
 
   /**
@@ -589,58 +607,63 @@ export const sheetsData = {
     // Immediately update local SWR cache in 0ms
     this.optimisticUpdateRow(sheetName, rowIndex, rowData);
 
-    try {
-      const res = await sheetsApi.updateRow(sheetName, rowIndex, rowData, mutationId);
-      const isVerified = res.success && res.data?.verified !== false && (!id || !res.data?.verifiedId || res.data.verifiedId === id);
-      if (isVerified) {
-        if (typeof res.data?.rowIndex === 'number') {
-          this.optimisticUpdateRow(res.data.sheet || sheetName, res.data.rowIndex, {
-            ...rowData,
-            _rowIndex: res.data.rowIndex,
-          });
-        }
-        return { success: true, pending: false };
-      }
-
-      const resMsg = String(res.message || '');
-      if (resMsg.includes('not found') || resMsg.includes('Invalid row index')) {
-        if (id && isRecordTombstoned(id)) {
-          return { success: true, pending: false };
-        }
-        const fallbackPayload = id
-          ? { ...rowData, Id: id, id, _forceRestore: true }
-          : { ...rowData, _forceRestore: true };
-        const fallbackAdd = await sheetsApi.addRow(sheetName, fallbackPayload, mutationId);
-        if (fallbackAdd.success && fallbackAdd.data?.verified !== false) {
-          if (typeof fallbackAdd.data?.rowIndex === 'number') {
-            this.optimisticUpdateRow(fallbackAdd.data.sheet || sheetName, fallbackAdd.data.rowIndex, {
-              ...rowData,
-              _rowIndex: fallbackAdd.data.rowIndex,
-            });
+    return trackActiveWrite(
+      (async () => {
+        try {
+          const res = await sheetsApi.updateRow(sheetName, rowIndex, rowData, mutationId);
+          const isVerified =
+            res.success && res.data?.verified !== false && (!id || !res.data?.verifiedId || res.data.verifiedId === id);
+          if (isVerified) {
+            if (typeof res.data?.rowIndex === 'number') {
+              this.optimisticUpdateRow(res.data.sheet || sheetName, res.data.rowIndex, {
+                ...rowData,
+                _rowIndex: res.data.rowIndex,
+              });
+            }
+            return { success: true, pending: false };
           }
-          return { success: true, pending: false };
-        }
-      }
 
-      throw new Error(res.message || 'Google Sheets updateRow was not verified on read-back');
-    } catch (err) {
-      if (id && isRecordTombstoned(id)) {
-        return { success: true, pending: false };
-      }
-      console.warn(`[SheetsData] Update row failed, enqueuing to offline queue:`, err);
-      enqueuePendingMutation({
-        mutationId,
-        type: 'update',
-        sheetName,
-        rowIndex,
-        rowId: id,
-        rowData,
-      });
-      toast.info('Updated offline. Will sync to Google Sheets when connected.', {
-        duration: 4000,
-      });
-      return { success: true, pending: true };
-    }
+          const resMsg = String(res.message || '');
+          if (resMsg.includes('not found') || resMsg.includes('Invalid row index')) {
+            if (id && isRecordTombstoned(id)) {
+              return { success: true, pending: false };
+            }
+            const fallbackPayload = id
+              ? { ...rowData, Id: id, id, _forceRestore: true }
+              : { ...rowData, _forceRestore: true };
+            const fallbackAdd = await sheetsApi.addRow(sheetName, fallbackPayload, mutationId);
+            if (fallbackAdd.success && fallbackAdd.data?.verified !== false) {
+              if (typeof fallbackAdd.data?.rowIndex === 'number') {
+                this.optimisticUpdateRow(fallbackAdd.data.sheet || sheetName, fallbackAdd.data.rowIndex, {
+                  ...rowData,
+                  _rowIndex: fallbackAdd.data.rowIndex,
+                });
+              }
+              return { success: true, pending: false };
+            }
+          }
+
+          throw new Error(res.message || 'Google Sheets updateRow was not verified on read-back');
+        } catch (err) {
+          if (id && isRecordTombstoned(id)) {
+            return { success: true, pending: false };
+          }
+          console.warn(`[SheetsData] Update row failed, enqueuing to offline queue:`, err);
+          enqueuePendingMutation({
+            mutationId,
+            type: 'update',
+            sheetName,
+            rowIndex,
+            rowId: id,
+            rowData,
+          });
+          toast.info('Updated offline. Will sync to Google Sheets when connected.', {
+            duration: 4000,
+          });
+          return { success: true, pending: true };
+        }
+      })()
+    );
   },
 
   /**
@@ -659,49 +682,60 @@ export const sheetsData = {
     // Immediately record tombstone and remove from local SWR cache in 0ms
     this.optimisticDeleteRow(sheetName, rowIndex, id);
 
-    try {
-      const res = await sheetsApi.deleteRow(sheetName, rowIndex, id, mutationId);
-      const msg = String(res.message || '');
-      const isAlreadyAbsent =
-        Boolean(res.data?.alreadyDeleted) ||
-        msg.includes('not found') ||
-        msg.includes('No valid ID or rowIndex') ||
-        msg.includes('Invalid row index');
-      const isVerified = (res.success && res.data?.verified !== false) || isAlreadyAbsent;
-      if (isVerified) {
-        return { success: true, pending: false };
-      }
-      throw new Error(res.message || 'Google Sheets deleteRow was not verified on read-back');
-    } catch (err) {
-      // If the row only existed in the local pending add queue and never reached the server, no delete needs to be queued.
-      if (pendingAddItems.length > 0) {
-        return { success: true, pending: false };
-      }
-      console.warn(`[SheetsData] Delete row failed, enqueuing to offline queue:`, err);
-      enqueuePendingMutation({
-        mutationId,
-        type: 'delete',
-        sheetName,
-        rowIndex,
-        rowId: id,
-      });
-      toast.info('Deleted offline. Will sync to Google Sheets when connected.', {
-        duration: 4000,
-      });
-      return { success: true, pending: true };
-    }
+    return trackActiveWrite(
+      (async () => {
+        try {
+          const res = await sheetsApi.deleteRow(sheetName, rowIndex, id, mutationId);
+          const msg = String(res.message || '');
+          const isAlreadyAbsent =
+            Boolean(res.data?.alreadyDeleted) ||
+            msg.includes('not found') ||
+            msg.includes('No valid ID or rowIndex') ||
+            msg.includes('Invalid row index');
+          const isVerified = (res.success && res.data?.verified !== false) || isAlreadyAbsent;
+          if (isVerified) {
+            return { success: true, pending: false };
+          }
+          throw new Error(res.message || 'Google Sheets deleteRow was not verified on read-back');
+        } catch (err) {
+          // If the row only existed in the local pending add queue and never reached the server, no delete needs to be queued.
+          if (pendingAddItems.length > 0) {
+            return { success: true, pending: false };
+          }
+          console.warn(`[SheetsData] Delete row failed, enqueuing to offline queue:`, err);
+          enqueuePendingMutation({
+            mutationId,
+            type: 'delete',
+            sheetName,
+            rowIndex,
+            rowId: id,
+          });
+          toast.info('Deleted offline. Will sync to Google Sheets when connected.', {
+            duration: 4000,
+          });
+          return { success: true, pending: true };
+        }
+      })()
+    );
   },
 
   /**
    * Flushes all pending offline mutations to Google Sheets with a single active sync mutex (P1 #10).
    */
   async flushPendingQueue(): Promise<{ total: number; succeeded: number; failed: number }> {
+    if (activeWritePromises.size > 0) {
+      await Promise.allSettled(Array.from(activeWritePromises));
+    }
+
     if (flushInFlight) {
       flushFollowUpNeeded = true;
       return flushInFlight;
     }
 
     const runFlush = async (): Promise<{ total: number; succeeded: number; failed: number }> => {
+      if (activeWritePromises.size > 0) {
+        await Promise.allSettled(Array.from(activeWritePromises));
+      }
       const queue = getPendingMutations();
       if (queue.length === 0) return { total: 0, succeeded: 0, failed: 0 };
 
@@ -881,7 +915,24 @@ function applyPendingMutations(rows: SheetRow[], targetSheet?: string): SheetRow
     : [...rows];
 
   for (const m of pending) {
-    if (targetSheet && targetSheet !== 'Transactions' && m.sheetName !== targetSheet) {
+    const mutDateStr = String(m.rowData?.Date || m.rowData?.date || '');
+    const mutMonth =
+      /^\d{4}-\d{2}$/.test(m.sheetName)
+        ? m.sheetName
+        : /^\d{4}-\d{2}/.test(String(m.rowData?._month || ''))
+          ? String(m.rowData?._month).substring(0, 7)
+          : /^\d{4}-\d{2}/.test(mutDateStr)
+            ? mutDateStr.substring(0, 7)
+            : m.sheetName;
+
+    if (
+      targetSheet &&
+      targetSheet !== 'Transactions' &&
+      targetSheet !== 'all' &&
+      !targetSheet.startsWith('year-') &&
+      m.sheetName !== targetSheet &&
+      mutMonth !== targetSheet
+    ) {
       continue;
     }
 
@@ -891,7 +942,7 @@ function applyPendingMutations(rows: SheetRow[], targetSheet?: string): SheetRow
         result.unshift({
           ...m.rowData,
           _pendingSync: true,
-          _month: m.sheetName,
+          _month: mutMonth || m.sheetName,
         });
       }
     } else if (m.type === 'update' && m.rowData) {

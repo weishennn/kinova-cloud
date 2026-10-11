@@ -155,6 +155,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem('cashflow_google_user_email', normalizedEmail);
         localStorage.setItem('cashflow_google_authenticated', 'true');
         localStorage.setItem('cashflow_use_server_proxy', 'true');
+        if (data.user.spreadsheetId) {
+          localStorage.setItem(`cashflow_sheet_id_${normalizedEmail}`, String(data.user.spreadsheetId));
+        }
 
         setGoogleUser(data.user);
         setIsLocalMode(false);

@@ -214,10 +214,20 @@ export async function updateUserDriveIds(
 ): Promise<void> {
   const normalizedEmail = email.trim().toLowerCase();
   const users = await getAdminUserRegistry(false);
-  const existing = users[normalizedEmail];
-  if (!existing) return;
+  const nowIso = new Date().toISOString();
+  const isAdmin = isAdminEmail(normalizedEmail);
+  const existing: RegisteredUser = users[normalizedEmail] || {
+    email: normalizedEmail,
+    name: normalizedEmail.split('@')[0],
+    role: isAdmin ? 'admin' : 'user',
+    status: 'active',
+    firstSeenAt: nowIso,
+    lastActiveAt: nowIso,
+    loginCount: 1,
+    aiCallCount: 0,
+  };
 
-  let changed = false;
+  let changed = !users[normalizedEmail];
   if (ids.spreadsheetId && existing.spreadsheetId !== ids.spreadsheetId) {
     existing.spreadsheetId = ids.spreadsheetId;
     changed = true;

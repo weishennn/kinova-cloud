@@ -783,6 +783,27 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 2
 }
 
 let mutatingRequestQueue: Promise<unknown> = Promise.resolve();
+let initialWorkspaceResolvePromise: Promise<void> | null = null;
+
+function getLockedUserSpreadsheetId(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    const email = (localStorage.getItem('cashflow_google_user_email') || '').trim().toLowerCase();
+    if (!email || localStorage.getItem('cashflow_google_authenticated') !== 'true') return '';
+    return (localStorage.getItem(`cashflow_sheet_id_${email}`) || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+function setLockedUserSpreadsheetId(spreadsheetId?: string): void {
+  if (typeof window === 'undefined' || !spreadsheetId) return;
+  try {
+    const email = (localStorage.getItem('cashflow_google_user_email') || '').trim().toLowerCase();
+    if (!email) return;
+    localStorage.setItem(`cashflow_sheet_id_${email}`, spreadsheetId.trim());
+  } catch {}
+}
 
 function enqueueMutatingRequest<T>(task: () => Promise<T>): Promise<T> {
   const next = mutatingRequestQueue.then(task, task);
@@ -828,9 +849,26 @@ async function executeApiRequest<T>(options: ApiRequestOptions): Promise<T> {
 
     if (useProxy || isInternalProxyUrl) {
       try {
+        // If signed in with Google OAuth and we don't have a locked spreadsheetId yet,
+        // wait if another initial request is currently resolving the workspace ID so
+        // parallel requests never race across serverless instances.
+        if (
+          typeof window !== 'undefined' &&
+          localStorage.getItem('cashflow_google_authenticated') === 'true' &&
+          !getLockedUserSpreadsheetId()
+        ) {
+          if (initialWorkspaceResolvePromise) {
+            await initialWorkspaceResolvePromise.catch(() => {});
+          }
+        }
+
         const proxyHeaders: Record<string, string> = {};
         if (proxyToken) {
           proxyHeaders['x-cashflow-proxy-token'] = proxyToken;
+        }
+        const lockedSheetId = getLockedUserSpreadsheetId();
+        if (lockedSheetId) {
+          proxyHeaders['x-kinova-spreadsheet-id'] = lockedSheetId;
         }
 
         if (method === 'GET') {
@@ -843,14 +881,42 @@ async function executeApiRequest<T>(options: ApiRequestOptions): Promise<T> {
             proxyUrl.searchParams.set(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
           });
 
-          const proxyRes = await fetchWithTimeout(proxyUrl.toString(), {
-            method: 'GET',
-            headers: proxyHeaders,
-            credentials: 'same-origin',
-            cache: 'no-store',
-          }, 25000);
+          const doFetch = async () => {
+            const proxyRes = await fetchWithTimeout(proxyUrl.toString(), {
+              method: 'GET',
+              headers: proxyHeaders,
+              credentials: 'same-origin',
+              cache: 'no-store',
+            }, 25000);
+            const data = await proxyRes.json().catch(() => null);
+            if (data?._proxy?.spreadsheetId) {
+              setLockedUserSpreadsheetId(String(data._proxy.spreadsheetId));
+            }
+            return { proxyRes, data };
+          };
 
-          const data = await proxyRes.json().catch(() => null);
+          let fetchResult: { proxyRes: Response; data: any };
+          if (
+            typeof window !== 'undefined' &&
+            localStorage.getItem('cashflow_google_authenticated') === 'true' &&
+            !getLockedUserSpreadsheetId() &&
+            !initialWorkspaceResolvePromise
+          ) {
+            let releaseLock!: () => void;
+            initialWorkspaceResolvePromise = new Promise<void>((resolve) => {
+              releaseLock = resolve;
+            });
+            try {
+              fetchResult = await doFetch();
+            } finally {
+              releaseLock();
+              initialWorkspaceResolvePromise = null;
+            }
+          } else {
+            fetchResult = await doFetch();
+          }
+
+          const { proxyRes, data } = fetchResult;
           if (proxyRes.status === 403 && data?.blocked) {
             window.dispatchEvent(new Event('cashflow_account_blocked'));
             throw new Error(data.message || 'Account restricted by administrator.');
@@ -877,6 +943,9 @@ async function executeApiRequest<T>(options: ApiRequestOptions): Promise<T> {
           }, 25000);
 
           const data = await proxyRes.json().catch(() => null);
+          if (data?._proxy?.spreadsheetId) {
+            setLockedUserSpreadsheetId(String(data._proxy.spreadsheetId));
+          }
           if (proxyRes.status === 403 && data?.blocked) {
             window.dispatchEvent(new Event('cashflow_account_blocked'));
             throw new Error(data.message || 'Account restricted by administrator.');
