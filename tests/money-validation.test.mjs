@@ -12,6 +12,9 @@ test('transaction amounts must be positive, cent-precise, and safely representab
   assert.equal(isSafeTransactionAmount(Number.POSITIVE_INFINITY), false);
   assert.equal(isSafeTransactionAmount(1e308), false);
   assert.equal(isSafeTransactionAmount(1e14), false);
+  assert.equal(isSafeTransactionAmount(1e-100), false);
+  assert.equal(isSafeTransactionAmount(0.0049), false);
+  assert.equal(isSafeTransactionAmount(0.005), false);
   assert.equal(isSafeTransactionAmount(12.345), false);
   assert.equal(isSafeTransactionAmount(12.34), true);
   assert.equal(isSafeTransactionAmount(0.29), true);

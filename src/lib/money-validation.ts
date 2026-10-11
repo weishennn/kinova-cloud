@@ -10,7 +10,9 @@ export function isSafeTransactionAmount(value: unknown): boolean {
   const cents = amount * 100;
   const roundedCents = Math.round(cents);
   const tolerance = Number.EPSILON * Math.max(1, Math.abs(cents)) * 2;
-  return Number.isSafeInteger(roundedCents) && Math.abs(cents - roundedCents) <= tolerance;
+  return roundedCents > 0 &&
+    Number.isSafeInteger(roundedCents) &&
+    Math.abs(cents - roundedCents) <= tolerance;
 }
 
 export function isSafeTransactionConversion(

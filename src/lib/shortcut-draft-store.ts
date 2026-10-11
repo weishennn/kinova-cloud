@@ -107,11 +107,20 @@ const MERCHANT_CATEGORY_RULES: Array<{ regex: RegExp; category: string }> = [
   },
 ];
 
+export interface ShortcutAutoRecordedEntry {
+  transactionId: string;
+  sheetName: string;
+  recordedAt: string;
+  rowData: Record<string, unknown>;
+}
+
 declare global {
   // eslint-disable-next-line no-var
   var __kinovaShortcutDraftMap: Map<string, ShortcutQuickDraft> | undefined;
   // eslint-disable-next-line no-var
   var __kinovaAckedShortcutDraftSet: Set<string> | undefined;
+  // eslint-disable-next-line no-var
+  var __kinovaRecentAutoRecordedMap: Map<string, ShortcutAutoRecordedEntry> | undefined;
 }
 
 function getDraftStore(): Map<string, ShortcutQuickDraft> {
@@ -126,6 +135,13 @@ function getAckedDraftSet(): Set<string> {
     globalThis.__kinovaAckedShortcutDraftSet = new Set<string>();
   }
   return globalThis.__kinovaAckedShortcutDraftSet;
+}
+
+function getRecentAutoRecordedStore(): Map<string, ShortcutAutoRecordedEntry> {
+  if (!globalThis.__kinovaRecentAutoRecordedMap) {
+    globalThis.__kinovaRecentAutoRecordedMap = new Map<string, ShortcutAutoRecordedEntry>();
+  }
+  return globalThis.__kinovaRecentAutoRecordedMap;
 }
 
 export function isShortcutDraftAcknowledged(draftId?: string | null): boolean {
@@ -197,6 +213,20 @@ export function parseAmountAndCurrencyFromRawInput(
     currencyAmbiguous = true;
     candidateCurrencies = AMBIGUOUS_SYMBOLS[explicitCurrency];
     explicitCurrency = defaultCurrency;
+  } else if (explicitCurrency) {
+    let matchedSymbol = false;
+    for (const rule of UNAMBIGUOUS_SYMBOL_MAP) {
+      if (rule.pattern.test(explicitCurrency)) {
+        explicitCurrency = rule.currency;
+        currencyProvided = true;
+        candidateCurrencies = [rule.currency];
+        matchedSymbol = true;
+        break;
+      }
+    }
+    if (!matchedSymbol) {
+      explicitCurrency = '';
+    }
   }
 
   if (typeof rawAmount === 'number' && Number.isFinite(rawAmount) && rawAmount > 0) {
@@ -869,6 +899,99 @@ function resolveShortcutSheetsEndpoint(): { url: string; apiKey: string } {
   return { url, apiKey };
 }
 
+const RECENT_AUTO_RECORDED_SETTING_KEY = 'kinova_recent_shortcut_records';
+const RECENT_AUTO_RECORDED_TTL_MS = 15 * 60 * 1000;
+let lastRemoteAutoRecordedFetchMs = 0;
+
+export async function recordRecentShortcutAutoRecorded(
+  entry: ShortcutAutoRecordedEntry,
+  persistRemote = true
+): Promise<void> {
+  const store = getRecentAutoRecordedStore();
+  store.set(entry.transactionId, entry);
+  const now = Date.now();
+  for (const [k, v] of store.entries()) {
+    if (now - new Date(v.recordedAt).getTime() > RECENT_AUTO_RECORDED_TTL_MS) {
+      store.delete(k);
+    }
+  }
+
+  if (!persistRemote) return;
+  try {
+    const { url, apiKey } = resolveShortcutSheetsEndpoint();
+    if (!url) return;
+    const recentList = Array.from(store.values())
+      .sort((a, b) => new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime())
+      .slice(0, 10);
+    await fetch(`${url}?apiKey=${encodeURIComponent(apiKey)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'updateSettings',
+        key: RECENT_AUTO_RECORDED_SETTING_KEY,
+        value: JSON.stringify(recentList),
+        mutationId: `sc_rec_${Date.now()}`,
+        apiKey,
+      }),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch {
+    // Non-blocking remote persistence
+  }
+}
+
+export async function getRecentShortcutAutoRecorded(
+  nowMs = Date.now(),
+  fetchRemote = true
+): Promise<ShortcutAutoRecordedEntry[]> {
+  const store = getRecentAutoRecordedStore();
+
+  if (fetchRemote && nowMs - lastRemoteAutoRecordedFetchMs > 2000) {
+    lastRemoteAutoRecordedFetchMs = nowMs;
+    try {
+      const { url, apiKey } = resolveShortcutSheetsEndpoint();
+      if (url) {
+        const res = await fetch(
+          `${url}?action=getSettings&apiKey=${encodeURIComponent(apiKey)}&key=${encodeURIComponent(apiKey)}&_t=${nowMs}`,
+          {
+            method: 'GET',
+            cache: 'no-store',
+            signal: AbortSignal.timeout(6000),
+          }
+        );
+        if (res.ok) {
+          const json = await res.json();
+          const raw = json?.data?.[RECENT_AUTO_RECORDED_SETTING_KEY];
+          if (typeof raw === 'string' && raw.trim()) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              for (const item of parsed) {
+                if (item && typeof item.transactionId === 'string' && item.sheetName && item.rowData) {
+                  store.set(item.transactionId, item as ShortcutAutoRecordedEntry);
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // Ignore remote fetch errors
+    }
+  }
+
+  const valid: ShortcutAutoRecordedEntry[] = [];
+  for (const [k, v] of store.entries()) {
+    const age = nowMs - new Date(v.recordedAt).getTime();
+    if (age <= RECENT_AUTO_RECORDED_TTL_MS) {
+      valid.push(v);
+    } else {
+      store.delete(k);
+    }
+  }
+  return valid.sort((a, b) => new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime());
+}
+
 /**
  * Directly records a validated shortcut transaction to Google Sheets when amount > 0
  * and no duplicate fingerprint is detected, returning a concise notification string for iOS Shortcuts.
@@ -892,7 +1015,8 @@ export async function recordShortcutDraftToLedger(
   notificationText: string;
 }> {
   const label = draft.description || draft.merchant || draft.category || '消费记录';
-  const curr = (draft.currency || 'MYR').toUpperCase();
+  const rawCurr = (draft.currency || 'MYR').toUpperCase().trim();
+  const curr = rawCurr === 'RM' ? 'MYR' : VALID_CURRENCIES.has(rawCurr) ? rawCurr : 'MYR';
 
   if (options.autoRecord === false) {
     return {
@@ -961,62 +1085,10 @@ export async function recordShortcutDraftToLedger(
     _forceRestore: true,
   };
 
-  // Primary Path: Write directly to the user's Google Drive Kinova CashFlow spreadsheet via OAuth refresh token
-  if (!options.fetchImpl) {
-    try {
-      const [{ getAdminUserRegistry }, { getAdminEmail, isAdminEmail, refreshGoogleAccessToken }, { executeUserGoogleAction }] =
-        await Promise.all([
-          import('./admin-registry'),
-          import('./google-auth'),
-          import('./google-sheets-user-engine'),
-        ]);
+  let recordedSuccessfully = false;
+  let duplicateDetected = false;
 
-      const registry = await getAdminUserRegistry(false);
-      const preferredEmail = (options.userEmail || getAdminEmail()).trim().toLowerCase();
-      const regUser =
-        registry[preferredEmail] ||
-        Object.values(registry).find((u) => u.role === 'admin' && u.refreshToken && u.status !== 'blocked') ||
-        Object.values(registry).find((u) => u.refreshToken && u.status !== 'blocked');
-
-      if (regUser?.refreshToken) {
-        const refreshed = await refreshGoogleAccessToken(regUser.refreshToken);
-        if (refreshed?.accessToken) {
-          const session = {
-            email: regUser.email,
-            name: regUser.name || regUser.email.split('@')[0],
-            picture: regUser.picture,
-            accessToken: refreshed.accessToken,
-            refreshToken: regUser.refreshToken,
-            expiresAt: refreshed.expiresAt,
-            spreadsheetId: regUser.spreadsheetId,
-            invoicesFolderId: regUser.invoicesFolderId,
-            backupsFolderId: regUser.backupsFolderId,
-            isAdmin: isAdminEmail(regUser.email),
-          };
-          const { result } = await executeUserGoogleAction(session, 'addRow', {
-            sheetName,
-            rowData,
-            mutationId,
-          });
-          const resObj = (result || {}) as Record<string, unknown>;
-          if (resObj.added !== false && !resObj.tombstoned) {
-            acknowledgeShortcutDraft(draft.draftId);
-            return {
-              autoRecorded: true,
-              duplicateSkipped: false,
-              transactionId: txId,
-              sheetName,
-              notificationTitle: `✅ 已记账 ${curr} ${draft.amount.toFixed(2)} (${targetDate})`,
-              notificationText: `✅ 已记账 [${targetDate}]：${curr} ${draft.amount.toFixed(2)} · ${label} (${draft.category})`,
-            };
-          }
-        }
-      }
-    } catch (oauthErr) {
-      console.warn('[Shortcut] OAuth Drive ledger write fallback:', oauthErr);
-    }
-  }
-
+  // 1. Write to Admin Apps Script ledger (used when logged in as admin account weishenooi2003@gmail.com)
   const fetchFn = options.fetchImpl || fetch;
   const endpoint = resolveShortcutSheetsEndpoint();
   const url = options.scriptUrl || endpoint.url;
@@ -1043,29 +1115,14 @@ export async function recordShortcutDraftToLedger(
         if (res.ok) {
           const json = await res.json();
           if (json?.data?.deduplicated) {
-            acknowledgeShortcutDraft(draft.draftId);
-            return {
-              autoRecorded: false,
-              duplicateSkipped: true,
-              transactionId: txId,
-              sheetName,
-              notificationTitle: 'ℹ️ 重复账单已跳过',
-              notificationText: `ℹ️ 已跳过重复记录 [${targetDate}]：${curr} ${draft.amount.toFixed(2)} · ${label}`,
-            };
+            duplicateDetected = true;
+            break;
           }
           const isSuccess = Boolean(json?.success || json?.status === 'success' || json?.data?.success);
           const isAdded = json?.data?.added !== false && !json?.data?.tombstoned;
           if (isSuccess && isAdded) {
-            // Acknowledge draft so opening Kinova later won't pop open the draft modal for an already-recorded transaction
-            acknowledgeShortcutDraft(draft.draftId);
-            return {
-              autoRecorded: true,
-              duplicateSkipped: false,
-              transactionId: txId,
-              sheetName,
-              notificationTitle: `✅ 已记账 ${curr} ${draft.amount.toFixed(2)} (${targetDate})`,
-              notificationText: `✅ 已记账 [${targetDate}]：${curr} ${draft.amount.toFixed(2)} · ${label} (${draft.category})`,
-            };
+            recordedSuccessfully = true;
+            break;
           }
           if (attempt === 0 && String(json?.message || '').toLowerCase().includes('lock')) {
             await new Promise((r) => setTimeout(r, 1200));
@@ -1081,6 +1138,88 @@ export async function recordShortcutDraftToLedger(
     }
   }
 
+  // 2. Also sync to Google Drive OAuth ledger(s) for active non-admin accounts (or specific userEmail)
+  if (!options.fetchImpl && !duplicateDetected) {
+    try {
+      const [{ getAdminUserRegistry }, { isAdminEmail, refreshGoogleAccessToken }, { executeUserGoogleAction }] =
+        await Promise.all([
+          import('./admin-registry'),
+          import('./google-auth'),
+          import('./google-sheets-user-engine'),
+        ]);
+
+      const registry = await getAdminUserRegistry(false);
+      const explicitEmail = (options.userEmail || '').trim().toLowerCase();
+      const targetUsers = explicitEmail && registry[explicitEmail]
+        ? [registry[explicitEmail]]
+        : Object.values(registry).filter(
+            (u) => u.refreshToken && u.status !== 'blocked' && (!isAdminEmail(u.email) || !recordedSuccessfully)
+          );
+
+      for (const regUser of targetUsers) {
+        if (!regUser?.refreshToken) continue;
+        const refreshed = await refreshGoogleAccessToken(regUser.refreshToken);
+        if (!refreshed?.accessToken) continue;
+        const session = {
+          email: regUser.email,
+          name: regUser.name || regUser.email.split('@')[0],
+          picture: regUser.picture,
+          accessToken: refreshed.accessToken,
+          refreshToken: regUser.refreshToken,
+          expiresAt: refreshed.expiresAt,
+          spreadsheetId: regUser.spreadsheetId,
+          invoicesFolderId: regUser.invoicesFolderId,
+          backupsFolderId: regUser.backupsFolderId,
+          isAdmin: isAdminEmail(regUser.email),
+        };
+        const { result } = await executeUserGoogleAction(session, 'addRow', {
+          sheetName,
+          rowData,
+          mutationId,
+        });
+        const resObj = (result || {}) as Record<string, unknown>;
+        if (resObj.added !== false && !resObj.tombstoned) {
+          recordedSuccessfully = true;
+        }
+      }
+    } catch (oauthErr) {
+      console.warn('[Shortcut] OAuth Drive ledger write warning:', oauthErr);
+    }
+  }
+
+  if (duplicateDetected) {
+    acknowledgeShortcutDraft(draft.draftId);
+    return {
+      autoRecorded: false,
+      duplicateSkipped: true,
+      transactionId: txId,
+      sheetName,
+      notificationTitle: 'ℹ️ 重复账单已跳过',
+      notificationText: `ℹ️ 已跳过重复记录 [${targetDate}]：${curr} ${draft.amount.toFixed(2)} · ${label}`,
+    };
+  }
+
+  if (recordedSuccessfully) {
+    acknowledgeShortcutDraft(draft.draftId);
+    await recordRecentShortcutAutoRecorded(
+      {
+        transactionId: txId,
+        sheetName,
+        recordedAt: new Date().toISOString(),
+        rowData,
+      },
+      !options.fetchImpl
+    );
+    return {
+      autoRecorded: true,
+      duplicateSkipped: false,
+      transactionId: txId,
+      sheetName,
+      notificationTitle: `✅ 已记账 ${curr} ${draft.amount.toFixed(2)} (${targetDate})`,
+      notificationText: `✅ 已记账 [${targetDate}]：${curr} ${draft.amount.toFixed(2)} · ${label} (${draft.category})`,
+    };
+  }
+
   return {
     autoRecorded: false,
     duplicateSkipped: false,
@@ -1090,5 +1229,6 @@ export async function recordShortcutDraftToLedger(
     notificationText: `⚠️ 已识别 [${targetDate}] ${curr} ${draft.amount.toFixed(2)} · ${label}，但写入云端超时，打开 Kinova 即可确认保存`,
   };
 }
+
 
 

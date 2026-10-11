@@ -17,6 +17,7 @@ import {
   applyOptimisticAddToQueryCache,
   applyOptimisticUpdateToQueryCache,
 } from '@/hooks/useSheets';
+import { sheetsData } from '@/lib/sheets-data';
 import { driveApi } from '@/lib/sheets-api';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -474,6 +475,63 @@ export function RecordPaymentModal() {
         });
         if (!res.ok) return;
         const json = await res.json();
+
+        // Sync any background auto-recorded Double Tap transactions into local SWR + React Query cache in 0ms
+        if (Array.isArray(json?.recentAutoRecorded) && json.recentAutoRecorded.length > 0) {
+          let syncedIds: string[] = [];
+          try {
+            const rawSynced = localStorage.getItem('kinova_synced_shortcut_tx_ids');
+            if (rawSynced) {
+              const parsedSynced = JSON.parse(rawSynced);
+              if (Array.isArray(parsedSynced)) syncedIds = parsedSynced.map(String);
+            }
+          } catch {
+            // ignore
+          }
+          const syncedSet = new Set(syncedIds);
+          const newlyAdded: Array<{ sheetName: string; rowData: Record<string, unknown> }> = [];
+
+          for (const item of json.recentAutoRecorded) {
+            const txId = String(item?.transactionId || '').trim();
+            const sheetName = String(item?.sheetName || '').trim();
+            const rowData = item?.rowData as Record<string, unknown> | undefined;
+            if (!txId || !sheetName || !rowData || syncedSet.has(txId)) continue;
+            syncedSet.add(txId);
+            const optimisticRow = sheetsData.optimisticAddRow(sheetName, rowData);
+            applyOptimisticAddToQueryCache(queryClient, sheetName, optimisticRow);
+            newlyAdded.push({ sheetName, rowData });
+          }
+
+          if (newlyAdded.length > 0) {
+            try {
+              localStorage.setItem(
+                'kinova_synced_shortcut_tx_ids',
+                JSON.stringify(Array.from(syncedSet).slice(-50))
+              );
+            } catch {
+              // ignore
+            }
+            void queryClient.invalidateQueries({ queryKey: ['sheet'] });
+            void queryClient.invalidateQueries({ queryKey: ['months'] });
+            const latestItem = newlyAdded[0];
+            const desc = String(latestItem.rowData.Description || '快捷指令消费');
+            const amt = Number(latestItem.rowData.Amount || 0).toFixed(2);
+            const curr = String(latestItem.rowData.Currency || 'MYR');
+            const targetMonth = latestItem.sheetName;
+            toast.success(
+              `✅ 快捷指令已入账：${curr} ${amt} · ${desc}`,
+              targetMonth && targetMonth !== selectedMonth
+                ? {
+                    action: {
+                      label: `View ${targetMonth}`,
+                      onClick: () => setSelectedMonth(targetMonth),
+                    },
+                  }
+                : undefined
+            );
+          }
+        }
+
         if (!json?.success || !json?.draft) return;
 
         const draft = json.draft as ShortcutQuickDraft;
@@ -552,10 +610,14 @@ export function RecordPaymentModal() {
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         triggerBurstCheck();
+        void queryClient.invalidateQueries({ queryKey: ['sheet'] });
+        void queryClient.invalidateQueries({ queryKey: ['months'] });
       }
     };
     const handleFocus = () => {
       triggerBurstCheck();
+      void queryClient.invalidateQueries({ queryKey: ['sheet'] });
+      void queryClient.invalidateQueries({ queryKey: ['months'] });
     };
 
     // Also poll lightly while app is visible in case Back Tap was triggered while Kinova was already foregrounded
@@ -578,7 +640,7 @@ export function RecordPaymentModal() {
       window.removeEventListener('pageshow', handleFocus);
       window.removeEventListener('popstate', handleFocus);
     };
-  }, [setEditTransaction, setQuickAddOpen]);
+  }, [queryClient, selectedMonth, setEditTransaction, setQuickAddOpen, setSelectedMonth]);
 
   const shortcutLedgerDuplicates = useMemo(() => {
     if (!shortcutDraft) return [];

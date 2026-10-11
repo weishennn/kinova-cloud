@@ -5,6 +5,7 @@ import {
   acknowledgeShortcutDraft,
   claimShortcutDraft,
   computeShortcutDraftFingerprint,
+  getRecentShortcutAutoRecorded,
   inferCategoryFromMerchant,
   inspectShortcutUrlSafety,
   normalizeApplePayTransactionInput,
@@ -438,11 +439,13 @@ export async function GET(req: Request) {
 
     const id = (searchParams.get('id') || 'latest').trim();
     const draft = claimShortcutDraft(id, Date.now(), false);
+    const recentAutoRecorded = await getRecentShortcutAutoRecorded();
 
     return NextResponse.json(
       {
-        success: Boolean(draft),
+        success: Boolean(draft) || recentAutoRecorded.length > 0,
         draft: draft || null,
+        recentAutoRecorded,
       },
       {
         status: 200,
@@ -451,7 +454,7 @@ export async function GET(req: Request) {
     );
   } catch {
     return NextResponse.json(
-      { success: false, draft: null },
+      { success: false, draft: null, recentAutoRecorded: [] },
       { status: 200, headers: { 'Cache-Control': 'no-store' } }
     );
   }
