@@ -1399,6 +1399,39 @@ export function RecordPaymentModal() {
               />
             </div>
 
+            {/* Description & Date in compact 2-column row (placed right below Amount) */}
+            <div className="grid grid-cols-[1.35fr_1fr] gap-2.5 sm:gap-3">
+              <div className="space-y-1.5">
+                <label htmlFor="record-description" className="text-xs font-semibold text-slate-700 dark:text-zinc-300 uppercase tracking-wider">Item / Description</label>
+                <div className="relative">
+                  <input
+                    id="record-description"
+                    type="text"
+                    placeholder="e.g. Nasi Lemak, Petrol..."
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 py-2.5 px-3 text-sm text-slate-950 dark:text-white placeholder-zinc-500 outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label htmlFor="record-date" className="text-xs font-semibold text-slate-700 dark:text-zinc-300 uppercase tracking-wider">Date</label>
+                <div className="relative flex items-center">
+                  <input
+                    id="record-date"
+                    type="date"
+                    value={date}
+                    onChange={(e) => {
+                      setDate(e.target.value);
+                      setManualUntagged(false);
+                    }}
+                    className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 py-2.5 px-2.5 text-xs sm:text-sm text-slate-950 dark:text-white outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+            </div>
+
             {/* Category Grid (5 columns so 10 categories fit in 2 rows; switches to TripExpense with Stay & Hotel + Flights when tagged to a trip) */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between gap-2">
@@ -1832,39 +1865,6 @@ export function RecordPaymentModal() {
                 )}
               </div>
             )}
-
-            {/* Description & Date in compact 2-column row */}
-            <div className="grid grid-cols-[1.35fr_1fr] gap-2.5 sm:gap-3">
-              <div className="space-y-1.5">
-                <label htmlFor="record-description" className="text-xs font-medium text-slate-600 dark:text-zinc-400 uppercase tracking-wider">Item / Description</label>
-                <div className="relative">
-                  <input
-                    id="record-description"
-                    type="text"
-                    placeholder="e.g. Nasi Lemak, Petrol..."
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 py-2.5 px-3 text-sm text-slate-950 dark:text-white placeholder-zinc-500 outline-none focus:border-indigo-500"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label htmlFor="record-date" className="text-xs font-medium text-slate-600 dark:text-zinc-400 uppercase tracking-wider">Date</label>
-                <div className="relative flex items-center">
-                  <input
-                    id="record-date"
-                    type="date"
-                    value={date}
-                    onChange={(e) => {
-                      setDate(e.target.value);
-                      setManualUntagged(false);
-                    }}
-                    className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 py-2.5 px-2.5 text-xs sm:text-sm text-slate-950 dark:text-white outline-none focus:border-indigo-500"
-                  />
-                </div>
-              </div>
-            </div>
 
             {showTripCurrency && (
               <div className="space-y-2">
