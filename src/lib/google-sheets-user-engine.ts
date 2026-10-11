@@ -260,34 +260,70 @@ async function ensureDriveFolder(accessToken: string, folderName: string, existi
   return String(created.id);
 }
 
-function buildOverviewInitialRows(year: number): Array<Array<string | number>> {
+function buildOverviewInitialRows(yearOrYears: number | number[]): Array<Array<string | number>> {
+  const rawYears = Array.isArray(yearOrYears) ? yearOrYears : [yearOrYears];
+  const uniqueYears = Array.from(
+    new Set(rawYears.filter((y) => Number.isFinite(y) && y >= 2000 && y <= 2100))
+  ).sort((a, b) => a - b);
+
+  if (uniqueYears.length === 0) {
+    uniqueYears.push(new Date().getFullYear());
+  }
+
   const rows: Array<Array<string | number>> = [OVERVIEW_HEADERS];
-  for (let m = 1; m <= 12; m++) {
-    const r = m + 1;
-    const monthStr = `${year}-${String(m).padStart(2, '0')}`;
+  let currentRow = 2; // 1-indexed sheet row number
+  const annualTotalRows: number[] = [];
+
+  for (const year of uniqueYears) {
+    const yearStartRow = currentRow;
+    for (let m = 1; m <= 12; m++) {
+      const r = currentRow;
+      const monthStr = `${year}-${String(m).padStart(2, '0')}`;
+      rows.push([
+        monthStr,
+        `=IFERROR(SUMIFS('${monthStr}'!G:G, '${monthStr}'!C:C, "Income"), 0)`,
+        `=IFERROR(SUMIFS('${monthStr}'!G:G, '${monthStr}'!C:C, "Expense"), 0)`,
+        `=B${r}-C${r}`,
+        `=IFERROR(SUMIFS('${monthStr}'!G:G, '${monthStr}'!C:C, "Investment"), 0)`,
+        `=IFERROR(SUMIFS(Trades!I:I, Trades!C:C, "DIVIDEND", Trades!B:B, ">=${monthStr}-01", Trades!B:B, "<=${monthStr}-31"), 0)`,
+        `=IFERROR(SUMIFS(Trades!I:I, Trades!C:C, "SELL", Trades!B:B, ">=${monthStr}-01", Trades!B:B, "<=${monthStr}-31"), 0)`,
+        `=F${r}+G${r}`,
+        `=D${r}+H${r}`,
+      ]);
+      currentRow++;
+    }
+    const yearEndRow = currentRow - 1;
+    const totalRow = currentRow;
+    annualTotalRows.push(totalRow);
     rows.push([
-      monthStr,
-      `=IFERROR(SUMIFS('${monthStr}'!G:G, '${monthStr}'!C:C, "Income"), 0)`,
-      `=IFERROR(SUMIFS('${monthStr}'!G:G, '${monthStr}'!C:C, "Expense"), 0)`,
-      `=B${r}-C${r}`,
-      `=IFERROR(SUMIFS('${monthStr}'!G:G, '${monthStr}'!C:C, "Investment"), 0)`,
-      `=IFERROR(SUMIFS(Trades!I:I, Trades!C:C, "DIVIDEND", Trades!B:B, ">=${monthStr}-01", Trades!B:B, "<=${monthStr}-31"), 0)`,
-      `=IFERROR(SUMIFS(Trades!I:I, Trades!C:C, "SELL", Trades!B:B, ">=${monthStr}-01", Trades!B:B, "<=${monthStr}-31"), 0)`,
-      `=F${r}+G${r}`,
-      `=D${r}+H${r}`,
+      `🏆 ${year} ANNUAL TOTAL`,
+      `=SUM(B${yearStartRow}:B${yearEndRow})`,
+      `=SUM(C${yearStartRow}:C${yearEndRow})`,
+      `=SUM(D${yearStartRow}:D${yearEndRow})`,
+      `=SUM(E${yearStartRow}:E${yearEndRow})`,
+      `=SUM(F${yearStartRow}:F${yearEndRow})`,
+      `=SUM(G${yearStartRow}:G${yearEndRow})`,
+      `=SUM(H${yearStartRow}:H${yearEndRow})`,
+      `=SUM(I${yearStartRow}:I${yearEndRow})`,
+    ]);
+    currentRow++;
+  }
+
+  if (annualTotalRows.length > 1) {
+    const sumCols = (col: string) => '=' + annualTotalRows.map((r) => `${col}${r}`).join('+');
+    rows.push([
+      '🌎 ALL-TIME GRAND TOTAL',
+      sumCols('B'),
+      sumCols('C'),
+      sumCols('D'),
+      sumCols('E'),
+      sumCols('F'),
+      sumCols('G'),
+      sumCols('H'),
+      sumCols('I'),
     ]);
   }
-  rows.push([
-    `🏆 ${year} ANNUAL TOTAL`,
-    '=SUM(B2:B13)',
-    '=SUM(C2:C13)',
-    '=SUM(D2:D13)',
-    '=SUM(E2:E13)',
-    '=SUM(F2:F13)',
-    '=SUM(G2:G13)',
-    '=SUM(H2:H13)',
-    '=SUM(I2:I13)',
-  ]);
+
   return rows;
 }
 
@@ -489,6 +525,16 @@ export async function ensureUserWorkspace(session: GoogleUserSession): Promise<{
       throw new Error('Could not open or initialize Google Sheet in your Google Drive.');
     }
 
+    // Ensure the current calendar month tab (e.g., 2027-01 when a new year begins) exists
+    const currentMonthTab = getCurrentYearMonth();
+    if (!meta.sheets.some((s) => s.properties.title === currentMonthTab)) {
+      try {
+        await ensureSheetExists(spreadsheetId, session.accessToken, meta, currentMonthTab);
+      } catch (monthErr) {
+        console.warn('[Workspace] Auto-create current month tab skipped:', monthErr);
+      }
+    }
+
     // 4. Immediately lock spreadsheetId onto session BEFORE optional Drive folder creation
     session.spreadsheetId = spreadsheetId;
 
@@ -566,6 +612,40 @@ function getDefaultHeadersForSheet(sheetName: string): string[] {
   return DEFAULT_MONTHLY_HEADERS;
 }
 
+async function syncOverviewSheetForMeta(
+  spreadsheetId: string,
+  accessToken: string,
+  meta: SpreadsheetMetadata
+): Promise<void> {
+  await ensureSheetExists(spreadsheetId, accessToken, meta, 'Overview');
+  const yearSet = new Set<number>([new Date().getFullYear()]);
+  for (const s of meta.sheets) {
+    const title = s.properties.title;
+    if (/^\d{4}-\d{2}$/.test(title)) {
+      const y = Number(title.slice(0, 4));
+      if (Number.isFinite(y) && y >= 2000 && y <= 2100) {
+        yearSet.add(y);
+      }
+    }
+  }
+  const overviewRows = buildOverviewInitialRows(Array.from(yearSet));
+  await googleApiFetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'Overview'!A1:I1000`)}:clear`,
+    accessToken,
+    { method: 'POST', body: JSON.stringify({}) }
+  );
+  await googleApiFetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'Overview'!A1`)}?valueInputOption=USER_ENTERED`,
+    accessToken,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        values: overviewRows,
+      }),
+    }
+  );
+}
+
 async function ensureSheetExists(
   spreadsheetId: string,
   accessToken: string,
@@ -622,6 +702,14 @@ async function ensureSheetExists(
       }),
     }
   );
+
+  if (/^\d{4}-\d{2}$/.test(sheetName)) {
+    try {
+      await syncOverviewSheetForMeta(spreadsheetId, accessToken, meta);
+    } catch (ovErr) {
+      console.warn('[Overview] Auto-sync Overview after creating month tab failed:', ovErr);
+    }
+  }
 
   return sheetId;
 }
@@ -1518,6 +1606,7 @@ export async function executeUserGoogleAction(
     case 'syncAll':
     case 'syncAllSheets': {
       await syncPortfolioFromTradesUser(spreadsheetId, accessToken, meta);
+      await syncOverviewSheetForMeta(spreadsheetId, accessToken, meta);
       return wrap({ success: true, synced: true, message: 'All sheets synchronized successfully' });
     }
 

@@ -92,14 +92,29 @@ export function CashflowCockpit() {
 
   const currentMonth = currentMonthValue();
   const months = useMemo(() => {
-    const values = new Set<string>([currentMonth, ...sheetMonths]);
     const currentYear = Number(currentMonth.slice(0, 4));
-    for (let month = 1; month <= 12; month += 1) values.add(`${currentYear}-${String(month).padStart(2, '0')}`);
+    const years = new Set<number>([currentYear, currentYear + 1]);
+    sheetMonths.forEach((m) => {
+      if (/^\d{4}-\d{2}$/.test(m)) years.add(Number(m.slice(0, 4)));
+    });
     transactions.forEach((transaction) => {
-      if (/^\d{4}-\d{2}/.test(transaction.date)) values.add(transaction.date.slice(0, 7));
+      if (/^\d{4}-\d{2}/.test(transaction.date)) years.add(Number(transaction.date.slice(0, 4)));
+    });
+    if (selectedMonth.startsWith('year-')) {
+      const selY = Number(selectedMonth.slice(5));
+      if (Number.isFinite(selY) && selY >= 2000 && selY <= 2100) years.add(selY);
+    } else if (/^\d{4}-\d{2}$/.test(selectedMonth)) {
+      const selY = Number(selectedMonth.slice(0, 4));
+      if (Number.isFinite(selY) && selY >= 2000 && selY <= 2100) years.add(selY);
+    }
+    const values = new Set<string>([currentMonth, ...sheetMonths]);
+    years.forEach((yr) => {
+      for (let month = 1; month <= 12; month += 1) {
+        values.add(`${yr}-${String(month).padStart(2, '0')}`);
+      }
     });
     return [...values].filter((value) => /^\d{4}-\d{2}$/.test(value)).sort((a, b) => b.localeCompare(a));
-  }, [currentMonth, sheetMonths, transactions]);
+  }, [currentMonth, selectedMonth, sheetMonths, transactions]);
 
   const visibleTransactions = useMemo(() => {
     if (selectedMonth === 'all') return transactions.filter((transaction) => transaction.date && transaction.id !== 'tx_sample');
@@ -217,8 +232,32 @@ export function CashflowCockpit() {
     <div className="money-cockpit-page">
       <div className="cockpit-period-row">
         <div className="cockpit-period-tabs" role="group" aria-label="Period type">
-          <button type="button" className={periodKind === 'month' ? 'is-active' : ''} aria-pressed={periodKind === 'month'} onClick={() => setSelectedMonth(currentMonth)}>Month</button>
-          <button type="button" className={periodKind === 'year' ? 'is-active' : ''} aria-pressed={periodKind === 'year'} onClick={() => setSelectedMonth(`year-${new Date().getFullYear()}`)}>Year</button>
+          <button
+            type="button"
+            className={periodKind === 'month' ? 'is-active' : ''}
+            aria-pressed={periodKind === 'month'}
+            onClick={() => {
+              if (selectedMonth.startsWith('year-')) {
+                const yr = selectedMonth.slice(5);
+                setSelectedMonth(yr === currentMonth.slice(0, 4) ? currentMonth : `${yr}-01`);
+              } else {
+                setSelectedMonth(currentMonth);
+              }
+            }}
+          >
+            Month
+          </button>
+          <button
+            type="button"
+            className={periodKind === 'year' ? 'is-active' : ''}
+            aria-pressed={periodKind === 'year'}
+            onClick={() => {
+              const yr = /^\d{4}-\d{2}$/.test(selectedMonth) ? selectedMonth.slice(0, 4) : String(new Date().getFullYear());
+              setSelectedMonth(`year-${yr}`);
+            }}
+          >
+            Year
+          </button>
           <button type="button" className={periodKind === 'all' ? 'is-active' : ''} aria-pressed={periodKind === 'all'} onClick={() => setSelectedMonth('all')}>All time</button>
         </div>
         <div className="cockpit-period-select-wrap">

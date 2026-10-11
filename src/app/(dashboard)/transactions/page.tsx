@@ -60,24 +60,34 @@ export default function TransactionsPage() {
 
   // Extract all available years and months from transactions + current year/month
   const { availableYears, monthsByYear } = useMemo(() => {
-    const monthSet = new Set<string>();
-    monthSet.add(currentMonthStr);
-
-    // Add all 12 months of current year so current year is always fully selectable
     const [curY] = currentMonthStr.split('-').map(Number);
-    for (let m = 1; m <= 12; m++) {
-      monthSet.add(`${curY}-${String(m).padStart(2, '0')}`);
-    }
+    const activeYears = new Set<number>([curY, curY + 1]);
 
-    // Add months from sheets query
+    // Add years from sheets query
     months.forEach(m => {
-      if (/^\d{4}-\d{2}$/.test(m)) monthSet.add(m);
+      if (/^\d{4}-\d{2}$/.test(m)) activeYears.add(Number(m.substring(0, 4)));
     });
 
-    // Add months from all recorded transactions
+    // Add years from all recorded transactions
     transactions.forEach(t => {
       if (t.date && t.date.length >= 7 && /^\d{4}-\d{2}/.test(t.date)) {
-        monthSet.add(t.date.substring(0, 7));
+        activeYears.add(Number(t.date.substring(0, 4)));
+      }
+    });
+
+    // Add year from currently selected period (e.g. when navigating with < / > arrows)
+    if (selectedMonth?.startsWith('year-')) {
+      const selY = Number(selectedMonth.slice(5));
+      if (Number.isFinite(selY) && selY >= 2000 && selY <= 2100) activeYears.add(selY);
+    } else if (selectedMonth && /^\d{4}-\d{2}$/.test(selectedMonth)) {
+      const selY = Number(selectedMonth.slice(0, 4));
+      if (Number.isFinite(selY) && selY >= 2000 && selY <= 2100) activeYears.add(selY);
+    }
+
+    const monthSet = new Set<string>([currentMonthStr]);
+    activeYears.forEach(yr => {
+      for (let m = 1; m <= 12; m++) {
+        monthSet.add(`${yr}-${String(m).padStart(2, '0')}`);
       }
     });
 
@@ -99,7 +109,7 @@ export default function TransactionsPage() {
       availableYears: sortedYears,
       monthsByYear: byYear,
     };
-  }, [transactions, months, currentMonthStr]);
+  }, [transactions, months, currentMonthStr, selectedMonth]);
 
   const formatPeriodLabel = (pStr: string) => {
     if (!pStr || pStr === 'all') return 'All Months';

@@ -21,9 +21,11 @@ import {
   DEFAULT_CATEGORY_CAPS
 } from '@/lib/category-budget-helper';
 import { saveSettingWithCloudSync, SETTINGS_UPDATED_EVENT } from '@/lib/cloud-settings-sync';
+import { useMonthList } from '@/hooks/useSheets';
 
 export default function BudgetPage() {
   const { selectedMonth, setSelectedMonth } = useAppStore();
+  const { data: sheetMonths = [] } = useMonthList();
   const { transactions = [] } = useTransactions(selectedMonth ? { period: selectedMonth } : undefined);
 
   // Active month in YYYY-MM format, e.g. "2026-10"
@@ -34,17 +36,31 @@ export default function BudgetPage() {
 
   // Extract all available years and months from transactions + current year/month
   const { availableYears, monthsByYear, allAvailableMonths } = useMemo(() => {
-    const monthSet = new Set<string>();
-    monthSet.add(currentMonthStr);
-
     const [curY] = currentMonthStr.split('-').map(Number);
-    for (let m = 1; m <= 12; m++) {
-      monthSet.add(`${curY}-${String(m).padStart(2, '0')}`);
-    }
+    const activeYears = new Set<number>([curY, curY + 1]);
+
+    sheetMonths.forEach(m => {
+      if (/^\d{4}-\d{2}$/.test(m)) activeYears.add(Number(m.substring(0, 4)));
+    });
 
     transactions.forEach(t => {
       if (t.date && t.date.length >= 7 && /^\d{4}-\d{2}/.test(t.date)) {
-        monthSet.add(t.date.substring(0, 7));
+        activeYears.add(Number(t.date.substring(0, 4)));
+      }
+    });
+
+    if (selectedMonth?.startsWith('year-')) {
+      const selY = Number(selectedMonth.slice(5));
+      if (Number.isFinite(selY) && selY >= 2000 && selY <= 2100) activeYears.add(selY);
+    } else if (selectedMonth && /^\d{4}-\d{2}$/.test(selectedMonth)) {
+      const selY = Number(selectedMonth.slice(0, 4));
+      if (Number.isFinite(selY) && selY >= 2000 && selY <= 2100) activeYears.add(selY);
+    }
+
+    const monthSet = new Set<string>([currentMonthStr]);
+    activeYears.forEach(yr => {
+      for (let m = 1; m <= 12; m++) {
+        monthSet.add(`${yr}-${String(m).padStart(2, '0')}`);
       }
     });
 
@@ -67,7 +83,7 @@ export default function BudgetPage() {
       monthsByYear: byYear,
       allAvailableMonths: sortedMonths
     };
-  }, [transactions, currentMonthStr]);
+  }, [transactions, sheetMonths, currentMonthStr, selectedMonth]);
 
   const handlePrevMonth = () => {
     if (selectedMonth.startsWith('year-')) {
