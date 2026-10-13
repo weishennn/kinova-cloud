@@ -268,6 +268,7 @@
 .cockpit-modal-close:disabled { opacity: .48; cursor: not-allowed; }
 .cockpit-modal-close:not(:disabled):hover { color: var(--cockpit-text); background: color-mix(in srgb, var(--cockpit-accent) 7%, var(--cockpit-surface-soft)); }
 .cockpit-modal-close:focus-visible { outline: 3px solid color-mix(in srgb, var(--cockpit-accent) 75%, transparent); outline-offset: 2px; }
+.receipt-price-search-modal .cockpit-modal-close { width: 44px; height: 44px; flex-basis: 44px; }
 
 .investment-action-label { margin-bottom: 8px; color: var(--cockpit-muted); font-size: 12px; font-weight: 620; }
 .investment-action-choice { min-height: 68px; display: grid; align-content: center; gap: 4px; padding: 10px 12px; border: 1px solid var(--cockpit-line); border-radius: 14px; color: var(--cockpit-muted); background: var(--cockpit-surface-soft); text-align: left; cursor: pointer; transition: border-color 150ms ease, color 150ms ease, background-color 150ms ease; }

@@ -26,6 +26,7 @@ import {
 import { driveApi } from '@/lib/sheets-api';
 import { MoneyCalculator } from '@/components/shared/money-calculator';
 import { toast } from 'sonner';
+import { withReceiptItemsInNotes } from '@/lib/receipt-items';
 
 const CATEGORY_EMOJIS: Record<string, string> = {
   'Food & Dining': '🍔',
@@ -80,6 +81,7 @@ export function SmartQuickInput() {
   const [saveReceiptPhoto, setSaveReceiptPhoto] = useState(true);
   const [isEditingDetails, setIsEditingDetails] = useState(false);
   const [receiptItems, setReceiptItems] = useState<AiReceiptItem[]>([]);
+  const [hasScannedReceiptLineItems, setHasScannedReceiptLineItems] = useState(false);
   const [selectedReceiptItems, setSelectedReceiptItems] = useState<number[]>([]);
   const [originalReceiptData, setOriginalReceiptData] = useState<{
     totalAmount: number;
@@ -146,6 +148,7 @@ export function SmartQuickInput() {
   const clearReceiptState = () => {
     setReceiptAttachment(null);
     setReceiptItems([]);
+    setHasScannedReceiptLineItems(false);
     setSelectedReceiptItems([]);
     setOriginalReceiptData(null);
     setReceiptRawText('');
@@ -414,8 +417,9 @@ export function SmartQuickInput() {
 
       const tx = payload.data as AiTransactionData;
       const items = Array.isArray(payload.items)
-        ? payload.items.filter((item) => item && typeof item.name === 'string' && Number(item.amount) > 0).slice(0, 15)
+        ? payload.items.filter((item) => item && typeof item.name === 'string' && Number(item.amount) > 0).slice(0, 40)
         : [];
+      setHasScannedReceiptLineItems(items.length > 0);
       const safeItems = items.length > 0
         ? items
         : [{ name: tx.description, amount: tx.subtotal || tx.amount, category: tx.category }];
@@ -570,6 +574,17 @@ export function SmartQuickInput() {
       const tagged = applyTaxReliefTag(taxPreviewInfo.category.id, finalNotes);
       finalSubCategory = tagged.subCategory;
       finalNotes = tagged.notes;
+    }
+
+    if (hasScannedReceiptLineItems && receiptItems.length > 0) {
+      finalNotes = withReceiptItemsInNotes(finalNotes, receiptItems.map((item, index) => ({
+        ...item,
+        quantity: Math.max(1, Math.round(Number(item.quantity) || 1)),
+        unitPrice: Number(item.unitPrice) > 0
+          ? Number(item.unitPrice)
+          : Number(item.amount) / Math.max(1, Math.round(Number(item.quantity) || 1)),
+        includedInExpense: selectedReceiptItems.includes(index),
+      })));
     }
 
     const rowData: Record<string, any> = {
@@ -1127,7 +1142,15 @@ export function SmartQuickInput() {
                   <button
                     type="button"
                     onClick={() => {
-                      setAiPrefill({ kind: 'transaction', data: activeCommand.data, receipt: receiptAttachment || undefined });
+                      setAiPrefill({
+                        kind: 'transaction',
+                        data: activeCommand.data,
+                        receipt: receiptAttachment || undefined,
+                        receiptItems: (hasScannedReceiptLineItems ? receiptItems : []).map((item, index) => ({
+                          ...item,
+                          includedInExpense: selectedReceiptItems.includes(index),
+                        })),
+                      });
                       setQuickAddOpen(true);
                       setInput('');
                       setAiParsed(null);

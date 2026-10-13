@@ -4,6 +4,7 @@ import { useSheetData, useAddRow, useUpdateRow, useDeleteRow } from './useSheets
 import { parseCurrencyAmount } from '@/lib/sheets-api';
 import { getAmountInBaseCurrency } from '@/lib/currency';
 import { parseLocalDate } from '@/lib/date-helper';
+import { parseLegacyPaidItemsFromNotes, parseReceiptItemsFromNotes, type StoredReceiptItem } from '@/lib/receipt-items';
 import { isMonthInRollingWindow } from '@/lib/cache-manager';
 import {
   buildSplitwiseTransactionsFromTrips,
@@ -28,6 +29,7 @@ export interface Transaction {
   baseCurrency?: string;
   fxRateToBase?: number;
   notes?: string;
+  receiptItems?: StoredReceiptItem[];
   tripTag?: string;
   tripId?: string;
   receiptUrl?: string;
@@ -51,6 +53,9 @@ export function normalizeTransaction(raw: Record<string, unknown>): Transaction 
     ? undefined
     : parseCurrencyAmount(rawBaseAmount);
 
+  const notes = String(raw.Notes || raw.notes || '');
+  const storedReceiptItems = parseReceiptItemsFromNotes(notes);
+
   return {
     id: String(raw.Id || raw.id || `tx_${Math.random().toString(36).substring(2, 9)}`),
     date: String(raw.Date || raw.date || ''),
@@ -64,7 +69,10 @@ export function normalizeTransaction(raw: Record<string, unknown>): Transaction 
     baseAmount: Number.isFinite(parsedBaseAmount) ? parsedBaseAmount : undefined,
     baseCurrency: String(raw.BaseCurrency || raw.baseCurrency || raw.base_currency || 'MYR'),
     fxRateToBase: Number(raw.FxRateToBase || raw.fxRateToBase || raw.fx_rate_to_base || 0) || undefined,
-    notes: String(raw.Notes || raw.notes || ''),
+    notes,
+    receiptItems: storedReceiptItems.length > 0
+      ? storedReceiptItems
+      : parseLegacyPaidItemsFromNotes(notes),
     tripTag: trip,
     tripId: trip,
     receiptUrl: String(raw.ReceiptUrl || raw.receiptUrl || ''),

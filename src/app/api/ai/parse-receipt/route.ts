@@ -20,6 +20,8 @@ interface RawKinovaReceiptItem {
   quantity: number;
   unitPrice: number;
   amount: number;
+  brand?: string;
+  productType?: string;
   qtyReconciled?: string;
   category?: string;
 }
@@ -185,7 +187,8 @@ Extract:
 - taxRate: total combined numeric percentage of ALL taxes + service charges (e.g. if Service Charge is 10% and SST is 6%, taxRate MUST be 16; if 10% + 8%, taxRate MUST be 18)
 - taxIncluded (boolean)
 - taxLabel: combined label of all taxes/charges (e.g. "Service Charge 10% + SST 6%")
-- items: array of purchased products/foods with { "name": string, "quantity": number, "unitPrice": number, "amount": number, "category": string }.
+- items: array of every purchased product/food line with { "name": string, "quantity": number, "unitPrice": number, "amount": number, "brand": string|null, "productType": string|null, "category": string }.
+  Preserve the printed brand, variant, and package size in name (e.g. "Sunsilk Black Shine Shampoo 680 ml"). Put a short product class in productType (e.g. "shampoo") even if it is abbreviated on the receipt. Use brand only when it is clear; do not guess.
   IMPORTANT FOR QUANTITY > 1 (e.g. "2 Laksa 18.00" vs "2 Laksa 9.00"):
   Check the receipt's subtotal / total math!
   - If the receipt prints "2 Laksa 18.00" where 18.00 is ALREADY the total for 2 plates, set "quantity": 2, "unitPrice": 9.00, "amount": 18.00 (do NOT multiply 18.00 by 2 again).
@@ -194,7 +197,7 @@ Extract:
 - notes: any short helpful summary.
 
 If the amount is unreadable, calculate from the sum of items plus taxes. If no items or amount are readable, set amount to null.
-Shape: {"amount": number|null, "currency": string, "category": string, "description": string, "date": "YYYY-MM-DD", "subtotal": number|null, "taxes": [{"label": string, "rate": number|null, "amount": number|null}], "taxAmount": number|null, "taxRate": number|null, "taxIncluded": boolean, "taxLabel": string, "items": [{"name": string, "quantity": number, "unitPrice": number, "amount": number, "category": string}], "notes": string}`;
+Shape: {"amount": number|null, "currency": string, "category": string, "description": string, "date": "YYYY-MM-DD", "subtotal": number|null, "taxes": [{"label": string, "rate": number|null, "amount": number|null}], "taxAmount": number|null, "taxRate": number|null, "taxIncluded": boolean, "taxLabel": string, "items": [{"name": string, "quantity": number, "unitPrice": number, "amount": number, "brand": string|null, "productType": string|null, "category": string}], "notes": string}`;
 
     for (const model of models) {
       let res: Response | null = null;
@@ -296,11 +299,13 @@ Shape: {"amount": number|null, "currency": string, "category": string, "descript
                 quantity: qty,
                 unitPrice,
                 amount: amt,
+                brand: typeof item.brand === 'string' ? item.brand.trim() : undefined,
+                productType: typeof item.productType === 'string' ? item.productType.trim() : undefined,
                 category: typeof item.category === 'string' ? item.category.trim() : undefined,
               };
             })
             .filter((item) => item.name && item.amount > 0)
-            .slice(0, 20)
+            .slice(0, 40)
           : [];
 
         const items = reconcileKinovaReceiptItems(rawParsedItems, expectedItemsSubtotal);

@@ -54,6 +54,7 @@ import {
   findDuplicateTransactionsInLedger,
   type ShortcutQuickDraft,
 } from '@/lib/shortcut-draft-store';
+import { parseLegacyPaidItemsFromNotes, parseReceiptItemsFromNotes, stripReceiptItemsFromNotes, withReceiptItemsInNotes, type StoredReceiptItem } from '@/lib/receipt-items';
 
 const CATEGORIES = {
   Expense: [
@@ -135,6 +136,7 @@ export function RecordPaymentModal() {
   const submitLockRef = useRef(false);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
+  const [receiptItemsToSave, setReceiptItemsToSave] = useState<StoredReceiptItem[]>([]);
   const [showReceiptModal, setShowReceiptModal] = useState<boolean>(false);
   const [isScanningReceipt, setIsScanningReceipt] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -372,7 +374,14 @@ export function RecordPaymentModal() {
     setDescription(String(editTransaction.Description || editTransaction.description || ''));
     setDate(String(editTransaction.Date || editTransaction.date || getLocalDateString()));
     const rawNotes = String(editTransaction.Notes || editTransaction.notes || '');
-    setNotes(rawNotes);
+    setNotes(stripReceiptItemsFromNotes(rawNotes));
+    setReceiptItemsToSave(
+      Array.isArray(editTransaction.receiptItems)
+        ? editTransaction.receiptItems as StoredReceiptItem[]
+        : parseReceiptItemsFromNotes(rawNotes).length > 0
+          ? parseReceiptItemsFromNotes(rawNotes)
+          : parseLegacyPaidItemsFromNotes(rawNotes),
+    );
     setTripTag(String(editTransaction.TripTag || editTransaction.tripTag || ''));
     setTransactionCurrency(String(editTransaction.Currency || editTransaction.currency || 'MYR').toUpperCase());
     const existingReceipt = String(editTransaction.ReceiptUrl || editTransaction.receiptUrl || '');
@@ -411,6 +420,7 @@ export function RecordPaymentModal() {
     setDate(draft.startDate);
     setFirstPaymentDate(draft.startDate);
     setNotes(draft.notes || '');
+    setReceiptItemsToSave([]);
     setTripTag(draft.tripTag || '');
     setTransactionCurrency(draft.currency || 'MYR');
     setIsInstallment(true);
@@ -436,6 +446,14 @@ export function RecordPaymentModal() {
       draft.taxIncluded === true ? 'included' : '',
     ].filter(Boolean).join(' ');
     setNotes([draft.notes, taxSummary ? `Tax breakdown: ${taxSummary}` : ''].filter(Boolean).join('\n'));
+    setReceiptItemsToSave((aiPrefill.receiptItems || []).map((item) => {
+      const quantity = Math.max(1, Math.round(Number(item.quantity) || 1));
+      return {
+        ...item,
+        quantity,
+        unitPrice: Number(item.unitPrice) > 0 ? Number(item.unitPrice) : Number(item.amount) / quantity,
+      };
+    }));
     setTransactionCurrency(draft.currency || 'MYR');
     setIsInstallment(false);
     setCustomInstallmentMonths('');
@@ -700,6 +718,7 @@ export function RecordPaymentModal() {
     setShortcutDuplicateConfirmed(false);
     setReceiptFile(null);
     setReceiptPreview(null);
+    setReceiptItemsToSave([]);
     setShowReceiptModal(false);
     setPayslipPcb('');
     setPayslipEpf('');
@@ -858,7 +877,9 @@ export function RecordPaymentModal() {
         parsed.taxAmount != null ? `tax ${parsed.currency || 'MYR'} ${Number(parsed.taxAmount).toFixed(2)}` : '',
         parsed.taxRate != null ? `${Number(parsed.taxRate)}%` : '',
       ].filter(Boolean).join(' ');
-      setNotes(`${String(parsed.notes || 'Scanned from receipt; please verify before saving.')}${taxSummary ? ` (${taxSummary})` : ''}`);
+      const receiptNotes = `${String(parsed.notes || 'Scanned from receipt; please verify before saving.')}${taxSummary ? ` (${taxSummary})` : ''}`;
+      setNotes(receiptNotes);
+      setReceiptItemsToSave(Array.isArray(json.data?.items) ? json.data.items as StoredReceiptItem[] : []);
       toast.success('Receipt details filled in. Please review before saving.');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Receipt scanning failed');
@@ -1010,6 +1031,7 @@ export function RecordPaymentModal() {
       manualTaxOverride && !selectedTaxCategoryId
     );
     finalNotes = taxTagged.notes;
+    finalNotes = withReceiptItemsInNotes(finalNotes, receiptItemsToSave);
     const finalSubCategory = taxTagged.subCategory;
 
     const rowData = {
@@ -2514,6 +2536,12 @@ export function RecordPaymentModal() {
                     <X className="h-4 w-4" />
                   </button>
                 </div>
+              )}
+              {receiptItemsToSave.length > 0 && (
+                <p className="flex items-center gap-1.5 text-xs text-emerald-800 dark:text-emerald-300" role="status">
+                  <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  {receiptItemsToSave.length} receipt {receiptItemsToSave.length === 1 ? 'item' : 'items'} will be searchable by product and price.
+                </p>
               )}
             </div>
 

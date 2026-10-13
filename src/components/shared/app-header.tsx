@@ -1,13 +1,15 @@
 'use client';
 
 import Link from 'next/link';
-import { Wallet, RefreshCw, Check, LoaderCircle } from 'lucide-react';
+import { Wallet, RefreshCw, Check, LoaderCircle, Search } from 'lucide-react';
 import { useSyncAndRefresh } from '@/hooks/useSyncAndRefresh';
 import { useSyncStatus } from '@/hooks/useSyncStatus';
 import { ThemeToggle } from './theme-toggle';
+import { useAppStore } from '@/stores/app-store';
 
 export function AppHeader() {
   const { isRefreshing, justRefreshed, syncAndRefresh } = useSyncAndRefresh();
+  const setReceiptPriceSearchOpen = useAppStore((state) => state.setReceiptPriceSearchOpen);
   const { isOnline, hasCloudEndpoint, isConnected, pendingCount, formattedLastSync, lastSyncError, isReady } = useSyncStatus();
 
   const statusLabel = !isReady
@@ -57,6 +59,15 @@ export function AppHeader() {
 
         <div className="cockpit-topbar-actions" aria-live="polite">
           <ThemeToggle className="cockpit-icon-button" />
+          <button
+            type="button"
+            onClick={() => setReceiptPriceSearchOpen(true)}
+            className="cockpit-icon-button"
+            title="Find a past receipt price"
+            aria-label="Find a past receipt price"
+          >
+            <Search size={17} />
+          </button>
           <button
             type="button"
             onClick={() => void syncAndRefresh()}

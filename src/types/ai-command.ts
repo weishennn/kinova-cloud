@@ -21,6 +21,8 @@ export interface AiReceiptItem {
   amount: number;
   quantity?: number;
   unitPrice?: number;
+  brand?: string;
+  productType?: string;
   qtyReconciled?: string;
   category?: string;
 }
@@ -80,6 +82,7 @@ export type AiPrefill =
       kind: 'transaction';
       data: AiTransactionData;
       receipt?: { dataUrl: string; fileName: string; mimeType: string };
+      receiptItems?: Array<AiReceiptItem & { includedInExpense?: boolean }>;
     }
   | { kind: 'installment'; data: AiInstallmentData }
   | { kind: 'trade'; data: AiTradeData }

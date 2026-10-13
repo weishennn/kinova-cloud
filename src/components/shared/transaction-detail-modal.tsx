@@ -31,6 +31,7 @@ import { useLockBodyScroll } from '@/hooks/useLockBodyScroll';
 import { confirmAction } from '@/stores/confirm-dialog-store';
 import { buildTransactionBaseRecord } from '@/lib/conflict-policy';
 import { getTransactionRecordedInfo } from '@/lib/date-helper';
+import { stripReceiptItemsFromNotes, withReceiptItemsInNotes } from '@/lib/receipt-items';
 
 interface TransactionDetailModalProps {
   transaction: Transaction | null;
@@ -293,7 +294,8 @@ function TransactionDetailContent({
 
   const handleTaxCategoryChange = (newCatId: string) => {
     setCurrentTaxCatId(newCatId);
-    const { subCategory, notes } = applyTaxReliefTag(newCatId, transaction.notes || '');
+    const { subCategory, notes } = applyTaxReliefTag(newCatId, stripReceiptItemsFromNotes(transaction.notes || ''));
+    const notesWithItems = withReceiptItemsInNotes(notes, transaction.receiptItems || []);
     const targetSheet = transaction._month || (transaction.date ? transaction.date.substring(0, 7) : 'Transactions');
     updateMutation.mutate({
       sheetName: targetSheet,
@@ -307,8 +309,8 @@ function TransactionDetailContent({
         Description: transaction.description,
         Amount: transaction.amount,
         Currency: transaction.currency,
-        Notes: notes,
-        notes: notes,
+        Notes: notesWithItems,
+        notes: notesWithItems,
         ReceiptUrl: transaction.receiptUrl || '',
         TripTag: currentTrip || '',
         tripTag: currentTrip || '',
@@ -456,6 +458,28 @@ function TransactionDetailContent({
               </p>
             </div>
 
+            {transaction.receiptItems && transaction.receiptItems.length > 0 && (
+              <div className="pt-2 border-t border-slate-200 dark:border-zinc-800/60">
+                <span className="text-slate-500 dark:text-zinc-400 block mb-1.5 font-medium">Receipt items · searchable by price</span>
+                <div className="space-y-1.5">
+                  {transaction.receiptItems.map((item, index) => (
+                    <div key={`${item.name}-${index}`} className="flex items-start justify-between gap-3 rounded-lg bg-white/90 dark:bg-zinc-950/50 px-2.5 py-2">
+                      <div className="min-w-0">
+                        <p className="font-medium text-slate-800 dark:text-zinc-200 break-words">{item.name}</p>
+                        <p className="mt-0.5 text-[10px] text-slate-500 dark:text-zinc-400">
+                          {item.quantity} × {transaction.currency} {item.unitPrice.toFixed(2)} each
+                          {item.includedInExpense === false ? ' · excluded from this expense' : ''}
+                        </p>
+                      </div>
+                      <span className="shrink-0 font-mono font-semibold text-slate-800 dark:text-zinc-200">
+                        {transaction.currency} {item.amount.toFixed(2)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="pt-2 border-t border-slate-200 dark:border-zinc-800/60">
               <span className="text-slate-500 dark:text-zinc-400 block mb-0.5 font-medium">Category</span>
               <span className="font-semibold text-slate-800 dark:text-zinc-200">{transaction.category}</span>
@@ -520,11 +544,11 @@ function TransactionDetailContent({
             )}
 
             {/* Notes */}
-            {transaction.notes && (
+            {stripReceiptItemsFromNotes(transaction.notes || '') && (
               <div className="pt-2 border-t border-slate-200 dark:border-zinc-800/60">
                 <span className="text-slate-500 dark:text-zinc-400 block mb-1 font-medium">Notes</span>
                 <p className="text-slate-700 dark:text-zinc-300 italic whitespace-pre-wrap leading-relaxed bg-white/90 dark:bg-zinc-950/60 p-2.5 rounded-xl border border-slate-200 dark:border-zinc-800/60">
-                  {transaction.notes}
+                  {stripReceiptItemsFromNotes(transaction.notes || '')}
                 </p>
               </div>
             )}

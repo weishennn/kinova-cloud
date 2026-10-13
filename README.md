@@ -20,6 +20,7 @@ A mobile-first Progressive Web App (PWA) for personal finance, wealth tracking, 
 ### 🤖 Gemini AI Bookkeeping & Multi-Key Load Balancing
 - **Smart Quick Input (Text & Voice)**: Type or dictate natural phrases like *"Lunch nasi lemak 15.50"* or *"买 10 股 NVDA @ 135 USD"* to auto-parse amount, currency, category, date, and investment metadata.
 - **Receipt Camera & Photo OCR**: Snap or upload receipts/PDFs to extract merchant, line items, SST/service tax, and auto-archive the file to Google Drive.
+- **Receipt Price Memory**: Saved receipt scans keep each item's brand, product type, package size, quantity, and unit price with the expense. Tap the header search button or pull farther down from the top to ask what you paid; recent matches appear locally while older history loads. “Compare online” is an optional, user-triggered Google Search comparison with source links. It uses the existing server-side Gemini key and may consume paid API quota; the key is never sent to the browser.
 - **Multi-Key Load Balancer & 429 Failover (`src/lib/gemini-key-pool.ts`)**: Configure 3 or more Gemini API keys (`GEMINI_API_KEY=key1,key2,key3` or `GEMINI_API_KEY_1`..`10`). Requests rotate via **Round-Robin** across healthy keys and transparently fail over in milliseconds within the same request if any key hits `HTTP 429` (quota exhausted) or `401/403`.
 
 ### 📲 iPhone Back Tap & Apple Pay Shortcut Auto-Recording
@@ -73,6 +74,8 @@ AUTH_SECRET=your_64_char_random_hex_secret
 GEMINI_API_KEY=key1,key2,key3
 # Option B: Or numbered keys GEMINI_API_KEY_1, GEMINI_API_KEY_2, GEMINI_API_KEY_3...
 GEMINI_MODEL=gemini-2.5-flash
+# Optional model override for user-requested web price comparisons (defaults to gemini-2.5-flash)
+GEMINI_PRICE_SEARCH_MODEL=gemini-2.5-flash
 
 # 3. Admin Google Apps Script Bridge & Shortcut Token
 APPS_SCRIPT_URL=https://script.google.com/macros/s/.../exec

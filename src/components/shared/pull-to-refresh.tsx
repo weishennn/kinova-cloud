@@ -7,10 +7,11 @@ import { useSyncAndRefresh } from '@/hooks/useSyncAndRefresh';
 
 interface PullToRefreshProps {
   onRefresh?: () => Promise<void>;
+  onAskPrice?: () => void;
   children?: React.ReactNode;
 }
 
-export function PullToRefresh({ onRefresh, children }: PullToRefreshProps) {
+export function PullToRefresh({ onRefresh, onAskPrice, children }: PullToRefreshProps) {
   const { isRefreshing: isHookRefreshing, syncAndRefresh } = useSyncAndRefresh();
   const [pullDistance, setPullDistance] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -20,7 +21,8 @@ export function PullToRefresh({ onRefresh, children }: PullToRefreshProps) {
   const isDraggingRef = useRef(false);
   const hasVibratedRef = useRef(false);
 
-  const THRESHOLD = 52; // Trigger distance in pixels
+  const REFRESH_THRESHOLD = 52;
+  const ASK_PRICE_THRESHOLD = 106;
 
   const handleTouchStart = useCallback((e: TouchEvent) => {
     if (
@@ -62,11 +64,11 @@ export function PullToRefresh({ onRefresh, children }: PullToRefreshProps) {
     }
 
     // Apply smooth rubber-band resistance curve
-    const dampedDistance = Math.min(75, Math.pow(diff, 0.82) * 1.5);
+    const dampedDistance = Math.min(124, Math.pow(diff, 0.85) * 2);
     setPullDistance(dampedDistance);
 
     // Haptic feedback once when crossing the threshold
-    if (dampedDistance >= THRESHOLD && !hasVibratedRef.current) {
+    if (dampedDistance >= REFRESH_THRESHOLD && !hasVibratedRef.current) {
       hasVibratedRef.current = true;
       if (typeof window !== 'undefined' && 'vibrate' in navigator) {
         try {
@@ -75,7 +77,7 @@ export function PullToRefresh({ onRefresh, children }: PullToRefreshProps) {
           // Ignore vibration failures if not permitted
         }
       }
-    } else if (dampedDistance < THRESHOLD) {
+    } else if (dampedDistance < REFRESH_THRESHOLD) {
       hasVibratedRef.current = false;
     }
   }, [isRefreshing]);
@@ -84,9 +86,12 @@ export function PullToRefresh({ onRefresh, children }: PullToRefreshProps) {
     if (!isDraggingRef.current) return;
     isDraggingRef.current = false;
 
-    if (pullDistance >= THRESHOLD && !isRefreshing) {
+    if (pullDistance >= ASK_PRICE_THRESHOLD && !isRefreshing && onAskPrice) {
+      setPullDistance(0);
+      onAskPrice();
+    } else if (pullDistance >= REFRESH_THRESHOLD && !isRefreshing) {
       setIsRefreshing(true);
-      setPullDistance(THRESHOLD);
+      setPullDistance(REFRESH_THRESHOLD);
 
       try {
         if (onRefresh) {
@@ -108,7 +113,7 @@ export function PullToRefresh({ onRefresh, children }: PullToRefreshProps) {
     } else {
       setPullDistance(0);
     }
-  }, [pullDistance, isRefreshing, onRefresh, syncAndRefresh]);
+  }, [pullDistance, isRefreshing, onRefresh, onAskPrice, syncAndRefresh]);
 
   useEffect(() => {
     window.addEventListener('touchstart', handleTouchStart, { passive: true });
@@ -125,7 +130,7 @@ export function PullToRefresh({ onRefresh, children }: PullToRefreshProps) {
   }, [handleTouchStart, handleTouchMove, handleTouchEnd]);
 
   const isVisible = pullDistance > 0 || isRefreshing || showSuccess;
-  const progress = Math.min(1, pullDistance / THRESHOLD);
+  const progress = Math.min(1, pullDistance / REFRESH_THRESHOLD);
 
   return (
     <>
@@ -164,8 +169,12 @@ export function PullToRefresh({ onRefresh, children }: PullToRefreshProps) {
                   >
                     <ArrowDown className={`h-3.5 w-3.5 ${progress >= 1 ? 'text-indigo-800 dark:text-indigo-400' : 'text-slate-600 dark:text-zinc-400'}`} />
                   </div>
-                  <span className={`text-[11px] ${progress >= 1 ? 'text-indigo-800 dark:text-indigo-300 font-bold' : 'text-slate-600 dark:text-zinc-400'}`}>
-                    {progress >= 1 ? 'Release to sync' : 'Pull to refresh'}
+                  <span className={`text-[11px] ${pullDistance >= ASK_PRICE_THRESHOLD ? 'text-indigo-800 dark:text-indigo-300 font-bold' : 'text-slate-600 dark:text-zinc-400'}`}>
+                    {pullDistance >= ASK_PRICE_THRESHOLD
+                      ? 'Release to find a price'
+                      : pullDistance >= REFRESH_THRESHOLD
+                        ? 'Release to sync · pull farther to ask'
+                        : 'Pull to sync · farther to ask'}
                   </span>
                 </>
               )}
