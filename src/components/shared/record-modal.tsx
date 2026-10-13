@@ -18,7 +18,11 @@ import {
   applyOptimisticUpdateToQueryCache,
 } from '@/hooks/useSheets';
 import { sheetsData } from '@/lib/sheets-data';
-import { driveApi } from '@/lib/sheets-api';
+import { getActiveUserCacheScope } from '@/lib/sheets-api';
+import {
+  enqueueReceiptUpload,
+  notifyReceiptUploadQueueChanged,
+} from '@/lib/receipt-upload-queue';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { formatClaimFileName } from '@/lib/claim-helper';
@@ -1059,6 +1063,8 @@ export function RecordPaymentModal() {
     if (editTransaction && (editTransaction.Id || editTransaction.id)) {
       const editTxId = String(editTransaction.Id || editTransaction.id);
       const targetReceiptUrl = receiptPreview ? (receiptPreview.startsWith('http') ? receiptPreview : existingReceiptUrl) : '';
+      const editSheetName = String(editTransaction._month || finalMonthStr);
+      const editRowIndex = Number(editTransaction._rowIndex || 2);
 
       // Instant optimistic UI + local SWR cache update (<10ms)
       const updatedTx = {
@@ -1079,41 +1085,48 @@ export function RecordPaymentModal() {
         updatedTx,
       );
 
+      // Start the ledger write first. updateUnifiedRow persists its local outbox
+      // entry before it waits on Google Sheets.
+      const ledgerWrite = updateUnifiedRow(editSheetName, editRowIndex, {
+        ...rowData,
+        ReceiptUrl: targetReceiptUrl,
+        Id: editTxId,
+        id: editTxId,
+        _month: finalMonthStr,
+        _baseData: buildTransactionBaseRecord(editTransaction),
+      });
+
+      let receiptQueued = false;
+      if (pendingReceipt && pendingPreview?.startsWith('data:')) {
+        const fileName = formatClaimFileName(pendingDate, pendingCategory, targetAmount, pendingDescription, pendingReceipt.name);
+        const isPdf = pendingReceipt.type === 'application/pdf' || pendingReceipt.name?.toLowerCase().endsWith('.pdf');
+        try {
+          await enqueueReceiptUpload({
+            accountScope: getActiveUserCacheScope(),
+            transactionId: editTxId,
+            sheetName: finalMonthStr,
+            rowIndex: editRowIndex,
+            fileName,
+            mimeType: isPdf ? 'application/pdf' : 'image/jpeg',
+            base64: pendingPreview.split(',')[1],
+            createdAt: Date.now(),
+          });
+          receiptQueued = true;
+        } catch (error) {
+          console.warn('Could not queue the receipt for retry:', error);
+          toast.error('Transaction update started, but the receipt could not be safely queued. Please attach it again from transaction details.');
+        }
+      }
+
       // Close modal and notify user immediately
       closeModal();
-      toast.success('Transaction updated! ⚡');
+      toast.success(receiptQueued ? 'Transaction updated. Receipt upload is queued! ⚡' : 'Transaction updated! ⚡');
 
-      // Asynchronous background update to Google Drive & databases
+      // Upload and link the receipt only after the transaction write is durable.
       void (async () => {
         try {
-          let uploadedReceiptUrl = targetReceiptUrl;
-          if (pendingReceipt && pendingPreview && pendingPreview.startsWith('data:')) {
-            const fileName = formatClaimFileName(pendingDate, pendingCategory, targetAmount, pendingDescription, pendingReceipt.name);
-            const isPdf = pendingReceipt.type === 'application/pdf' || pendingReceipt.name?.toLowerCase().endsWith('.pdf');
-            const uploadMime = isPdf ? 'application/pdf' : 'image/jpeg';
-            const res = await driveApi.uploadFile(fileName, uploadMime, pendingPreview.split(',')[1]);
-            uploadedReceiptUrl = res.data?.url || '';
-          }
-
-          await updateUnifiedRow(String(editTransaction._month || finalMonthStr), Number(editTransaction._rowIndex || 2), {
-            ...rowData,
-            ReceiptUrl: uploadedReceiptUrl,
-            Id: editTxId,
-            _month: finalMonthStr,
-            _baseData: buildTransactionBaseRecord(editTransaction),
-          });
-          if (uploadedReceiptUrl && uploadedReceiptUrl !== targetReceiptUrl) {
-            applyOptimisticUpdateToQueryCache(
-              queryClient,
-              String(editTransaction._month || finalMonthStr),
-              typeof editTransaction._rowIndex === 'number' ? editTransaction._rowIndex : 2,
-              {
-                ...updatedTx,
-                ReceiptUrl: uploadedReceiptUrl,
-                receiptUrl: uploadedReceiptUrl,
-              },
-            );
-          }
+          await ledgerWrite;
+          if (receiptQueued) notifyReceiptUploadQueueChanged();
           queryClient.invalidateQueries({ queryKey: ['months'] });
           queryClient.invalidateQueries({ queryKey: ['overview'] });
         } catch (err: unknown) {
@@ -1147,8 +1160,8 @@ export function RecordPaymentModal() {
       currency: pendingCurrency,
       TripTag: tripTag,
       tripTag: tripTag,
-      ReceiptUrl: pendingPreview || '',
-      receiptUrl: pendingPreview || '',
+      ReceiptUrl: '',
+      receiptUrl: '',
       Notes: finalNotes,
       notes: finalNotes,
       _month: finalMonthStr,
@@ -1160,6 +1173,39 @@ export function RecordPaymentModal() {
 
     if (!isFutureInstallment) {
       applyOptimisticAddToQueryCache(queryClient, finalMonthStr, optimisticRow);
+    }
+
+    let ledgerWrite: Promise<{ success: boolean; id: string; pending?: boolean }> | null = null;
+    let receiptQueued = false;
+    if (!isFutureInstallment) {
+      // addUnifiedRow writes the transaction outbox before starting its cloud request.
+      ledgerWrite = addUnifiedRow(finalMonthStr, {
+        ...rowData,
+        Id: tempId,
+        id: tempId,
+        ReceiptUrl: '',
+      });
+
+      if (pendingReceipt && pendingPreview?.startsWith('data:')) {
+        const fileName = formatClaimFileName(pendingDate, pendingCategory, targetAmount, pendingDescription, pendingReceipt.name);
+        const isPdf = pendingReceipt.type === 'application/pdf' || pendingReceipt.name?.toLowerCase().endsWith('.pdf');
+        try {
+          await enqueueReceiptUpload({
+            accountScope: getActiveUserCacheScope(),
+            transactionId: tempId,
+            sheetName: finalMonthStr,
+            rowIndex: 2,
+            fileName,
+            mimeType: isPdf ? 'application/pdf' : 'image/jpeg',
+            base64: pendingPreview.split(',')[1],
+            createdAt: Date.now(),
+          });
+          receiptQueued = true;
+        } catch (error) {
+          console.warn('Could not queue the receipt for retry:', error);
+          toast.error('Transaction saved, but the receipt could not be safely queued. Please attach it again from transaction details.');
+        }
+      }
     }
 
     // Register persistent installment plan immediately so UI reflects it right away
@@ -1228,11 +1274,17 @@ export function RecordPaymentModal() {
         toast.success(`Installment 1/${installmentMonths} (${pendingCurrency} ${targetAmount.toFixed(2)}) recorded! Future months will be tracked month-by-month.`, toastOptions);
       }
     } else if (savedTaxCat) {
-      if (pendingPreview) {
+      if (receiptQueued) {
+        toast.success(`Recorded under LHDN ${savedTaxCat.shortName}; receipt upload is queued! 🇲🇾🧾`, toastOptions);
+      } else if (pendingPreview?.startsWith('http')) {
         toast.success(`Recorded under LHDN ${savedTaxCat.shortName} with tax receipt! 🇲🇾🧾`, toastOptions);
+      } else if (pendingPreview) {
+        toast.success(`Recorded under LHDN ${savedTaxCat.shortName}; receipt still needs to be attached. 🇲🇾🧾`, toastOptions);
       } else {
         toast.success(`Recorded under LHDN ${savedTaxCat.shortName}! Don't forget to attach the receipt in Invoices & Claims. 🇲🇾📸`, toastOptions);
       }
+    } else if (receiptQueued) {
+      toast.success('Recorded; receipt upload is queued and will finish in the background. 🧾', toastOptions);
     } else {
       toast.success(
         isOtherPeriod
@@ -1244,27 +1296,8 @@ export function RecordPaymentModal() {
 
     void (async () => {
       try {
-        let receiptUrl = '';
-        if (pendingReceipt && pendingPreview && pendingPreview.startsWith('data:')) {
-          const fileName = formatClaimFileName(pendingDate, pendingCategory, targetAmount, pendingDescription, pendingReceipt.name);
-          const isPdf = pendingReceipt.type === 'application/pdf' || pendingReceipt.name?.toLowerCase().endsWith('.pdf');
-          const uploadMime = isPdf ? 'application/pdf' : 'image/jpeg';
-          const res = await driveApi.uploadFile(fileName, uploadMime, pendingPreview.split(',')[1]);
-          receiptUrl = res.data?.url || '';
-        }
-
-        // Only insert Month 1 transaction if it starts today or in the past.
-        // If starting next month, it will be recorded when that month arrives.
-        if (!isFutureInstallment) {
-          await addUnifiedRow(finalMonthStr, { ...rowData, Id: tempId, id: tempId, ReceiptUrl: receiptUrl });
-          if (receiptUrl) {
-            applyOptimisticUpdateToQueryCache(queryClient, finalMonthStr, 2, {
-              ...optimisticRow,
-              ReceiptUrl: receiptUrl,
-              receiptUrl,
-            });
-          }
-        }
+        if (ledgerWrite) await ledgerWrite;
+        if (receiptQueued) notifyReceiptUploadQueueChanged();
 
         queryClient.invalidateQueries({ queryKey: ['months'] });
         queryClient.invalidateQueries({ queryKey: ['overview'] });

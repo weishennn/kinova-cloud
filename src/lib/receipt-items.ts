@@ -92,8 +92,11 @@ export function withReceiptItemsInNotes(notes: string, items: unknown): string {
 }
 
 const QUERY_STOP_WORDS = new Set([
-  'a', 'an', 'and', 'bought', 'buy', 'cost', 'did', 'do', 'for', 'how', 'i', 'is', 'last', 'me', 'much',
-  'my', 'of', 'on', 'paid', 'pay', 'price', 'recent', 'the', 'what', 'when', 'where', 'with',
+  'a', 'an', 'and', 'any', 'are', 'ago', 'bought', 'buy', 'can', 'cost', 'could', 'did', 'do', 'does', 'find',
+  'for', 'have', 'how', 'i', 'is', 'item', 'items', 'last', 'like', 'me', 'much', 'my', 'of', 'on', 'paid',
+  'pay', 'please', 'price', 'product', 'products', 'previously', 'recent', 'remember', 'search', 'show', 'some',
+  'something', 'tell', 'the', 'that', 'these', 'thing', 'things', 'this', 'those', 'time', 'was', 'what', 'when',
+  'where', 'were', 'with', 'you', 'your',
 ]);
 
 function tokenize(value: string): string[] {

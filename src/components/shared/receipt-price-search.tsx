@@ -1,17 +1,16 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-  ArrowLeft,
+  ArrowUp,
   CalendarDays,
   ExternalLink,
   Globe2,
   LoaderCircle,
   PackageSearch,
   ReceiptText,
-  Search,
   Sparkles,
   Store,
   X,
@@ -64,6 +63,7 @@ function stableItemKey(item: StoredReceiptItem): string {
 }
 
 export function ReceiptPriceSearch({ returnTo }: ReceiptPriceSearchProps) {
+  const [draftQuery, setDraftQuery] = useState('');
   const [query, setQuery] = useState('');
   const [onlineResults, setOnlineResults] = useState<Record<string, OnlineResult>>({});
   const [loadingKey, setLoadingKey] = useState('');
@@ -109,6 +109,34 @@ export function ReceiptPriceSearch({ returnTo }: ReceiptPriceSearchProps) {
       )
       .slice(0, 30);
   }, [query, searchableTransactions]);
+
+  const suggestions = useMemo(() => {
+    const labels = new Set<string>();
+    const recentTransactions = [...searchableTransactions].sort((left, right) => right.date.localeCompare(left.date));
+
+    for (const transaction of recentTransactions) {
+      for (const item of transaction.receiptItems || []) {
+        const label = item.brand || item.productType || item.name;
+        if (label) labels.add(label);
+        if (labels.size >= 3) break;
+      }
+      if (labels.size >= 3) break;
+    }
+
+    return Array.from(labels).map((label) => `How much was ${label}?`);
+  }, [searchableTransactions]);
+
+  const askAboutPrice = (value: string) => {
+    const cleanValue = value.trim();
+    if (!cleanValue) return;
+    setDraftQuery(cleanValue);
+    setQuery(cleanValue);
+  };
+
+  const handleAskSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    askAboutPrice(draftQuery);
+  };
 
   const compareOnline = async (item: StoredReceiptItem) => {
     const key = stableItemKey(item);
@@ -169,110 +197,68 @@ export function ReceiptPriceSearch({ returnTo }: ReceiptPriceSearchProps) {
     <div className="receipt-price-page">
       <div className="receipt-price-page-inner">
         <header className="receipt-price-page-nav">
-          <Link href={returnTo} className="receipt-price-back">
-            <ArrowLeft size={18} aria-hidden="true" />
-            <span>Back</span>
+          <Link href={returnTo} className="receipt-price-back" aria-label="Close price search">
+            <X size={19} aria-hidden="true" />
           </Link>
-          <span className="receipt-price-nav-title">Price history</span>
+          <span className="receipt-price-nav-title">
+            Kinova AI <span className="receipt-price-beta">receipt memory</span>
+          </span>
           <span className="receipt-price-nav-spacer" aria-hidden="true" />
         </header>
 
-        <section className="receipt-price-hero" aria-labelledby="receipt-price-heading">
-          <div className="receipt-price-hero-copy">
-            <p className="receipt-price-hero-kicker">Your receipts, remembered</p>
-            <h1 id="receipt-price-heading">What did you pay?</h1>
-            <p>Find a product, brand or size across your saved receipts.</p>
-          </div>
-          <div className="receipt-price-hero-icon" aria-hidden="true">
-            <ReceiptText size={26} strokeWidth={1.8} />
-          </div>
-        </section>
-
-        <section className="receipt-price-search-panel" aria-labelledby="receipt-price-search-label">
-          <label id="receipt-price-search-label" htmlFor="receipt-price-query">Search your receipts</label>
-          <div className="receipt-price-search-field">
-            <Search size={19} aria-hidden="true" />
-            <input
-              id="receipt-price-query"
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Try Sunsilk shampoo or Dove"
-              aria-describedby="receipt-price-search-help"
-              autoComplete="off"
-            />
-            {query && (
-              <button
-                type="button"
-                className="receipt-price-clear"
-                onClick={() => setQuery('')}
-                aria-label="Clear search"
-              >
-                <X size={18} aria-hidden="true" />
-              </button>
-            )}
-          </div>
-          <div className="receipt-price-search-status" aria-live="polite">
-            <span id="receipt-price-search-help">Saved receipt matches appear first.</span>
-            <span className="receipt-price-history-status">
-              {historyQuery.isFetching && <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />}
-              {historyStatus}
-            </span>
-          </div>
-          {historyQuery.isError && (
-            <div className="receipt-price-history-error" role="status">
-              <span>Showing receipt items already saved on this device.</span>
-              <button type="button" onClick={() => void historyQuery.refetch()}>Retry</button>
-            </div>
-          )}
-        </section>
-
         {query.trim().length === 0 ? (
-          <section className="receipt-price-start" aria-labelledby="receipt-price-start-title">
-            <div className="receipt-price-section-heading">
-              <div>
-                <h2 id="receipt-price-start-title">Find an item</h2>
-                <p>Search by product, brand or pack size.</p>
-              </div>
-              <PackageSearch size={21} aria-hidden="true" />
+          <section className="receipt-price-welcome" aria-labelledby="receipt-price-heading">
+            <div className="receipt-price-welcome-mark" aria-hidden="true"><Sparkles size={25} strokeWidth={1.6} /></div>
+            <h1 id="receipt-price-heading">Where do we start?</h1>
+            <p>Ask about a product price from your saved receipts.</p>
+            <div className="receipt-price-history-status" aria-live="polite">
+              {historyQuery.isFetching && <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />}
+              <span>{historyStatus}</span>
             </div>
-            <div className="receipt-price-suggestions" aria-label="Example searches">
-              {['Sunsilk', 'Dove', 'Shampoo'].map((suggestion) => (
-                <button key={suggestion} type="button" onClick={() => setQuery(suggestion)}>
-                  <Search size={14} aria-hidden="true" />
-                  {suggestion}
+            {historyQuery.isError && (
+              <div className="receipt-price-history-error" role="status">
+                <span>Using receipt items already saved on this device.</span>
+                <button type="button" onClick={() => void historyQuery.refetch()}>Retry</button>
+              </div>
+            )}
+            <div className="receipt-price-suggestions" aria-label="Suggested questions">
+              {(suggestions.length > 0 ? suggestions : ['Find shampoo', 'Find Sunsilk']).map((suggestion) => (
+                <button key={suggestion} type="button" onClick={() => askAboutPrice(suggestion)}>
+                  <ReceiptText size={15} aria-hidden="true" />
+                  <span>{suggestion}</span>
                 </button>
               ))}
             </div>
-            <p className="receipt-price-start-note">Product names and prices are saved from your receipt scans.</p>
+            {searchableTransactions.length === 0 && !historyQuery.isFetching && (
+              <p className="receipt-price-start-note">Scan a receipt with item details and Kinova will remember its prices.</p>
+            )}
           </section>
-        ) : query.trim().length < 2 ? (
-          <div className="receipt-price-empty" role="status">
-            <Search size={21} aria-hidden="true" />
-            <h2>Keep typing</h2>
-            <p>Enter at least 2 letters to search your receipt items.</p>
-          </div>
         ) : (
-          <section className="receipt-price-results" aria-label={`${matches.length} receipt price matches`}>
-            <div className="receipt-price-results-heading">
-              <div>
-                <h2>{matches.length ? 'Found in your receipts' : historyQuery.isFetching ? 'Searching older receipts' : 'No saved price found'}</h2>
-                <p>
-                  {matches.length
-                    ? `Showing ${matches.length} ${matches.length === 1 ? 'match' : 'matches'} for “${query.trim()}”.`
-                    : historyQuery.isFetching
-                      ? 'Your recent records are searched first. Older ones are loading in the background.'
-                      : `Try another brand, product name or size.`}
-                </p>
-              </div>
-              {matches.length > 0 && <span className="receipt-price-result-count">{matches.length}</span>}
+          <section className="receipt-price-conversation" aria-label="Receipt price answer" aria-live="polite">
+            <div className="receipt-price-user-message">{query}</div>
+            <div className="receipt-price-answer-heading">
+              <div className="receipt-price-answer-mark" aria-hidden="true"><Sparkles size={15} /></div>
+              <span>From your receipts</span>
+              {historyQuery.isFetching && <LoaderCircle size={14} className="animate-spin" aria-label="Checking older receipts" />}
             </div>
-
+            <p className="receipt-price-answer-copy">
+              {matches.length > 0
+                ? `I found ${matches.length} ${matches.length === 1 ? 'match' : 'matches'} in your saved receipt items.`
+                : historyQuery.isFetching
+                  ? 'Checking recent items first. Older receipt history is loading in the background.'
+                  : 'I couldn’t find that item in your saved receipt history.'}
+            </p>
+            {historyQuery.isError && matches.length === 0 && (
+              <div className="receipt-price-history-error" role="status">
+                <span>Older receipts could not load.</span>
+                <button type="button" onClick={() => void historyQuery.refetch()}>Retry</button>
+              </div>
+            )}
             {matches.length === 0 ? (
               <div className="receipt-price-empty">
                 {historyQuery.isFetching ? <LoaderCircle size={21} className="animate-spin" aria-hidden="true" /> : <PackageSearch size={21} aria-hidden="true" />}
-                <h2>{historyQuery.isFetching ? 'Checking the rest of your history…' : 'Try a different search'}</h2>
-                <p>{historyQuery.isError ? 'Older receipts could not be checked. Retry the history search above.' : 'For example, search for Sunsilk, Dove or a product size.'}</p>
+                <h2>{historyQuery.isFetching ? 'Still searching' : 'No saved price yet'}</h2>
+                <p>{historyQuery.isError ? 'Retry to check older receipts, or try a shorter brand or product name.' : 'Try a shorter product name or brand, such as Sunsilk, Dove or shampoo.'}</p>
               </div>
             ) : (
               <div className="receipt-price-result-list">
@@ -286,7 +272,7 @@ export function ReceiptPriceSearch({ returnTo }: ReceiptPriceSearchProps) {
                       <div className="receipt-price-result-main">
                         <div className="receipt-price-result-product">
                           {item.brand && <p className="receipt-price-result-brand">{item.brand}</p>}
-                          <h3>{item.name}</h3>
+                          <h2>{item.name}</h2>
                         </div>
                         <div className="receipt-price-result-price">
                           <span>Unit price</span>
@@ -350,6 +336,25 @@ export function ReceiptPriceSearch({ returnTo }: ReceiptPriceSearchProps) {
             )}
           </section>
         )}
+
+        <footer className="receipt-price-composer-wrap">
+          <form className="receipt-price-composer" onSubmit={handleAskSubmit}>
+            <Sparkles size={19} aria-hidden="true" />
+            <input
+              id="receipt-price-query"
+              type="search"
+              value={draftQuery}
+              onChange={(event) => setDraftQuery(event.target.value)}
+              placeholder="Ask about a product price…"
+              aria-label="Ask about a product price"
+              autoComplete="off"
+            />
+            <button type="submit" disabled={!draftQuery.trim()} aria-label="Search saved receipt prices">
+              <ArrowUp size={18} aria-hidden="true" />
+            </button>
+          </form>
+          <p className="receipt-price-composer-note">Saved receipt prices are searched first. Compare online is optional.</p>
+        </footer>
       </div>
     </div>
   );

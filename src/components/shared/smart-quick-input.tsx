@@ -8,7 +8,6 @@ import { parseNaturalExpense, ParsedExpense } from '@/lib/natural-expense-parser
 import {
   addUnifiedRow,
   applyOptimisticAddToQueryCache,
-  applyOptimisticUpdateToQueryCache,
 } from '@/hooks/useSheets';
 import { useTransactions } from '@/hooks/useTransactions';
 import { useQueryClient } from '@tanstack/react-query';
@@ -18,12 +17,16 @@ import { useAppStore } from '@/stores/app-store';
 import type { AiCommand, AiReceiptItem, AiTransactionData } from '@/types/ai-command';
 import { compressImageFile } from '@/lib/image-compressor';
 import { formatClaimFileName } from '@/lib/claim-helper';
+import { getActiveUserCacheScope } from '@/lib/sheets-api';
+import {
+  enqueueReceiptUpload,
+  notifyReceiptUploadQueueChanged,
+} from '@/lib/receipt-upload-queue';
 import {
   analyzePurchaseForTaxRelief,
   calculateYearlyTaxReliefSummary,
   applyTaxReliefTag,
 } from '@/lib/lhdn-tax-helper';
-import { driveApi } from '@/lib/sheets-api';
 import { MoneyCalculator } from '@/components/shared/money-calculator';
 import { toast } from 'sonner';
 import { withReceiptItemsInNotes } from '@/lib/receipt-items';
@@ -606,8 +609,8 @@ export function SmartQuickInput() {
       currency: activeParsed.currency || 'MYR',
       TripTag: '',
       tripTag: '',
-      ReceiptUrl: currentReceipt?.dataUrl || '',
-      receiptUrl: currentReceipt?.dataUrl || '',
+      ReceiptUrl: '',
+      receiptUrl: '',
       Notes: finalNotes,
       notes: finalNotes,
       _month: monthStr,
@@ -616,6 +619,53 @@ export function SmartQuickInput() {
 
     // Instant Optimistic Feedback (<10ms) across all active transaction queries + local SWR cache
     applyOptimisticAddToQueryCache(queryClient, monthStr, rowData);
+
+    // Persist the financial row first; the row outbox is written synchronously
+    // before addUnifiedRow waits for the Google Sheets response.
+    const ledgerWrite = addUnifiedRow(monthStr, {
+      Id: tempId,
+      id: tempId,
+      Date: safeDate,
+      Type: activeParsed.type,
+      Category: activeParsed.category,
+      SubCategory: finalSubCategory,
+      Description: activeParsed.description,
+      Amount: activeParsed.amount,
+      Currency: activeParsed.currency || 'MYR',
+      TripTag: '',
+      ReceiptUrl: '',
+      Notes: finalNotes,
+    });
+
+    let receiptQueued = false;
+    if (shouldUploadPhoto && currentReceipt?.base64) {
+      const fileCatLabel = taxPreviewInfo?.isEligible && taxPreviewInfo.category
+        ? `LHDN_${taxPreviewInfo.category.shortName}`
+        : activeParsed.category;
+      const fileName = formatClaimFileName(
+        activeParsed.date,
+        fileCatLabel,
+        activeParsed.amount,
+        activeParsed.description,
+        currentReceipt.fileName
+      );
+      try {
+        await enqueueReceiptUpload({
+          accountScope: getActiveUserCacheScope(),
+          transactionId: tempId,
+          sheetName: monthStr,
+          rowIndex: 2,
+          fileName,
+          mimeType: currentReceipt.mimeType || 'image/jpeg',
+          base64: currentReceipt.base64,
+          createdAt: Date.now(),
+        });
+        receiptQueued = true;
+      } catch (error) {
+        console.warn('Could not queue the receipt for retry:', error);
+        toast.error('Transaction saved, but the receipt could not be safely queued. Please attach it again from transaction details.');
+      }
+    }
 
     const recordedText = `${activeParsed.currency || 'MYR'} ${activeParsed.amount.toFixed(2)} for ${activeParsed.description}`;
     const savedTaxCat = taxPreviewInfo?.isEligible ? taxPreviewInfo.category : null;
@@ -640,8 +690,8 @@ export function SmartQuickInput() {
         }
       : undefined;
 
-    const toastMsg = currentReceipt && shouldUploadPhoto
-      ? `📸 Recorded & saved receipt photo: ${recordedText}!`
+    const toastMsg = receiptQueued
+      ? `📸 Recorded; receipt upload is queued: ${recordedText}!`
       : savedTaxCat
       ? `🇲🇾 Recorded (${savedTaxCat.shortName} Tax Relief): ${recordedText}! Remember to attach your receipt in Invoices & Tax.`
       : isOtherPeriod
@@ -649,52 +699,12 @@ export function SmartQuickInput() {
       : `✨ Recorded: ${recordedText}!`;
     toast.success(toastMsg, toastOptions);
 
-    // Asynchronously save to Google Sheets (and upload photo to Google Drive) in background
+    // Wake the global retry worker after the ledger write has acknowledged or
+    // safely entered its offline outbox. The receipt itself is already in IndexedDB.
     void (async () => {
       try {
-        let uploadedUrl = '';
-        if (shouldUploadPhoto && currentReceipt?.base64) {
-          try {
-            const fileCatLabel = savedTaxCat ? `LHDN_${savedTaxCat.shortName}` : activeParsed.category;
-            const fileName = formatClaimFileName(
-              activeParsed.date,
-              fileCatLabel,
-              activeParsed.amount,
-              activeParsed.description,
-              currentReceipt.fileName
-            );
-            const res = await driveApi.uploadFile(
-              fileName,
-              currentReceipt.mimeType || 'image/jpeg',
-              currentReceipt.base64
-            );
-            uploadedUrl = res.data?.url || '';
-          } catch (uploadErr) {
-            console.warn('Drive receipt upload failed, saving sheet row without url:', uploadErr);
-          }
-        }
-
-        await addUnifiedRow(monthStr, {
-          Id: tempId,
-          id: tempId,
-          Date: safeDate,
-          Type: activeParsed.type,
-          Category: activeParsed.category,
-          SubCategory: finalSubCategory,
-          Description: activeParsed.description,
-          Amount: activeParsed.amount,
-          Currency: activeParsed.currency || 'MYR',
-          TripTag: '',
-          ReceiptUrl: uploadedUrl,
-          Notes: finalNotes,
-        });
-        if (uploadedUrl) {
-          applyOptimisticUpdateToQueryCache(queryClient, monthStr, 2, {
-            ...rowData,
-            ReceiptUrl: uploadedUrl,
-            receiptUrl: uploadedUrl,
-          });
-        }
+        await ledgerWrite;
+        if (receiptQueued) notifyReceiptUploadQueueChanged();
         queryClient.invalidateQueries({ queryKey: ['months'] });
         queryClient.invalidateQueries({ queryKey: ['overview'] });
       } catch (err) {

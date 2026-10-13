@@ -823,6 +823,16 @@ export const sheetsData = {
     // Immediately update local SWR cache so UI and subsequent reads see the new row in 0ms
     this.optimisticAddRow(effectiveSheetName, payload);
 
+    // Persist the outbox entry before the network request starts. If the page is
+    // suspended while Apps Script is still responding, startup sync can replay it.
+    const pendingMutation = enqueuePendingMutation({
+      mutationId,
+      type: 'add',
+      sheetName: effectiveSheetName,
+      rowId: tempId,
+      rowData: payload,
+    });
+
     return trackActiveWrite(
       (async () => {
         try {
@@ -831,6 +841,7 @@ export const sheetsData = {
           // and never re-insert it into the local cache.
           if (isRecordTombstoned(tempId)) {
             void sheetsApi.deleteRow(res.data?.sheet || effectiveSheetName, res.data?.rowIndex, tempId).catch(() => {});
+            removePendingMutation(pendingMutation.id);
             return { success: true, id: tempId, pending: false };
           }
 
@@ -843,22 +854,18 @@ export const sheetsData = {
                 _rowIndex: res.data.rowIndex,
               });
             }
+            removePendingMutation(pendingMutation.id);
             return { success: true, id: tempId, pending: false };
           }
           throw new Error(res.message || 'Google Sheets addRow was not verified on read-back');
         } catch (err) {
           // If the user already deleted this row while addRow was in flight, do not queue a stale add!
           if (isRecordTombstoned(tempId)) {
+            removePendingMutation(pendingMutation.id);
             return { success: true, id: tempId, pending: false };
           }
           console.warn(`[SheetsData] Add row failed, enqueuing to offline queue:`, err);
-          enqueuePendingMutation({
-            mutationId,
-            type: 'add',
-            sheetName: effectiveSheetName,
-            rowId: tempId,
-            rowData: payload,
-          });
+          markPendingMutationFailed(pendingMutation.id, err instanceof Error ? err.message : String(err));
           toast.info('Saved offline. Will sync to Google Sheets when connected.', {
             duration: 4000,
           });
@@ -880,6 +887,17 @@ export const sheetsData = {
     // Immediately update local SWR cache in 0ms
     this.optimisticUpdateRow(sheetName, rowIndex, cacheRowData);
 
+    // Keep the update durable while its cloud request is in flight, not only
+    // after a timeout has already been detected.
+    const pendingMutation = enqueuePendingMutation({
+      mutationId,
+      type: 'update',
+      sheetName,
+      rowIndex,
+      rowId: id,
+      rowData,
+    });
+
     return trackActiveWrite(
       (async () => {
         try {
@@ -897,6 +915,7 @@ export const sheetsData = {
             if (!conflictSaved) {
               throw new Error('Could not persist both versions of the transaction conflict');
             }
+            removePendingMutation(pendingMutation.id);
             return { success: false, pending: false, conflict: true };
           }
           const isVerified =
@@ -908,6 +927,7 @@ export const sheetsData = {
                 _rowIndex: res.data.rowIndex,
               });
             }
+            removePendingMutation(pendingMutation.id);
             return { success: true, pending: false };
           }
 
@@ -929,6 +949,7 @@ export const sheetsData = {
                     _rowIndex: fallbackAdd.data.rowIndex,
                   });
                 }
+                removePendingMutation(pendingMutation.id);
                 return { success: true, pending: false };
               }
             } else {
@@ -941,6 +962,7 @@ export const sheetsData = {
                 this.optimisticDeleteRow(sheetName, rowIndex, id);
                 toast.warning('此记录已在云端被删除，未重新创建。您的离线修改已转存至冲突中心。');
               }
+              removePendingMutation(pendingMutation.id);
               return { success: true, pending: false };
             }
           }
@@ -948,17 +970,11 @@ export const sheetsData = {
           throw new Error(res.message || 'Google Sheets updateRow was not verified on read-back');
         } catch (err) {
           if (id && isRecordTombstoned(id)) {
+            removePendingMutation(pendingMutation.id);
             return { success: true, pending: false };
           }
           console.warn(`[SheetsData] Update row failed, enqueuing to offline queue:`, err);
-          enqueuePendingMutation({
-            mutationId,
-            type: 'update',
-            sheetName,
-            rowIndex,
-            rowId: id,
-            rowData,
-          });
+          markPendingMutationFailed(pendingMutation.id, err instanceof Error ? err.message : String(err));
           toast.info('Updated offline. Will sync to Google Sheets when connected.', {
             duration: 4000,
           });
