@@ -1,17 +1,28 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ExternalLink, Globe2, LoaderCircle, PackageSearch, Search, Sparkles } from 'lucide-react';
-import { CockpitModal, CockpitModalHeader } from '@/components/money-cockpit/cockpit-modal';
+import {
+  ArrowLeft,
+  CalendarDays,
+  ExternalLink,
+  Globe2,
+  LoaderCircle,
+  PackageSearch,
+  ReceiptText,
+  Search,
+  Sparkles,
+  Store,
+  X,
+} from 'lucide-react';
 import { normalizeTransaction, useTransactions, type Transaction } from '@/hooks/useTransactions';
 import { getUnifiedSheetData } from '@/hooks/useSheets';
 import { getActiveUserCacheScope } from '@/lib/sheets-api';
 import { scoreReceiptItemQuery, type StoredReceiptItem } from '@/lib/receipt-items';
 
 interface ReceiptPriceSearchProps {
-  isOpen: boolean;
-  onClose: () => void;
+  returnTo: string;
 }
 
 interface OnlineSource {
@@ -52,11 +63,10 @@ function stableItemKey(item: StoredReceiptItem): string {
     .trim();
 }
 
-export function ReceiptPriceSearch({ isOpen, onClose }: ReceiptPriceSearchProps) {
+export function ReceiptPriceSearch({ returnTo }: ReceiptPriceSearchProps) {
   const [query, setQuery] = useState('');
   const [onlineResults, setOnlineResults] = useState<Record<string, OnlineResult>>({});
   const [loadingKey, setLoadingKey] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
   const { transactions = [] } = useTransactions();
   const cacheScope = getActiveUserCacheScope();
 
@@ -66,7 +76,6 @@ export function ReceiptPriceSearch({ isOpen, onClose }: ReceiptPriceSearchProps)
       const result = await getUnifiedSheetData('Transactions', 'all');
       return (result.rows || []).map((row) => normalizeTransaction(row));
     },
-    enabled: isOpen,
     staleTime: 5 * 60 * 1000,
     retry: 1,
   });
@@ -148,172 +157,200 @@ export function ReceiptPriceSearch({ isOpen, onClose }: ReceiptPriceSearchProps)
     }
   };
 
-  const resetAndClose = () => {
-    setQuery('');
-    onClose();
-  };
+  const historyStatus = historyQuery.isFetching
+    ? 'Checking older receipts…'
+    : historyQuery.isError
+      ? 'Older receipts could not load'
+      : historyQuery.isSuccess
+        ? 'All receipt history loaded'
+        : 'Searching saved receipts';
 
   return (
-    <CockpitModal
-      isOpen={isOpen}
-      onClose={resetAndClose}
-      labelledBy="receipt-price-search-title"
-      describedBy="receipt-price-search-description"
-      size="wide"
-      className="receipt-price-search-modal"
-    >
-      <CockpitModalHeader
-        title="Ask what you paid"
-        titleId="receipt-price-search-title"
-        description="Search item prices from your saved receipts. Online checks are optional."
-        descriptionId="receipt-price-search-description"
-        icon={<PackageSearch size={20} />}
-        onClose={resetAndClose}
-        closeLabel="Close price search"
-      />
+    <div className="receipt-price-page">
+      <div className="receipt-price-page-inner">
+        <header className="receipt-price-page-nav">
+          <Link href={returnTo} className="receipt-price-back">
+            <ArrowLeft size={18} aria-hidden="true" />
+            <span>Back</span>
+          </Link>
+          <span className="receipt-price-nav-title">Price history</span>
+          <span className="receipt-price-nav-spacer" aria-hidden="true" />
+        </header>
 
-      <div className="space-y-4 pt-4">
-        <div>
-          <label htmlFor="receipt-price-query" className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-zinc-200">
-            Product, brand or size
-          </label>
-          <div className="relative">
-            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 dark:text-zinc-400" aria-hidden="true" />
+        <section className="receipt-price-hero" aria-labelledby="receipt-price-heading">
+          <div className="receipt-price-hero-copy">
+            <p className="receipt-price-hero-kicker">Your receipts, remembered</p>
+            <h1 id="receipt-price-heading">What did you pay?</h1>
+            <p>Find a product, brand or size across your saved receipts.</p>
+          </div>
+          <div className="receipt-price-hero-icon" aria-hidden="true">
+            <ReceiptText size={26} strokeWidth={1.8} />
+          </div>
+        </section>
+
+        <section className="receipt-price-search-panel" aria-labelledby="receipt-price-search-label">
+          <label id="receipt-price-search-label" htmlFor="receipt-price-query">Search your receipts</label>
+          <div className="receipt-price-search-field">
+            <Search size={19} aria-hidden="true" />
             <input
-              ref={inputRef}
               id="receipt-price-query"
               type="search"
-              autoFocus
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Try “Sunsilk shampoo 800 ml” or “Dove”"
-              className="min-h-12 w-full rounded-2xl border border-slate-200 bg-white/90 py-3 pl-10 pr-4 text-sm text-slate-950 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-zinc-900/80 dark:text-white"
+              placeholder="Try Sunsilk shampoo or Dove"
+              aria-describedby="receipt-price-search-help"
+              autoComplete="off"
             />
+            {query && (
+              <button
+                type="button"
+                className="receipt-price-clear"
+                onClick={() => setQuery('')}
+                aria-label="Clear search"
+              >
+                <X size={18} aria-hidden="true" />
+              </button>
+            )}
           </div>
-        </div>
-
-        <div className="flex min-h-5 items-center justify-between gap-3 text-[11px] text-slate-500 dark:text-zinc-400" aria-live="polite">
-          <span>Saved receipt matches appear first.</span>
-          {historyQuery.isFetching ? (
-            <span className="inline-flex shrink-0 items-center gap-1.5">
-              <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> Searching older receipts…
+          <div className="receipt-price-search-status" aria-live="polite">
+            <span id="receipt-price-search-help">Saved receipt matches appear first.</span>
+            <span className="receipt-price-history-status">
+              {historyQuery.isFetching && <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />}
+              {historyStatus}
             </span>
-          ) : historyQuery.isError ? (
-            <button type="button" onClick={() => void historyQuery.refetch()} className="min-h-11 rounded-lg px-2 font-semibold text-indigo-700 hover:bg-indigo-500/10 focus-visible:outline-2 focus-visible:outline-indigo-500 dark:text-indigo-300">
-              Retry older history
-            </button>
-          ) : historyQuery.isSuccess ? (
-              <span className="shrink-0">Full history loaded</span>
-          ) : null}
-        </div>
-
-        {historyQuery.isError && (
-          <p className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200" role="status">
-            Older records could not load. Showing receipt matches already on this device.
-          </p>
-        )}
-
-        {query.trim().length < 2 ? (
-          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-4 py-7 text-center dark:border-white/10 dark:bg-zinc-900/35">
-            <Search className="mx-auto h-5 w-5 text-indigo-600 dark:text-indigo-300" aria-hidden="true" />
-            <p className="mt-2 text-sm font-semibold text-slate-800 dark:text-zinc-200">Search a brand or product</p>
-            <p className="mt-1 text-xs text-slate-500 dark:text-zinc-400">For example: “Dove body wash” or “Sunsilk 800 ml”.</p>
           </div>
-        ) : matches.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-4 py-7 text-center dark:border-white/10 dark:bg-zinc-900/35">
-            <PackageSearch className="mx-auto h-5 w-5 text-slate-500 dark:text-zinc-400" aria-hidden="true" />
-            <p className="mt-2 text-sm font-semibold text-slate-800 dark:text-zinc-200">
-              {historyQuery.isFetching ? 'Checking the rest of your history…' : 'No matching receipt items yet'}
-            </p>
-            <p className="mt-1 text-xs text-slate-500 dark:text-zinc-400">
-              New receipt scans save product names, sizes, quantities, and prices here.
-            </p>
+          {historyQuery.isError && (
+            <div className="receipt-price-history-error" role="status">
+              <span>Showing receipt items already saved on this device.</span>
+              <button type="button" onClick={() => void historyQuery.refetch()}>Retry</button>
+            </div>
+          )}
+        </section>
+
+        {query.trim().length === 0 ? (
+          <section className="receipt-price-start" aria-labelledby="receipt-price-start-title">
+            <div className="receipt-price-section-heading">
+              <div>
+                <h2 id="receipt-price-start-title">Find an item</h2>
+                <p>Search by product, brand or pack size.</p>
+              </div>
+              <PackageSearch size={21} aria-hidden="true" />
+            </div>
+            <div className="receipt-price-suggestions" aria-label="Example searches">
+              {['Sunsilk', 'Dove', 'Shampoo'].map((suggestion) => (
+                <button key={suggestion} type="button" onClick={() => setQuery(suggestion)}>
+                  <Search size={14} aria-hidden="true" />
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+            <p className="receipt-price-start-note">Product names and prices are saved from your receipt scans.</p>
+          </section>
+        ) : query.trim().length < 2 ? (
+          <div className="receipt-price-empty" role="status">
+            <Search size={21} aria-hidden="true" />
+            <h2>Keep typing</h2>
+            <p>Enter at least 2 letters to search your receipt items.</p>
           </div>
         ) : (
-          <div className="max-h-[min(54dvh,520px)] space-y-2 overflow-y-auto overscroll-contain pr-1" aria-label={`${matches.length} saved receipt price matches`}>
-            {matches.map(({ transaction, item, itemIndex }) => {
-              const key = stableItemKey(item);
-              const online = onlineResults[key];
-              const merchant = transaction.description || transaction.category || 'Receipt purchase';
-              return (
-                <article key={`${transaction.id}-${itemIndex}`} className="rounded-2xl border border-slate-200 bg-white/90 p-3 dark:border-white/[0.08] dark:bg-zinc-900/55">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <h3 className="break-words text-sm font-semibold text-slate-950 dark:text-white">{item.name}</h3>
-                      <p className="mt-1 text-xs text-slate-500 dark:text-zinc-400">
-                        {merchant} · {transaction.date}
-                      </p>
-                      <p className="mt-1 text-[11px] text-slate-600 dark:text-zinc-300">
-                        {item.quantity} × {formatPrice(transaction.currency, item.unitPrice)} each
-                        {item.includedInExpense === false ? ' · not included in this expense total' : ''}
-                      </p>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <p className="font-mono text-base font-bold text-slate-950 dark:text-white">
-                        {formatPrice(transaction.currency, item.unitPrice)}
-                      </p>
-                      {item.quantity > 1 && (
-                        <p className="mt-0.5 text-[10px] text-slate-500 dark:text-zinc-400">
-                          line total {formatPrice(transaction.currency, item.amount)}
+          <section className="receipt-price-results" aria-label={`${matches.length} receipt price matches`}>
+            <div className="receipt-price-results-heading">
+              <div>
+                <h2>{matches.length ? 'Found in your receipts' : historyQuery.isFetching ? 'Searching older receipts' : 'No saved price found'}</h2>
+                <p>
+                  {matches.length
+                    ? `Showing ${matches.length} ${matches.length === 1 ? 'match' : 'matches'} for “${query.trim()}”.`
+                    : historyQuery.isFetching
+                      ? 'Your recent records are searched first. Older ones are loading in the background.'
+                      : `Try another brand, product name or size.`}
+                </p>
+              </div>
+              {matches.length > 0 && <span className="receipt-price-result-count">{matches.length}</span>}
+            </div>
+
+            {matches.length === 0 ? (
+              <div className="receipt-price-empty">
+                {historyQuery.isFetching ? <LoaderCircle size={21} className="animate-spin" aria-hidden="true" /> : <PackageSearch size={21} aria-hidden="true" />}
+                <h2>{historyQuery.isFetching ? 'Checking the rest of your history…' : 'Try a different search'}</h2>
+                <p>{historyQuery.isError ? 'Older receipts could not be checked. Retry the history search above.' : 'For example, search for Sunsilk, Dove or a product size.'}</p>
+              </div>
+            ) : (
+              <div className="receipt-price-result-list">
+                {matches.map(({ transaction, item, itemIndex }) => {
+                  const key = stableItemKey(item);
+                  const online = onlineResults[key];
+                  const merchant = transaction.description || transaction.category || 'Receipt purchase';
+
+                  return (
+                    <article key={`${transaction.id}-${itemIndex}`} className="receipt-price-result">
+                      <div className="receipt-price-result-main">
+                        <div className="receipt-price-result-product">
+                          {item.brand && <p className="receipt-price-result-brand">{item.brand}</p>}
+                          <h3>{item.name}</h3>
+                        </div>
+                        <div className="receipt-price-result-price">
+                          <span>Unit price</span>
+                          <strong>{formatPrice(transaction.currency, item.unitPrice)}</strong>
+                        </div>
+                      </div>
+
+                      <div className="receipt-price-result-meta">
+                        <span><Store size={15} aria-hidden="true" />{merchant}</span>
+                        <span><CalendarDays size={15} aria-hidden="true" /><time dateTime={transaction.date}>{transaction.date}</time></span>
+                        <span>{item.quantity} {item.quantity === 1 ? 'item' : 'items'}</span>
+                        {item.includedInExpense === false && <span>Not included in expense total</span>}
+                      </div>
+
+                      <div className="receipt-price-result-footer">
+                        <p className="receipt-price-line-total">
+                          <span>Line total</span>
+                          <strong>{formatPrice(transaction.currency, item.amount)}</strong>
                         </p>
-                      )}
-                    </div>
-                  </div>
+                        <button
+                          type="button"
+                          className="receipt-price-compare"
+                          onClick={() => void compareOnline(item)}
+                          disabled={Boolean(loadingKey) || online?.status === 'loading' || online?.status === 'ready'}
+                        >
+                          {online?.status === 'loading' ? <LoaderCircle size={16} className="animate-spin" aria-hidden="true" /> : <Globe2 size={16} aria-hidden="true" />}
+                          {online?.status === 'ready' ? 'Compared online' : 'Compare online'}
+                        </button>
+                      </div>
 
-                  <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-2 dark:border-white/[0.06]">
-                    <button
-                      type="button"
-                      onClick={() => void compareOnline(item)}
-                      disabled={Boolean(loadingKey) || online?.status === 'loading' || online?.status === 'ready'}
-                      className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-indigo-500/25 bg-indigo-500/10 px-3 text-xs font-semibold text-indigo-800 transition hover:bg-indigo-500/15 focus-visible:outline-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:opacity-60 dark:text-indigo-200"
-                    >
-                      {online?.status === 'loading' ? (
-                        <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                      ) : (
-                        <Globe2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      {online?.status === 'error' && (
+                        <p className="receipt-price-online-error" role="alert">{online.message} You can try again.</p>
                       )}
-                      {online?.status === 'ready' ? 'Online check complete' : 'Compare online'}
-                    </button>
-                    <span className="text-[10px] text-slate-500 dark:text-zinc-400">Optional · uses configured Gemini API</span>
-                  </div>
-
-                  {online?.status === 'error' && (
-                    <p className="mt-2 rounded-lg bg-rose-500/10 px-2.5 py-2 text-xs text-rose-800 dark:text-rose-200" role="alert">
-                      {online.message}
-                    </p>
-                  )}
-                  {online?.status === 'ready' && (
-                    <div className="mt-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3">
-                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-emerald-800 dark:text-emerald-300">
-                        <Sparkles className="h-3 w-3" aria-hidden="true" /> Current web listings
-                      </p>
-                      <p className="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-slate-700 dark:text-zinc-200">{online.summary}</p>
-                      {online.sources.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {online.sources.map((source) => (
-                            <a
-                              key={source.uri}
-                              href={source.uri}
-                              target="_blank"
-                              rel="noreferrer"
-                              aria-label={`${source.title} (opens in a new tab)`}
-                              className="inline-flex min-h-11 max-w-full items-center gap-1 rounded-lg border border-slate-200 bg-white/80 px-2 text-[10px] font-medium text-indigo-800 hover:border-indigo-300 focus-visible:outline-2 focus-visible:outline-indigo-500 dark:border-white/10 dark:bg-zinc-950/50 dark:text-indigo-200"
-                            >
-                              <span className="truncate">{source.title}</span>
-                              <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />
-                            </a>
-                          ))}
+                      {online?.status === 'ready' && (
+                        <div className="receipt-price-online-result">
+                          <p className="receipt-price-online-heading"><Sparkles size={14} aria-hidden="true" />Current web listings</p>
+                          <p className="receipt-price-online-summary">{online.summary}</p>
+                          {online.sources.length > 0 && (
+                            <div className="receipt-price-online-sources">
+                              {online.sources.map((source) => (
+                                <a
+                                  key={source.uri}
+                                  href={source.uri}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  aria-label={`${source.title} (opens in a new tab)`}
+                                >
+                                  <span>{source.title}</span>
+                                  <ExternalLink size={13} aria-hidden="true" />
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                          <p className="receipt-price-online-note">Online listings can change. Check the retailer before buying.</p>
                         </div>
                       )}
-                      <p className="mt-2 text-[10px] text-slate-500 dark:text-zinc-400">Online listings change; check the retailer page before buying.</p>
-                    </div>
-                  )}
-                </article>
-              );
-            })}
-          </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </section>
         )}
       </div>
-    </CockpitModal>
+    </div>
   );
 }

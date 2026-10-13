@@ -16,10 +16,6 @@ interface AppState {
   quickAddType: 'income' | 'expense' | null;
   setQuickAddType: (type: 'income' | 'expense' | null) => void;
 
-  // Receipt price lookup sheet
-  isReceiptPriceSearchOpen: boolean;
-  setReceiptPriceSearchOpen: (open: boolean) => void;
-
   // AI drafts are handed to existing forms and must be reviewed before saving.
   aiPrefill: AiPrefill | null;
   setAiPrefill: (prefill: AiPrefill | null) => void;
@@ -63,9 +59,6 @@ export const useAppStore = create<AppState>((set) => ({
   
   quickAddType: null,
   setQuickAddType: (type) => set({ quickAddType: type }),
-
-  isReceiptPriceSearchOpen: false,
-  setReceiptPriceSearchOpen: (open) => set({ isReceiptPriceSearchOpen: open }),
 
   aiPrefill: null,
   setAiPrefill: (prefill) => set({ aiPrefill: prefill }),
