@@ -714,7 +714,7 @@ export function SmartQuickInput() {
   };
 
   return (
-    <div className="relative rounded-2xl border border-indigo-500/25 bg-white dark:bg-zinc-950 p-2.5 sm:p-3 shadow-sm space-y-1.5 transition-colors focus-within:border-indigo-500/60">
+    <div className="cockpit-quick-input-frame relative rounded-2xl border border-indigo-500/25 bg-white dark:bg-zinc-950 p-2.5 sm:p-3 shadow-sm space-y-1.5 transition-colors focus-within:border-indigo-500/60">
       <form onSubmit={handleQuickSubmit} className="relative flex items-center gap-2">
         <div className="relative flex-1">
           <Sparkles className={`absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 shrink-0 pointer-events-none transition-colors ${
@@ -741,7 +741,7 @@ export function SmartQuickInput() {
             }}
 
             placeholder={receiptAttachment ? 'Edit receipt description...' : 'e.g. Mamak lunch 18, Shell petrol 60, Groceries 45...'}
-            className="block w-full h-11 rounded-2xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-950/90 py-2.5 pl-10 pr-20 text-[16px] sm:text-sm text-slate-950 dark:text-white placeholder-zinc-400 outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400/50 transition-colors shadow-inner touch-manipulation leading-5"
+            className="cockpit-quick-input-field block w-full h-11 rounded-2xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-950/90 py-2.5 pl-10 pr-20 text-[16px] sm:text-sm text-slate-950 dark:text-white placeholder-zinc-400 outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400/50 transition-colors shadow-inner touch-manipulation leading-5"
           />
           {/* Action buttons: Camera Scan + Voice Dictation */}
           <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
