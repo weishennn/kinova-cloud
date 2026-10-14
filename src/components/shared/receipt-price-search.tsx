@@ -15,6 +15,7 @@ import {
   Store,
   X,
 } from 'lucide-react';
+import { ThemeToggle } from './theme-toggle';
 import { normalizeTransaction, useTransactions, type Transaction } from '@/hooks/useTransactions';
 import { getUnifiedSheetData } from '@/hooks/useSheets';
 import { getActiveUserCacheScope } from '@/lib/sheets-api';
@@ -208,16 +209,17 @@ export function ReceiptPriceSearch({ returnTo, onClose }: ReceiptPriceSearchProp
             </Link>
           )}
           <span className="receipt-price-nav-title">
-            Kinova AI <span className="receipt-price-beta">receipt memory</span>
+            <Sparkles size={16} aria-hidden="true" />
+            Kinova AI <span className="receipt-price-beta">Receipts</span>
           </span>
-          <span className="receipt-price-nav-spacer" aria-hidden="true" />
+          <ThemeToggle className="receipt-price-theme-toggle" />
         </header>
 
         {query.trim().length === 0 ? (
           <section className="receipt-price-welcome" aria-labelledby="receipt-price-heading">
-            <div className="receipt-price-welcome-mark" aria-hidden="true"><Sparkles size={25} strokeWidth={1.6} /></div>
-            <h1 id="receipt-price-heading">Where do we start?</h1>
-            <p>Ask about a product price from your saved receipts.</p>
+            <div className="receipt-price-welcome-eyebrow"><span className="receipt-price-welcome-mark" aria-hidden="true"><Sparkles size={17} strokeWidth={1.7} /></span> Your purchase memory</div>
+            <h1 id="receipt-price-heading">What did you pay<br className="receipt-price-desktop-break" /> for it?</h1>
+            <p>Ask about a product and Kinova will find its price in your saved receipts.</p>
             <div className="receipt-price-history-status" aria-live="polite">
               {historyQuery.isFetching && <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />}
               <span>{historyStatus}</span>
@@ -228,13 +230,16 @@ export function ReceiptPriceSearch({ returnTo, onClose }: ReceiptPriceSearchProp
                 <button type="button" onClick={() => void historyQuery.refetch()}>Retry</button>
               </div>
             )}
-            <div className="receipt-price-suggestions" aria-label="Suggested questions">
-              {(suggestions.length > 0 ? suggestions : ['Find shampoo', 'Find Sunsilk']).map((suggestion) => (
-                <button key={suggestion} type="button" onClick={() => askAboutPrice(suggestion)}>
-                  <ReceiptText size={15} aria-hidden="true" />
-                  <span>{suggestion}</span>
-                </button>
-              ))}
+            <div className="receipt-price-suggestions-area">
+              <div className="receipt-price-suggestions-heading"><span>Try asking</span><span>Search your own receipts</span></div>
+              <div className="receipt-price-suggestions" aria-label="Suggested questions">
+                {(suggestions.length > 0 ? suggestions : ['Find shampoo', 'Find Sunsilk']).map((suggestion) => (
+                  <button key={suggestion} type="button" onClick={() => askAboutPrice(suggestion)}>
+                    <ReceiptText size={16} aria-hidden="true" />
+                    <span>{suggestion}</span>
+                  </button>
+                ))}
+              </div>
             </div>
             {searchableTransactions.length === 0 && !historyQuery.isFetching && (
               <p className="receipt-price-start-note">Scan a receipt with item details and Kinova will remember its prices.</p>
@@ -360,7 +365,7 @@ export function ReceiptPriceSearch({ returnTo, onClose }: ReceiptPriceSearchProp
               <ArrowUp size={18} aria-hidden="true" />
             </button>
           </form>
-          <p className="receipt-price-composer-note">Saved receipt prices are searched first. Compare online is optional.</p>
+          <p className="receipt-price-composer-note">Your receipts are searched first. Online comparisons are optional.</p>
         </footer>
       </div>
     </div>

@@ -37,7 +37,7 @@
 
 /* Calm light surfaces by default; dark mode follows the device or saved preference. */
 :root {
-  --background: #f7f7fc;
+  --background: #f1f2ff;
   --foreground: #0a0a0a;
   --card: #ffffff;
   --card-foreground: #0a0a0a;
@@ -66,7 +66,7 @@
 
 /* Explicit light and dark theme tokens for system and user-selected modes. */
 .light {
-  --background: #f7f7fc;
+  --background: #f1f2ff;
   --foreground: #0a0a0a;
   --card: #ffffff;
   --card-foreground: #0a0a0a;
@@ -93,7 +93,7 @@
 }
 
 .dark {
-  --background: #090d16;
+  --background: #0d1028;
   --foreground: #f8fafc;
   --card: #111827;
   --card-foreground: #f8fafc;
