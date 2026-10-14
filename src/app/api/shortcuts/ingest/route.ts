@@ -131,8 +131,15 @@ export async function POST(req: NextRequest) {
     }
 
     const body = (await req.json()) as Record<string, unknown>;
+    const urlParamEmail = (
+      req.nextUrl.searchParams.get('email') ||
+      req.nextUrl.searchParams.get('user') ||
+      req.nextUrl.searchParams.get('u') ||
+      ''
+    ).trim().toLowerCase();
     const explicitEmail = (
       req.headers.get('x-shortcut-email') ||
+      urlParamEmail ||
       (typeof body?.email === 'string' ? body.email : '') ||
       (typeof body?.userEmail === 'string' ? body.userEmail : '') ||
       ''
@@ -143,11 +150,26 @@ export async function POST(req: NextRequest) {
     const userEmail = (
       explicitEmail ||
       session?.email ||
-      (await getActiveShortcutOwnerEmail(true)) ||
       ''
     )
       .trim()
       .toLowerCase();
+
+    // Strict zero-guess policy: In a multi-user deployment, unauthenticated shortcuts MUST explicitly
+    // specify their user email to guarantee 100% account isolation. Never guess and never default!
+    if (!userEmail) {
+      return NextResponse.json(
+        {
+          success: false,
+          autoRecorded: false,
+          error: 'Missing user email in shortcut request. To ensure strict account isolation, you must provide your email via x-shortcut-email header, ?user=email in URL, or userEmail in body.',
+          notificationTitle: '⚠️ 记账未绑定账号',
+          notificationText: '⚠️ 快捷指令未指定用户账号，本次未记账。请在快捷指令中添加 x-shortcut-email 或在 URL 添加 ?user=你的邮箱',
+          openUrl: `${origin}/?shortcutError=${encodeURIComponent('快捷指令未指定用户账号，已拒绝入账以保护数据隐私')}`,
+        },
+        { status: 400 }
+      );
+    }
 
     const today = sanitizeDate(body?.today) || getMalaysiaTodayDateString();
     const rawMode = typeof body?.mode === 'string' ? body.mode.trim().toLowerCase() : '';

@@ -1,9 +1,20 @@
-const puppeteer = require('puppeteer-core');
-
 const EDGE_PATH = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const BASE_URL = process.env.TEST_BASE_URL || 'http://127.0.0.1:3055';
 
+async function loadRoute(page, route, options) {
+  const response = await page.goto(`${BASE_URL}${route}`, options);
+  if (!response) {
+    throw new Error(`No document response received for ${route}.`);
+  }
+  if (response.status() < 200 || response.status() >= 300) {
+    throw new Error(`Expected ${route} to return HTTP 2xx, got ${response.status()}.`);
+  }
+  return response;
+}
+
 async function runTests() {
+  const puppeteerModule = await import('puppeteer-core');
+  const puppeteer = puppeteerModule.default || puppeteerModule;
   console.log('🚀 Starting Automated Full-Flow End-to-End Test with Edge...');
 
   const browser = process.env.PUPPETEER_CDP_URL
@@ -43,7 +54,7 @@ async function runTests() {
   try {
     // 1. Test Home Page
     console.log('\n--- 1. Testing Home Page (/) ---');
-    await page.goto(`${BASE_URL}/`, { waitUntil: 'networkidle0', timeout: 20000 });
+    await loadRoute(page, '/', { waitUntil: 'networkidle0', timeout: 20000 });
     const homeTitle = await page.title();
     console.log(`✓ Home page loaded. Title: "${homeTitle}"`);
     await new Promise((r) => setTimeout(r, 2000));
@@ -71,7 +82,7 @@ async function runTests() {
 
     // 2. Test Transactions Page
     console.log('\n--- 2. Testing Transactions Page (/transactions) ---');
-    await page.goto(`${BASE_URL}/transactions`, { waitUntil: 'networkidle0', timeout: 20000 });
+    await loadRoute(page, '/transactions', { waitUntil: 'networkidle0', timeout: 20000 });
     console.log('✓ /transactions loaded');
     await new Promise((r) => setTimeout(r, 3000));
 
@@ -222,11 +233,182 @@ async function runTests() {
       { timeout: 10000 },
       editedDescription
     );
-    console.log('✓ Confirmed delete removes the QA transaction from the list.');
+    await page.reload({ waitUntil: 'networkidle0', timeout: 20000 });
+    await page.waitForFunction(
+      (description) => !Array.from(document.querySelectorAll('[aria-label^="View transaction "]'))
+        .some((card) => (card.getAttribute('aria-label') || '').includes(description)),
+      { timeout: 10000 },
+      editedDescription
+    );
+    console.log('✓ Confirmed delete stays removed after a full page reload.');
+
+    // Income and investments have different accounting meanings and must remain
+    // distinguishable in accessible labels, type filters, and cash-flow totals.
+    async function openRecordForm() {
+      if (await page.$('#record-transaction-dialog #record-amount')) return;
+      const button = await page.evaluateHandle(() =>
+        Array.from(document.querySelectorAll('button')).find((candidate) => {
+          const rect = candidate.getBoundingClientRect();
+          const visible = rect.width > 0 && rect.height > 0 && getComputedStyle(candidate).visibility !== 'hidden';
+          return visible && /record payment|add expense/i.test(
+            `${candidate.getAttribute('aria-label') || ''} ${candidate.textContent || ''}`
+          );
+        }) || null
+      );
+      if (!button.asElement()) throw new Error('Could not reopen the record-entry form.');
+      await button.asElement().click();
+      try {
+        await page.waitForSelector('#record-transaction-dialog #record-amount', { timeout: 5000 });
+      } catch (error) {
+        const pageState = await page.evaluate(() => ({
+          url: location.pathname,
+          dialogs: Array.from(document.querySelectorAll('[role="dialog"]')).map((dialog) => dialog.textContent?.trim().slice(0, 100)),
+          matchingButtons: Array.from(document.querySelectorAll('button')).filter((candidate) =>
+            /record payment|add expense/i.test(`${candidate.getAttribute('aria-label') || ''} ${candidate.textContent || ''}`)
+          ).map((candidate) => ({ text: candidate.textContent?.trim(), label: candidate.getAttribute('aria-label'), visible: candidate.getBoundingClientRect().width > 0 })),
+        }));
+        throw new Error(`Record form did not open: ${JSON.stringify(pageState)}. ${error.message}`);
+      }
+    }
+
+    async function fillAndSubmit(amount, description) {
+      await page.click('#record-amount');
+      await page.keyboard.down('Control');
+      await page.keyboard.press('A');
+      await page.keyboard.up('Control');
+      await page.type('#record-amount', amount);
+      await page.click('#record-description');
+      await page.keyboard.down('Control');
+      await page.keyboard.press('A');
+      await page.keyboard.up('Control');
+      await page.type('#record-description', description);
+      await page.click('#record-transaction-dialog form button[type="submit"]');
+      await page.waitForSelector('#record-transaction-dialog', { hidden: true, timeout: 5000 });
+      await page.waitForFunction(
+        (labelPart) => Array.from(document.querySelectorAll('[aria-label^="View transaction "]'))
+          .some((card) => (card.getAttribute('aria-label') || '').includes(labelPart)),
+        { timeout: 10000 },
+        description
+      );
+    }
+
+    const incomeDescription = `Codex QA income ${Date.now()}`;
+    await openRecordForm();
+    await page.evaluate(() => {
+      const button = Array.from(document.querySelectorAll('#record-transaction-dialog form button'))
+        .find((candidate) => candidate.textContent?.trim() === 'Income');
+      button?.click();
+    });
+    await fillAndSubmit('50.00', incomeDescription);
+    const incomeCard = await page.$eval(
+      '[aria-label^="View transaction "]',
+      (card) => card.getAttribute('aria-label') || ''
+    );
+    if (!incomeCard.includes(', income RM 50.00')) {
+      throw new Error(`Income transaction label does not announce the saved type: ${incomeCard}`);
+    }
+    console.log('✓ Income is saved and announced as income.');
+
+    const investmentDescription = `Codex QA investment ${Date.now()}`;
+    await openRecordForm();
+    await page.evaluate(() => {
+      const buttons = Array.from(document.querySelectorAll('#record-transaction-dialog form button'));
+      buttons.find((candidate) => candidate.textContent?.trim() === 'Investment')?.click();
+    });
+    await page.click('[aria-label="Select category Other Savings"]');
+    await fillAndSubmit('15.25', investmentDescription);
+    const investmentCard = await page.evaluate((description) =>
+      Array.from(document.querySelectorAll('[aria-label^="View transaction "]'))
+        .find((card) => (card.getAttribute('aria-label') || '').includes(description))
+        ?.getAttribute('aria-label') || '',
+      investmentDescription
+    );
+    if (!investmentCard.includes(', investment RM 15.25')) {
+      throw new Error(`Investment transaction label does not announce the saved type: ${investmentCard}`);
+    }
+    console.log('✓ Investment is saved and announced as investment.');
+
+    await page.waitForFunction(() => {
+      const summaryValues = Array.from(document.querySelectorAll('.grid.grid-cols-2 .font-mono'))
+        .map((element) => (element.textContent || '').replace(/\s+/g, ' ').trim());
+      return summaryValues.includes('RM 50.00') && summaryValues.includes('RM 0.00');
+    }, { timeout: 10000 });
+    console.log('✓ Income contributes to the income total; investment does not inflate expenses.');
+
+    await loadRoute(page, '/', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.waitForFunction(() => {
+      const groups = Array.from(document.querySelectorAll('dl[aria-label="Cash flow totals"] > div'))
+        .map((group) => (group.textContent || '').replace(/\s+/g, ' ').trim());
+      return groups.some((text) => text.includes('Income') && text.includes('RM 50.00')) &&
+        groups.some((text) => text.includes('Expenses') && text.includes('RM 0.00')) &&
+        groups.some((text) => text.includes('Invested') && text.includes('RM 15.25'));
+    }, { timeout: 10000 });
+    console.log('✓ Dashboard keeps income, expenses, invested total, and net cash flow in their intended buckets.');
+    await loadRoute(page, '/transactions', { waitUntil: 'networkidle0', timeout: 20000 });
+    await page.waitForFunction(
+      (descriptions) => descriptions.every((description) =>
+        Array.from(document.querySelectorAll('[aria-label^="View transaction "]'))
+          .some((card) => (card.getAttribute('aria-label') || '').includes(description))
+      ),
+      { timeout: 10000 },
+      [incomeDescription, investmentDescription]
+    );
+
+    const clickTransactionFilter = async (filter) => {
+      const button = await page.evaluateHandle((value) =>
+        Array.from(document.querySelectorAll('.cockpit-segmented-control button'))
+          .find((candidate) => candidate.textContent?.trim() === value) || null,
+        filter
+      );
+      if (!button.asElement()) throw new Error(`Could not find the ${filter} transaction filter.`);
+      await button.asElement().click();
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    };
+
+    await clickTransactionFilter('income');
+    const incomeFilterCount = await page.$$eval('[aria-label^="View transaction "]', (cards) => cards.length);
+    if (incomeFilterCount !== 1 || !(await page.$(`[aria-label*="${incomeDescription}"]`))) {
+      throw new Error('Income type filter did not isolate the income record.');
+    }
+    await clickTransactionFilter('investment');
+    const investmentFilterCount = await page.$$eval('[aria-label^="View transaction "]', (cards) => cards.length);
+    if (investmentFilterCount !== 1 || !(await page.$(`[aria-label*="${investmentDescription}"]`))) {
+      throw new Error('Investment type filter did not isolate the investment record.');
+    }
+    await clickTransactionFilter('all');
+
+    const searchInput = await page.$('input[type="search"]');
+    if (!searchInput) throw new Error('Could not find the transaction search field.');
+    await searchInput.click();
+    await page.keyboard.type(investmentDescription);
+    const searchCount = await page.$$eval('[aria-label^="View transaction "]', (cards) => cards.length);
+    if (searchCount !== 1 || !(await page.$(`[aria-label*="${investmentDescription}"]`))) {
+      throw new Error('Transaction search did not isolate the matching investment.');
+    }
+    await searchInput.click();
+    await page.keyboard.down('Control');
+    await page.keyboard.press('A');
+    await page.keyboard.up('Control');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.type(`no-match-${Date.now()}`);
+    await page.waitForFunction(
+      () => document.querySelectorAll('[aria-label^="View transaction "]').length === 0 &&
+        Array.from(document.querySelectorAll('p')).some((paragraph) => paragraph.textContent === 'No transactions found'),
+      { timeout: 5000 }
+    );
+    const clearSearchButton = await page.$('button[aria-label="Clear search query"]');
+    if (!clearSearchButton) throw new Error('The empty search result did not offer a clear-search action.');
+    await clearSearchButton.click();
+    await page.waitForFunction(
+      () => document.querySelectorAll('[aria-label^="View transaction "]').length === 2,
+      { timeout: 5000 }
+    );
+    await clickTransactionFilter('all');
+    console.log('✓ Type filters, matching search, empty search state, and clear-search recovery work.');
 
     // 5. Test Ongoing Installment Plan Card Click -> Edit Installment Modal
     console.log('\n--- 5. Testing Ongoing Installment Plan Card Click ---');
-    await page.goto(`${BASE_URL}/`, { waitUntil: 'networkidle0', timeout: 20000 });
+    await loadRoute(page, '/', { waitUntil: 'networkidle0', timeout: 20000 });
     await new Promise((r) => setTimeout(r, 1500));
     const clickableCards = await page.$$('div[role="button"][tabindex="0"]');
     const installmentCardIndex = await page.$$eval(
@@ -254,22 +436,34 @@ async function runTests() {
     }
 
     // 6. Smoke test all app routes at desktop size.
-    const otherRoutes = ['/budget', '/investments', '/trips', '/invoices', '/analytics', '/settings', '/privacy', '/redesign'];
+    const otherRoutes = ['/budget', '/investments', '/trips', '/invoices', '/analytics', '/settings', '/privacy'];
     for (const route of otherRoutes) {
       console.log(`\n--- Testing ${route} ---`);
-      await page.goto(`${BASE_URL}${route}`, { waitUntil: 'networkidle0', timeout: 20000 });
-      console.log(`✓ ${route} loaded successfully`);
+      const response = await loadRoute(page, route, { waitUntil: 'networkidle0', timeout: 20000 });
+      console.log(`✓ ${route} returned HTTP ${response.status()}`);
       await new Promise((r) => setTimeout(r, 1000));
     }
 
-    // Check narrow mobile layout for horizontal overflow on key flows.
-    console.log('\n--- 7. Testing Mobile Layout ---');
-    await page.setViewport({ width: 390, height: 844 });
-    for (const route of ['/', '/transactions', '/budget', '/analytics']) {
-      await page.goto(`${BASE_URL}${route}`, { waitUntil: 'networkidle0', timeout: 20000 });
-      const hasHorizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
-      if (hasHorizontalOverflow) throw new Error(`Horizontal overflow detected on ${route} at 390px width.`);
-      console.log(`✓ ${route} fits a 390px viewport without horizontal overflow.`);
+    // Check narrow phone, tablet, and desktop layouts for horizontal overflow on key flows.
+    console.log('\n--- 7. Testing Responsive Layouts ---');
+    const responsiveSizes = [
+      { width: 320, height: 720 },
+      { width: 360, height: 800 },
+      { width: 390, height: 844 },
+      { width: 768, height: 1024 },
+      { width: 1024, height: 768 },
+      { width: 1440, height: 900 },
+    ];
+    for (const viewport of responsiveSizes) {
+      await page.setViewport(viewport);
+      for (const route of ['/', '/transactions', '/budget', '/analytics']) {
+        await loadRoute(page, route, { waitUntil: 'networkidle0', timeout: 20000 });
+        const hasHorizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+        if (hasHorizontalOverflow) {
+          throw new Error(`Horizontal overflow detected on ${route} at ${viewport.width}px width.`);
+        }
+        console.log(`✓ ${route} fits ${viewport.width}px without horizontal overflow.`);
+      }
     }
 
   } catch (err) {

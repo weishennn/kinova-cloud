@@ -2,14 +2,16 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { RefreshCw, Check, LoaderCircle, Search } from 'lucide-react';
+import { RefreshCw, Check, LoaderCircle, Search, Sparkles } from 'lucide-react';
 import { useSyncAndRefresh } from '@/hooks/useSyncAndRefresh';
 import { useSyncStatus } from '@/hooks/useSyncStatus';
 import { ThemeToggle } from './theme-toggle';
 import { receiptPriceSearchHref } from '@/lib/receipt-price-search-route';
+import { useAppStore } from '@/stores/app-store';
 
 export function AppHeader() {
   const pathname = usePathname();
+  const setKinovaAIOpen = useAppStore((s) => s.setKinovaAIOpen);
   const { isRefreshing, justRefreshed, syncAndRefresh } = useSyncAndRefresh();
   const { isOnline, hasCloudEndpoint, isConnected, pendingCount, formattedLastSync, lastSyncError, isReady } = useSyncStatus();
 
@@ -59,15 +61,18 @@ export function AppHeader() {
         </div>
 
         <div className="cockpit-topbar-actions" aria-live="polite">
-          <ThemeToggle className="cockpit-icon-button" />
-          <Link
-            href={receiptPriceSearchHref(pathname)}
-            className="cockpit-icon-button"
-            title="Find a past receipt price"
-            aria-label="Find a past receipt price"
+          <button
+            type="button"
+            onClick={() => setKinovaAIOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-500/10 hover:bg-indigo-500/20 active:scale-95 text-indigo-600 dark:text-indigo-300 border border-indigo-500/25 text-xs font-semibold transition-all cursor-pointer shadow-xs"
+            title="Ask Kinova AI (小票智能查价)"
+            aria-label="Open Kinova AI"
           >
-            <Search size={17} />
-          </Link>
+            <Sparkles size={13} className="text-indigo-500" />
+            <span className="hidden sm:inline">Ask Kinova AI</span>
+            <span className="sm:hidden font-medium">查价</span>
+          </button>
+          <ThemeToggle className="cockpit-icon-button" />
           <button
             type="button"
             onClick={() => void syncAndRefresh()}

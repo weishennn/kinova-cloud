@@ -314,7 +314,7 @@ export default function TransactionsPage() {
         key={keyId}
         role="button"
         tabIndex={0}
-        aria-label={`View transaction ${t.description || t.category}, ${isIncome ? 'income' : 'expense'} RM ${t.amount.toFixed(2)}`}
+        aria-label={`View transaction ${t.description || t.category}, ${t.type} RM ${t.amount.toFixed(2)}`}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();

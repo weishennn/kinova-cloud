@@ -952,7 +952,7 @@ function resolveShortcutSheetsEndpoint(): { url: string; apiKey: string } {
 }
 
 const RECENT_AUTO_RECORDED_SETTING_KEY = 'kinova_recent_shortcut_records_v2';
-const RECENT_AUTO_RECORDED_TTL_MS = 15 * 60 * 1000;
+export const RECENT_AUTO_RECORDED_TTL_MS = 48 * 60 * 60 * 1000; // 48 hours (allows seamless app reconciliation even if opened days later)
 let lastRemoteAutoRecordedFetchMs = 0;
 
 export async function recordRecentShortcutAutoRecorded(
@@ -981,7 +981,7 @@ export async function recordRecentShortcutAutoRecorded(
     const recentList = Array.from(store.values())
       .filter((v) => Boolean(v.ownerEmail))
       .sort((a, b) => new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime())
-      .slice(0, 15);
+      .slice(0, 50);
     await fetch(`${url}?apiKey=${encodeURIComponent(apiKey)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -1207,10 +1207,24 @@ export async function recordShortcutDraftToLedger(
       }
     }
   } else {
+    // Zero-guess policy: strictly reject if no owner email is provided
+    if (!ownerEmail) {
+      return {
+        autoRecorded: false,
+        duplicateSkipped: false,
+        transactionId: null,
+        sheetName: null,
+        notificationTitle: '⚠️ 未绑定账号',
+        notificationText: '⚠️ 快捷指令未指定用户账号，本次未记账。请在快捷指令中添加 x-shortcut-email 或 ?user=你的邮箱',
+      };
+    }
+
+    draft.ownerEmail = ownerEmail;
+
     // Production path: resolve SINGLE active account owner and route EXCLUSIVELY to that user's ledger
     try {
       const [
-        { getAdminUserRegistry, getActiveShortcutOwnerEmail },
+        { getAdminUserRegistry },
         { isAdminEmail, refreshGoogleAccessToken },
         { executeUserGoogleAction },
       ] = await Promise.all([
@@ -1218,23 +1232,6 @@ export async function recordShortcutDraftToLedger(
         import('./google-auth'),
         import('./google-sheets-user-engine'),
       ]);
-
-      if (!ownerEmail) {
-        ownerEmail = (await getActiveShortcutOwnerEmail(true)) || '';
-      }
-
-      if (!ownerEmail) {
-        return {
-          autoRecorded: false,
-          duplicateSkipped: false,
-          transactionId: null,
-          sheetName: null,
-          notificationTitle: '⚠️ 请先登录账号',
-          notificationText: '⚠️ 请先在 Kinova 登录账号后再使用快捷指令',
-        };
-      }
-
-      draft.ownerEmail = ownerEmail;
 
       if (isAdminEmail(ownerEmail)) {
         // Admin account (weishenooi2003@gmail.com) -> write EXCLUSIVELY to Admin Apps Script ledger

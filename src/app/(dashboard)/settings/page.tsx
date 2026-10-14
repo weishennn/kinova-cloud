@@ -1938,19 +1938,23 @@ export default function SettingsPage() {
             </div>
 
             {/* Fast Copy Helpers */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 pt-1 text-xs">
               <button
                 type="button"
                 onClick={() => {
-                  const url = typeof window !== 'undefined' ? `${window.location.origin}/api/shortcuts/ingest` : 'https://你的域名/api/shortcuts/ingest';
-                  copyTextToClipboard(url, 'url', 'API 请求接口 URL');
+                  const url = typeof window !== 'undefined'
+                    ? `${window.location.origin}/api/shortcuts/ingest${googleUser?.email ? `?user=${encodeURIComponent(googleUser.email)}` : ''}`
+                    : 'https://你的域名/api/shortcuts/ingest';
+                  copyTextToClipboard(url, 'url', '个人专属 API 接收地址（已预绑定你的账号）');
                 }}
                 className="p-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/50 hover:bg-slate-100 dark:hover:bg-zinc-800 text-left flex items-center justify-between transition-colors cursor-pointer"
               >
                 <div>
-                  <div className="font-semibold text-slate-800 dark:text-zinc-200 text-[11px]">📋 复制 API 接收地址</div>
+                  <div className="font-semibold text-slate-800 dark:text-zinc-200 text-[11px]">📋 复制专属 API 地址</div>
                   <div className="text-[10px] text-slate-500 dark:text-zinc-400 truncate max-w-[220px]">
-                    {typeof window !== 'undefined' ? `${window.location.origin}/api/shortcuts/ingest` : '/api/shortcuts/ingest'}
+                    {typeof window !== 'undefined'
+                      ? `${window.location.origin}/api/shortcuts/ingest${googleUser?.email ? `?user=${googleUser.email}` : ''}`
+                      : '/api/shortcuts/ingest'}
                   </div>
                 </div>
                 <span className="text-[10px] text-indigo-500 font-bold ml-2 shrink-0">
@@ -1975,6 +1979,26 @@ export default function SettingsPage() {
                   {copiedConfigKey === 'header' ? '已复制 ✓' : '复制'}
                 </span>
               </button>
+
+              {googleUser?.email && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    copyTextToClipboard(googleUser.email, 'email', '你的绑定账号邮箱 (x-shortcut-email)');
+                  }}
+                  className="p-2.5 rounded-xl border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50/50 dark:bg-indigo-950/30 hover:bg-indigo-100/60 dark:hover:bg-indigo-900/40 text-left flex items-center justify-between transition-colors cursor-pointer"
+                >
+                  <div>
+                    <div className="font-semibold text-indigo-900 dark:text-indigo-200 text-[11px]">👤 复制绑定账号邮箱</div>
+                    <div className="text-[10px] text-indigo-600 dark:text-indigo-400 truncate max-w-[180px] font-mono">
+                      {googleUser.email}
+                    </div>
+                  </div>
+                  <span className="text-[10px] text-indigo-600 font-bold ml-2 shrink-0">
+                    {copiedConfigKey === 'email' ? '已复制 ✓' : '复制'}
+                  </span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -1991,10 +2015,18 @@ export default function SettingsPage() {
               <li>
                 添加动作 3：<strong>获取 URL 内容 (Get Contents of URL)</strong>：
                 <ul className="list-disc list-inside pl-4 mt-1 space-y-0.5 text-[11px]">
-                  <li>URL：<code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">{typeof window !== 'undefined' ? `${window.location.origin}/api/shortcuts/ingest` : 'https://你的域名/api/shortcuts/ingest'}</code></li>
+                  <li>URL：<code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">{typeof window !== 'undefined' ? `${window.location.origin}/api/shortcuts/ingest${googleUser?.email ? `?user=${encodeURIComponent(googleUser.email)}` : ''}` : 'https://你的域名/api/shortcuts/ingest?user=你的邮箱'}</code>（已自动预带你的专属账号参数）</li>
                   <li>方法：<code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">POST</code>，请求体：<code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">JSON</code></li>
-                  <li>头部 (Headers)：<code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">x-shortcut-token</code> = 你的服务端令牌</li>
-                  <li>JSON 字段：<code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">source</code> = <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">back_tap_screenshot</code>，<code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">imageBase64</code> = 「Base64 编码后的文本」，<code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">defaultCurrency</code> = <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">{currency}</code></li>
+                  <li>头部 (Headers)：
+                    <div className="pl-2 space-y-0.5 font-mono text-[10px] text-slate-700 dark:text-zinc-300">
+                      <div>• <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">x-shortcut-token</code> = 你的服务端令牌</div>
+                      <div>• <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">x-shortcut-email</code> = <span className="text-indigo-600 dark:text-indigo-400 font-semibold">{googleUser?.email || '你的 Google 账号邮箱'}</span>（若 URL 中已带有 <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">?user=...</code> 则此 Header 可选）</div>
+                    </div>
+                  </li>
+                  <li>JSON 字段：<code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">source</code> = <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">back_tap_screenshot</code>，<code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">imageBase64</code> = 「Base64 编码后的文本」，<code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">defaultCurrency</code> = <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">{currency}</code>{googleUser?.email ? <span>，<code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">userEmail</code> = <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">{googleUser.email}</code></span> : null}</li>
+                  <li className="text-amber-600 dark:text-amber-400 font-medium">
+                    🔒 <strong>严格零猜测账号隔离</strong>：系统已启用零容错保护。快捷指令如果未显式提供账号信息（URL参数/Header/JSON），服务端将直接拒绝入账并报错，<strong>绝不默认记入任何人的账本（包括管理员）</strong>，彻底杜绝串账！
+                  </li>
                 </ul>
               </li>
               <li>添加动作 4：<strong>获取词典值 (Get Dictionary Value)</strong> → 获取键 <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">notificationText</code>，再通过 <strong>显示通知 (Show Notification)</strong> 直接弹窗提示入账结果。</li>

@@ -36,6 +36,10 @@ interface AppState {
   selectedMonth: string;
   setSelectedMonth: (month: string) => void;
   
+  // Kinova AI (Receipt price search & memory layer)
+  isKinovaAIOpen: boolean;
+  setKinovaAIOpen: (open: boolean) => void;
+
   // Settings cache
   settings: Record<string, string>;
   setSettings: (settings: Record<string, string>) => void;
@@ -75,6 +79,9 @@ export const useAppStore = create<AppState>((set) => ({
   selectedMonth: getCurrentMonthStr(),
   setSelectedMonth: (month) => set({ selectedMonth: month }),
   
+  isKinovaAIOpen: false,
+  setKinovaAIOpen: (open) => set({ isKinovaAIOpen: open }),
+
   settings: {
     currency: 'MYR',
     theme: 'dark',

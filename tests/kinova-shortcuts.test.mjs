@@ -396,4 +396,32 @@ test('7. Background auto-record writes valid transactions via mocked fetch, skip
   assert.equal(capturedPayloads.length, 1); // Still 1
 });
 
+test('8. Strict zero-guess policy: shortcut auto-record rejects requests without explicit owner email and never defaults to admin', async () => {
+  const unownedDraft = saveShortcutQuickDraft({
+    source: 'back_tap_screenshot',
+    amount: 50.0,
+    currency: 'MYR',
+    category: 'Food & Dining',
+    description: 'Starbucks Coffee',
+    merchant: 'Starbucks Coffee',
+    date: '2026-10-12',
+    ocrSummary: 'MYR 50.00 at Starbucks Coffee',
+    notes: 'No owner email provided',
+    missingFields: [],
+    uncertainFields: [],
+    fingerprint: 'kfp_no_owner_test',
+    aiDisclosure: 'Auto-recorded',
+  });
+
+  // Calling recordShortcutDraftToLedger without ownerEmail in draft or options
+  const res = await recordShortcutDraftToLedger(unownedDraft, {
+    autoRecord: true,
+  });
+
+  assert.equal(res.autoRecorded, false);
+  assert.equal(res.transactionId, null);
+  assert.match(res.notificationTitle, /未绑定账号/);
+  assert.match(res.notificationText, /未指定用户账号/);
+});
+
 

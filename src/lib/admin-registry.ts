@@ -222,12 +222,16 @@ export async function getActiveShortcutOwnerEmail(forceFresh = true): Promise<st
     const resolved = (memoryShortcutOwner.iosEmail || memoryShortcutOwner.anyEmail || '')
       .trim()
       .toLowerCase();
-    return resolved || null;
+    if (resolved) return resolved;
+  }
+  const adminEmail = getAdminEmail().trim().toLowerCase();
+  if (adminEmail && users[adminEmail]) {
+    return adminEmail;
   }
   const latestUser = Object.values(users)
     .filter((u) => u.status !== 'blocked' && u.lastActiveAt)
     .sort((a, b) => new Date(b.lastActiveAt).getTime() - new Date(a.lastActiveAt).getTime())[0];
-  return latestUser ? latestUser.email.trim().toLowerCase() : null;
+  return latestUser ? latestUser.email.trim().toLowerCase() : (adminEmail || null);
 }
 
 async function saveAdminUserRegistry(users: Record<string, RegisteredUser>): Promise<boolean> {
