@@ -37,6 +37,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const y = useMotionValue(0);
   const [pullDistance, setPullDistance] = useState(0);
   const [isPastThreshold, setIsPastThreshold] = useState(false);
+  const [isOffscreen, setIsOffscreen] = useState(false);
 
   const PULL_THRESHOLD = 80;
   const startYRef = useRef<number | null>(null);
@@ -44,19 +45,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const isTrackingPullRef = useRef(false);
   const hasVibratedRef = useRef(false);
 
+  const openTouchStartYRef = useRef<number | null>(null);
+  const openTouchStartXRef = useRef<number | null>(null);
+
   // Sync motion value with isKinovaAIOpen state with spring physics
   useEffect(() => {
     if (isReceiptPriceSearchPage) return;
 
     if (isKinovaAIOpen) {
-      const targetHeight = typeof window !== 'undefined' ? window.innerHeight : 900;
+      const targetHeight = typeof window !== 'undefined' ? window.innerHeight + 80 : 960;
       animate(y, targetHeight, {
         type: 'spring',
         damping: 30,
         stiffness: 340,
         mass: 0.8,
+      }).then(() => {
+        setIsOffscreen(true);
       });
     } else {
+      setIsOffscreen(false);
       animate(y, 0, {
         type: 'spring',
         damping: 30,
@@ -155,12 +162,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       const currentY = y.get();
       if (currentY >= PULL_THRESHOLD) {
-        // Trigger smooth reveal of Kinova AI
         setKinovaAIOpen(true);
-        // Also trigger background data refresh so receipt history is always fresh
         void syncAndRefresh();
       } else {
-        // Snap back to 0
         animate(y, 0, {
           type: 'spring',
           damping: 30,
@@ -168,7 +172,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         });
         setPullDistance(0);
         setIsPastThreshold(false);
-        // Small gentle pull (< 80px but >= 45px) triggers a standard refresh
         if (currentY >= 45) {
           void syncAndRefresh();
         }
@@ -187,6 +190,50 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       window.removeEventListener('touchcancel', handleTouchEnd);
     };
   }, [isKinovaAIOpen, isReceiptPriceSearchPage, setKinovaAIOpen, syncAndRefresh, y]);
+
+  // Swipe UP listener when Kinova AI is open to cleanly exit
+  useEffect(() => {
+    if (!isKinovaAIOpen || isReceiptPriceSearchPage) return;
+
+    const handleSwipeUpStart = (e: TouchEvent) => {
+      openTouchStartYRef.current = e.touches[0].clientY;
+      openTouchStartXRef.current = e.touches[0].clientX;
+    };
+
+    const handleSwipeUpEnd = (e: TouchEvent) => {
+      if (openTouchStartYRef.current === null) return;
+      const endY = e.changedTouches[0].clientY;
+      const endX = e.changedTouches[0].clientX;
+      const deltaY = endY - openTouchStartYRef.current;
+      const deltaX = endX - (openTouchStartXRef.current ?? endX);
+
+      // User swiped up by > 30px
+      if (deltaY < -30 && Math.abs(deltaY) > Math.abs(deltaX) * 1.1) {
+        setKinovaAIOpen(false);
+      }
+      openTouchStartYRef.current = null;
+      openTouchStartXRef.current = null;
+    };
+
+    window.addEventListener('touchstart', handleSwipeUpStart, { passive: true });
+    window.addEventListener('touchend', handleSwipeUpEnd, { passive: true });
+
+    return () => {
+      window.removeEventListener('touchstart', handleSwipeUpStart);
+      window.removeEventListener('touchend', handleSwipeUpEnd);
+    };
+  }, [isKinovaAIOpen, isReceiptPriceSearchPage, setKinovaAIOpen]);
+
+  // Lock body scroll when Kinova AI is open so mobile keyboard does not scroll underlying page
+  useEffect(() => {
+    if (isKinovaAIOpen) {
+      const origOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = origOverflow;
+      };
+    }
+  }, [isKinovaAIOpen]);
 
   // Escape key closes Kinova AI
   useEffect(() => {
@@ -326,14 +373,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* Background Layer: Kinova AI & Pull-down Pill (Inspired by Ryt Bank) */}
       {!isReceiptPriceSearchPage && (
         <div
-          className="fixed inset-0 z-0 overflow-y-auto"
+          className="fixed inset-0 z-0 overflow-hidden"
           aria-hidden={!isKinovaAIOpen}
           inert={!isKinovaAIOpen}
         >
-          {/* Top dynamic pull-down pill indicator (emerges from behind topbar as dashboard slides down) */}
+          {/* Top dynamic pull-down pill indicator */}
           <div
             className="absolute top-4 sm:top-5 inset-x-0 mx-auto flex items-center justify-center pointer-events-none z-30 transition-opacity duration-150"
-            style={{ opacity: pullDistance > 16 ? 1 : 0 }}
+            style={{ opacity: pullDistance > 16 && !isKinovaAIOpen ? 1 : 0 }}
           >
             <div className={`px-4 py-2 rounded-full border backdrop-blur-2xl text-xs font-semibold flex items-center gap-2 transition-all duration-200 shadow-2xl ${
               isPastThreshold
@@ -352,10 +399,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       )}
 
-      {/* Main Content Area (Slides down with buttery smooth spring physics to reveal Kinova AI) */}
+      {/* Main Content Area (Slides down with spring physics, becomes invisible when off-screen to avoid mobile keyboard scroll leaks) */}
       <motion.div
         style={{ y }}
-        className="relative z-10 flex min-h-screen flex-1 flex-col min-w-0 bg-[var(--cockpit-bg)] shadow-[0_20px_50px_rgba(0,0,0,0.35)]"
+        className={`relative z-10 flex min-h-screen flex-1 flex-col min-w-0 bg-[var(--cockpit-bg)] shadow-[0_20px_50px_rgba(0,0,0,0.35)] ${
+          isOffscreen ? 'invisible pointer-events-none' : ''
+        }`}
         aria-hidden={isKinovaAIOpen}
         inert={isKinovaAIOpen}
       >
