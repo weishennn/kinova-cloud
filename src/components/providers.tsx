@@ -11,21 +11,18 @@ function ThemeSurfaceSync() {
 
   useEffect(() => {
     const isDark = resolvedTheme === 'dark';
-    const appBackground = isDark ? '#0d1028' : '#f1f2ff';
-    const assistantBackground = document.querySelector('.receipt-price-reveal[data-open="true"]')
-      ? isDark ? '#12163c' : '#f1f2ff'
-      : appBackground;
-    document.documentElement.style.backgroundColor = appBackground;
+    const bg = isDark ? '#090d16' : '#f7f7fc';
+    document.documentElement.style.backgroundColor = bg;
     document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
-    document.body.style.backgroundColor = appBackground;
+    document.body.style.backgroundColor = bg;
 
     const metas = document.querySelectorAll('meta[name="theme-color"]');
     if (metas.length > 0) {
-      metas.forEach((meta) => meta.setAttribute('content', assistantBackground));
+      metas.forEach((meta) => meta.setAttribute('content', bg));
     } else {
       const meta = document.createElement('meta');
       meta.name = 'theme-color';
-      meta.content = assistantBackground;
+      meta.content = bg;
       document.head.appendChild(meta);
     }
   }, [resolvedTheme]);

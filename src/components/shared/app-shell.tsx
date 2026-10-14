@@ -62,12 +62,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useLayoutEffect(() => {
     if (!isPriceAssistantOpen) return;
     const themeColorMetas = Array.from(document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]'));
-    const setAppThemeColor = (color: string) => themeColorMetas.forEach((meta) => meta.setAttribute('content', color));
-    const isDark = document.documentElement.classList.contains('dark');
-    setAppThemeColor(isDark ? '#12163c' : '#f1f2ff');
+    const previousColors = themeColorMetas.map((meta) => [meta, meta.getAttribute('content')] as const);
+    themeColorMetas.forEach((meta) => meta.setAttribute('content', '#12163c'));
     return () => {
-      const isDarkAfterClose = document.documentElement.classList.contains('dark');
-      setAppThemeColor(isDarkAfterClose ? '#0d1028' : '#f1f2ff');
+      previousColors.forEach(([meta, color]) => {
+        if (color === null) meta.removeAttribute('content');
+        else meta.setAttribute('content', color);
+      });
     };
   }, [isPriceAssistantOpen]);
 
