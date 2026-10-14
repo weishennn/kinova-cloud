@@ -8,10 +8,20 @@ import { useSyncAndRefresh } from '@/hooks/useSyncAndRefresh';
 interface PullToRefreshProps {
   onRefresh?: () => Promise<void>;
   onAskPrice?: () => void;
+  onAskPriceProgress?: (distance: number, dragging: boolean) => void;
+  isAskPriceOpen?: boolean;
+  onCloseAskPrice?: () => void;
   children?: React.ReactNode;
 }
 
-export function PullToRefresh({ onRefresh, onAskPrice, children }: PullToRefreshProps) {
+export function PullToRefresh({
+  onRefresh,
+  onAskPrice,
+  onAskPriceProgress,
+  isAskPriceOpen = false,
+  onCloseAskPrice,
+  children,
+}: PullToRefreshProps) {
   const { isRefreshing: isHookRefreshing, syncAndRefresh } = useSyncAndRefresh();
   const [pullDistance, setPullDistance] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -19,12 +29,29 @@ export function PullToRefresh({ onRefresh, onAskPrice, children }: PullToRefresh
 
   const startYRef = useRef<number | null>(null);
   const isDraggingRef = useRef(false);
+  const isDismissDraggingRef = useRef(false);
+  const pullDistanceRef = useRef(0);
+  const dismissDistanceRef = useRef(0);
+  const dismissTargetRef = useRef<HTMLElement | null>(null);
   const hasVibratedRef = useRef(false);
 
   const REFRESH_THRESHOLD = 52;
   const ASK_PRICE_THRESHOLD = 106;
 
   const handleTouchStart = useCallback((e: TouchEvent) => {
+    if (isAskPriceOpen) {
+      const target = e.target instanceof Element ? e.target : null;
+      const header = target?.closest<HTMLElement>('.receipt-price-page-nav');
+      if (!header || target?.closest('a,button,input,textarea,select,[role="button"]')) return;
+
+      startYRef.current = e.touches[0].clientY;
+      isDismissDraggingRef.current = true;
+      dismissDistanceRef.current = 0;
+      dismissTargetRef.current = header.closest<HTMLElement>('.receipt-price-reveal');
+      dismissTargetRef.current?.setAttribute('data-dismissing', 'true');
+      return;
+    }
+
     if (
       document.body.classList.contains('modal-open') ||
       (e.target instanceof Element && e.target.closest('[role="dialog"]'))
@@ -42,16 +69,27 @@ export function PullToRefresh({ onRefresh, onAskPrice, children }: PullToRefresh
 
     startYRef.current = e.touches[0].clientY;
     isDraggingRef.current = true;
+    pullDistanceRef.current = 0;
+    onAskPriceProgress?.(0, true);
     hasVibratedRef.current = false;
-  }, [isRefreshing]);
+  }, [isAskPriceOpen, isRefreshing, onAskPriceProgress]);
 
   const handleTouchMove = useCallback((e: TouchEvent) => {
+    if (isDismissDraggingRef.current && startYRef.current !== null) {
+      const upwardDistance = startYRef.current - e.touches[0].clientY;
+      dismissDistanceRef.current = Math.min(160, Math.max(0, upwardDistance * 0.82));
+      dismissTargetRef.current?.style.setProperty('--receipt-price-dismiss-offset', `${dismissDistanceRef.current}px`);
+      return;
+    }
+
     if (!isDraggingRef.current || startYRef.current === null || isRefreshing) return;
 
     // Check again to ensure we haven't scrolled down
     if (window.scrollY > 5 || document.documentElement.scrollTop > 5) {
       isDraggingRef.current = false;
+      pullDistanceRef.current = 0;
       setPullDistance(0);
+      onAskPriceProgress?.(0, false);
       return;
     }
 
@@ -59,13 +97,17 @@ export function PullToRefresh({ onRefresh, onAskPrice, children }: PullToRefresh
     const diff = currentY - startYRef.current;
 
     if (diff <= 0) {
+      pullDistanceRef.current = 0;
       setPullDistance(0);
+      onAskPriceProgress?.(0, true);
       return;
     }
 
     // Apply smooth rubber-band resistance curve
     const dampedDistance = Math.min(124, Math.pow(diff, 0.85) * 2);
+    pullDistanceRef.current = dampedDistance;
     setPullDistance(dampedDistance);
+    onAskPriceProgress?.(dampedDistance, true);
 
     // Haptic feedback once when crossing the threshold
     if (dampedDistance >= REFRESH_THRESHOLD && !hasVibratedRef.current) {
@@ -73,23 +115,49 @@ export function PullToRefresh({ onRefresh, onAskPrice, children }: PullToRefresh
       if (typeof window !== 'undefined' && 'vibrate' in navigator) {
         try {
           navigator.vibrate(12);
-        } catch (_) {
+        } catch {
           // Ignore vibration failures if not permitted
         }
       }
     } else if (dampedDistance < REFRESH_THRESHOLD) {
       hasVibratedRef.current = false;
     }
-  }, [isRefreshing]);
+  }, [isRefreshing, onAskPriceProgress]);
 
   const handleTouchEnd = useCallback(async () => {
+    if (isDismissDraggingRef.current) {
+      isDismissDraggingRef.current = false;
+      startYRef.current = null;
+      const dismissTarget = dismissTargetRef.current;
+      dismissTarget?.removeAttribute('data-dismissing');
+      if (dismissDistanceRef.current >= 86) {
+        onCloseAskPrice?.();
+        window.setTimeout(() => {
+          dismissTarget?.style.setProperty('--receipt-price-dismiss-offset', '0px');
+        }, 360);
+      } else {
+        dismissTarget?.style.setProperty('--receipt-price-dismiss-offset', '0px');
+      }
+      dismissTargetRef.current = null;
+      dismissDistanceRef.current = 0;
+      return;
+    }
+
     if (!isDraggingRef.current) return;
     isDraggingRef.current = false;
+    startYRef.current = null;
+    const finalPullDistance = pullDistanceRef.current;
+    pullDistanceRef.current = 0;
 
-    if (pullDistance >= ASK_PRICE_THRESHOLD && !isRefreshing && onAskPrice) {
+    if (finalPullDistance >= ASK_PRICE_THRESHOLD && !isRefreshing && onAskPrice) {
+      onAskPriceProgress?.(finalPullDistance, false);
       setPullDistance(0);
       onAskPrice();
-    } else if (pullDistance >= REFRESH_THRESHOLD && !isRefreshing) {
+      return;
+    }
+
+    onAskPriceProgress?.(0, false);
+    if (finalPullDistance >= REFRESH_THRESHOLD && !isRefreshing) {
       setIsRefreshing(true);
       setPullDistance(REFRESH_THRESHOLD);
 
@@ -113,21 +181,40 @@ export function PullToRefresh({ onRefresh, onAskPrice, children }: PullToRefresh
     } else {
       setPullDistance(0);
     }
-  }, [pullDistance, isRefreshing, onRefresh, onAskPrice, syncAndRefresh]);
+  }, [isRefreshing, onRefresh, onAskPrice, onAskPriceProgress, onCloseAskPrice, syncAndRefresh]);
+
+  const handleTouchCancel = useCallback(() => {
+    if (isDismissDraggingRef.current) {
+      isDismissDraggingRef.current = false;
+      startYRef.current = null;
+      dismissTargetRef.current?.removeAttribute('data-dismissing');
+      dismissTargetRef.current?.style.setProperty('--receipt-price-dismiss-offset', '0px');
+      dismissTargetRef.current = null;
+      dismissDistanceRef.current = 0;
+      return;
+    }
+
+    if (!isDraggingRef.current) return;
+    isDraggingRef.current = false;
+    startYRef.current = null;
+    pullDistanceRef.current = 0;
+    setPullDistance(0);
+    onAskPriceProgress?.(0, false);
+  }, [onAskPriceProgress]);
 
   useEffect(() => {
     window.addEventListener('touchstart', handleTouchStart, { passive: true });
     window.addEventListener('touchmove', handleTouchMove, { passive: true });
     window.addEventListener('touchend', handleTouchEnd, { passive: true });
-    window.addEventListener('touchcancel', handleTouchEnd, { passive: true });
+    window.addEventListener('touchcancel', handleTouchCancel, { passive: true });
 
     return () => {
       window.removeEventListener('touchstart', handleTouchStart);
       window.removeEventListener('touchmove', handleTouchMove);
       window.removeEventListener('touchend', handleTouchEnd);
-      window.removeEventListener('touchcancel', handleTouchEnd);
+      window.removeEventListener('touchcancel', handleTouchCancel);
     };
-  }, [handleTouchStart, handleTouchMove, handleTouchEnd]);
+  }, [handleTouchStart, handleTouchMove, handleTouchEnd, handleTouchCancel]);
 
   const isVisible = pullDistance > 0 || isRefreshing || showSuccess;
   const progress = Math.min(1, pullDistance / REFRESH_THRESHOLD);

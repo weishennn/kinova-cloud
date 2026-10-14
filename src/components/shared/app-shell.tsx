@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useEffect } from 'react';
-import { usePathname, useRouter } from 'next/navigation';
+import React, { useEffect, useRef, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { RecordPaymentModal } from './record-modal';
 import { EditInstallmentModal } from './edit-installment-modal';
@@ -10,7 +10,8 @@ import { ConfirmDialog } from './confirm-dialog';
 import { PullToRefresh } from './pull-to-refresh';
 import { useCloudSettingsSync } from '@/hooks/useCloudSettingsSync';
 import { FloatingDock } from '@/components/money-cockpit/floating-dock';
-import { receiptPriceSearchHref, RECEIPT_PRICE_SEARCH_PATH } from '@/lib/receipt-price-search-route';
+import { RECEIPT_PRICE_SEARCH_PATH } from '@/lib/receipt-price-search-route';
+import { ReceiptPriceSearch } from './receipt-price-search';
 import { updateUnifiedRow } from '@/hooks/useSheets';
 import { driveApi, getActiveUserCacheScope, sheetsApi } from '@/lib/sheets-api';
 import {
@@ -21,10 +22,20 @@ import {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const router = useRouter();
   const queryClient = useQueryClient();
+  const appFrameRef = useRef<HTMLDivElement>(null);
+  const [isPriceAssistantOpen, setIsPriceAssistantOpen] = useState(false);
   const isCockpit = pathname === '/';
   const isReceiptPriceSearchPage = pathname === RECEIPT_PRICE_SEARCH_PATH;
+
+  const closePriceAssistant = () => {
+    setIsPriceAssistantOpen(false);
+    const appFrame = appFrameRef.current;
+    if (!appFrame) return;
+    appFrame.style.setProperty('--receipt-price-pull-offset', '0px');
+    delete appFrame.dataset.pullDragging;
+    delete appFrame.dataset.pullReleased;
+  };
 
   // Global non-blocking Cloud SOT sync (zero latency, zero data loss)
   useCloudSettingsSync();
@@ -136,21 +147,60 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="relative flex min-h-screen bg-background text-foreground selection:bg-violet-500/30 overflow-x-clip antialiased money-cockpit-shell">
+      {!isReceiptPriceSearchPage && (
+        <div
+          className="receipt-price-reveal"
+          data-open={isPriceAssistantOpen}
+          aria-hidden={!isPriceAssistantOpen}
+          inert={!isPriceAssistantOpen}
+        >
+          <ReceiptPriceSearch
+            returnTo={pathname || '/'}
+            onClose={closePriceAssistant}
+          />
+        </div>
+      )}
+
       {/* Pull-To-Refresh Gesture on mobile */}
       {!isReceiptPriceSearchPage && (
-        <PullToRefresh onAskPrice={() => router.push(receiptPriceSearchHref(pathname))} />
+        <PullToRefresh
+          isAskPriceOpen={isPriceAssistantOpen}
+          onAskPrice={() => setIsPriceAssistantOpen(true)}
+          onCloseAskPrice={closePriceAssistant}
+          onAskPriceProgress={(distance, dragging) => {
+            const appFrame = appFrameRef.current;
+            if (!appFrame) return;
+            appFrame.style.setProperty('--receipt-price-pull-offset', `${distance}px`);
+            if (dragging) {
+              appFrame.dataset.pullDragging = 'true';
+              delete appFrame.dataset.pullReleased;
+            } else {
+              delete appFrame.dataset.pullDragging;
+              if (distance > 0) appFrame.dataset.pullReleased = 'true';
+              else delete appFrame.dataset.pullReleased;
+            }
+          }}
+        />
       )}
 
       {/* Main Content Area */}
-      <div className={`relative flex-1 flex flex-col min-w-0 ${isReceiptPriceSearchPage ? 'receipt-price-shell' : isCockpit ? 'money-cockpit-content' : 'money-legacy-content pb-28 lg:pb-24'}`}>
-        {!isReceiptPriceSearchPage && <AppHeader />}
-        <main className={`flex-1 w-full ${isReceiptPriceSearchPage ? 'receipt-price-main' : isCockpit ? 'max-w-none mx-0 p-0 money-cockpit-main' : 'money-legacy-main'}`}>
-          {children}
-        </main>
-      </div>
+      <div
+        ref={appFrameRef}
+        className="receipt-price-app-frame relative z-[2] flex min-h-screen flex-1 flex-col min-w-0"
+        data-assistant-open={isPriceAssistantOpen}
+        aria-hidden={isPriceAssistantOpen}
+        inert={isPriceAssistantOpen}
+      >
+        <div className={`relative flex-1 flex flex-col min-w-0 ${isReceiptPriceSearchPage ? 'receipt-price-shell' : isCockpit ? 'money-cockpit-content' : 'money-legacy-content pb-28 lg:pb-24'}`}>
+          {!isReceiptPriceSearchPage && <AppHeader />}
+          <main className={`flex-1 w-full ${isReceiptPriceSearchPage ? 'receipt-price-main' : isCockpit ? 'max-w-none mx-0 p-0 money-cockpit-main' : 'money-legacy-main'}`}>
+            {children}
+          </main>
+        </div>
 
-      {/* Mobile Bottom Navigation (hidden on desktop) */}
-      {!isReceiptPriceSearchPage && <FloatingDock />}
+        {/* Mobile Bottom Navigation (hidden on desktop) */}
+        {!isReceiptPriceSearchPage && <FloatingDock />}
+      </div>
 
       {/* Global Record Payment Modal */}
       <RecordPaymentModal />

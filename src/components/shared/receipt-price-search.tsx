@@ -22,6 +22,7 @@ import { scoreReceiptItemQuery, type StoredReceiptItem } from '@/lib/receipt-ite
 
 interface ReceiptPriceSearchProps {
   returnTo: string;
+  onClose?: () => void;
 }
 
 interface OnlineSource {
@@ -62,7 +63,7 @@ function stableItemKey(item: StoredReceiptItem): string {
     .trim();
 }
 
-export function ReceiptPriceSearch({ returnTo }: ReceiptPriceSearchProps) {
+export function ReceiptPriceSearch({ returnTo, onClose }: ReceiptPriceSearchProps) {
   const [draftQuery, setDraftQuery] = useState('');
   const [query, setQuery] = useState('');
   const [onlineResults, setOnlineResults] = useState<Record<string, OnlineResult>>({});
@@ -197,9 +198,15 @@ export function ReceiptPriceSearch({ returnTo }: ReceiptPriceSearchProps) {
     <div className="receipt-price-page">
       <div className="receipt-price-page-inner">
         <header className="receipt-price-page-nav">
-          <Link href={returnTo} className="receipt-price-back" aria-label="Close price search">
-            <X size={19} aria-hidden="true" />
-          </Link>
+          {onClose ? (
+            <button type="button" onClick={onClose} className="receipt-price-back" aria-label="Close price search">
+              <X size={19} aria-hidden="true" />
+            </button>
+          ) : (
+            <Link href={returnTo} className="receipt-price-back" aria-label="Close price search">
+              <X size={19} aria-hidden="true" />
+            </Link>
+          )}
           <span className="receipt-price-nav-title">
             Kinova AI <span className="receipt-price-beta">receipt memory</span>
           </span>

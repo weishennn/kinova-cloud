@@ -68,14 +68,34 @@
 /* Full-screen receipt-price assistant inspired by the reference video. */
 .receipt-price-shell { padding-bottom: 0 !important; }
 .receipt-price-main { min-height: 100dvh; padding: 0; }
+.receipt-price-reveal {
+  position: fixed; inset: 0; z-index: 1; height: 100dvh; overflow-x: hidden; overflow-y: auto;
+  overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y;
+  background: #090a1b;
+  transform: translate3d(0, calc(-1 * var(--receipt-price-dismiss-offset, 0px)), 0);
+  transition: transform 360ms cubic-bezier(.22,.75,.25,1);
+}
+.receipt-price-reveal[data-open="true"] { z-index: 3; pointer-events: auto; }
+.receipt-price-reveal[data-dismissing="true"] { transition: none; }
+.receipt-price-app-frame { transition: transform 420ms cubic-bezier(.22,.75,.25,1); }
+.receipt-price-app-frame[data-pull-dragging="true"] {
+  transform: translate3d(0, var(--receipt-price-pull-offset, 0px), 0);
+  transition: none;
+}
+.receipt-price-app-frame[data-pull-released="true"] {
+  transform: translate3d(0, var(--receipt-price-pull-offset, 0px), 0);
+}
+.receipt-price-app-frame[data-assistant-open="true"] { transform: translate3d(0, 100dvh, 0); }
+body:has(.receipt-price-reveal[data-open="true"]) { overflow: hidden; }
+html:has(.money-cockpit-shell),body:has(.money-cockpit-shell) { overscroll-behavior-y: none; }
 .receipt-price-page {
   --receipt-price-line: rgba(223,228,255,.14);
   position: relative; isolation: isolate; min-height: 100dvh;
-  padding: max(8px,env(safe-area-inset-top,0px)) 24px 0; overflow: clip; color: #f7f7ff;
+  padding: max(8px,env(safe-area-inset-top,0px)) 24px 0; overflow: visible; color: #f7f7ff;
   background: radial-gradient(ellipse at 22% -12%,rgba(24,80,244,.95),transparent 47%),radial-gradient(ellipse at 83% 4%,rgba(132,48,198,.76),transparent 39%),linear-gradient(165deg,#12163c 0%,#0b0c22 47%,#090a1b 100%);
 }
 .receipt-price-page-inner { width: min(100%,760px); min-height: calc(100dvh - max(8px,env(safe-area-inset-top,0px))); margin: 0 auto; display: flex; flex-direction: column; }
-.receipt-price-page-nav { min-height: 52px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; }
+.receipt-price-page-nav { min-height: 52px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; touch-action: none; }
 .receipt-price-back { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.12); border-radius: 50%; color: #f8f8ff; background: rgba(255,255,255,.08); text-decoration: none; transition: background-color 150ms ease,transform 150ms ease; }
 .receipt-price-back:hover { background: rgba(255,255,255,.16); transform: scale(1.03); }
 .receipt-price-back:focus-visible,.receipt-price-suggestions button:focus-visible,.receipt-price-composer button:focus-visible,.receipt-price-history-error button:focus-visible,.receipt-price-compare:focus-visible,.receipt-price-online-sources a:focus-visible { outline: 2px solid #bdc4ff; outline-offset: 3px; }
