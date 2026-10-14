@@ -41,13 +41,13 @@ export function PullToRefresh({
 
   const handleTouchStart = useCallback((e: TouchEvent) => {
     const target = e.target instanceof Element ? e.target : null;
+    const interactiveTarget = target?.closest('a,button,input,textarea,select,[role="button"],[contenteditable="true"],[data-pull-to-refresh-ignore]');
     const y = e.touches[0].clientY;
     const now = performance.now();
 
     if (isAskPriceOpen) {
       const header = target?.closest<HTMLElement>('.receipt-price-page-nav');
       const welcome = target?.closest<HTMLElement>('.receipt-price-welcome');
-      const interactiveTarget = target?.closest('a,button,input,textarea,select,[role="button"]');
       const canDismissFromWelcome = Boolean(
         welcome &&
         !document.querySelector('.receipt-price-conversation') &&
@@ -69,6 +69,7 @@ export function PullToRefresh({
 
     if (
       document.body.classList.contains('modal-open') ||
+      interactiveTarget ||
       target?.closest('[role="dialog"]') ||
       window.scrollY > 5 ||
       document.documentElement.scrollTop > 5 ||
