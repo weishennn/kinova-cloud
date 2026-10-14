@@ -77,7 +77,11 @@
 }
 .receipt-price-reveal[data-open="true"] { z-index: 3; pointer-events: auto; }
 .receipt-price-reveal[data-dismissing="true"] { transition: none; }
-.receipt-price-app-frame { transition: transform 420ms cubic-bezier(.22,.75,.25,1); }
+.receipt-price-app-frame { transition: transform 420ms cubic-bezier(.22,.75,.25,1); background: var(--cockpit-bg); }
+.receipt-price-app-frame[data-pull-dragging="true"],
+.receipt-price-app-frame[data-pull-released="true"],
+.receipt-price-app-frame[data-assistant-open="true"],
+.receipt-price-app-frame[data-assistant-closing="true"] { will-change: transform; }
 .receipt-price-app-frame[data-pull-dragging="true"] {
   transform: translate3d(0, var(--receipt-price-pull-offset, 0px), 0);
   transition: none;
@@ -86,7 +90,12 @@
   transform: translate3d(0, var(--receipt-price-pull-offset, 0px), 0);
 }
 .receipt-price-app-frame[data-assistant-open="true"] { transform: translate3d(0, 100dvh, 0); }
-body:has(.receipt-price-reveal[data-open="true"]) { overflow: hidden; }
+.receipt-price-app-frame[data-assistant-closing="true"] {
+  transform: translate3d(0, calc(100dvh - var(--receipt-price-dismiss-offset, 0px)), 0);
+  transition: transform 360ms cubic-bezier(.22,.75,.25,1);
+}
+.receipt-price-app-frame[data-assistant-dismiss-dragging="true"] { transition: none; }
+body:has(.receipt-price-app-frame[data-assistant-open="true"]) { overflow: hidden; }
 html:has(.money-cockpit-shell),body:has(.money-cockpit-shell) { overscroll-behavior-y: none; }
 .receipt-price-page {
   --receipt-price-line: rgba(223,228,255,.14);
@@ -183,6 +192,7 @@ html:has(.money-cockpit-shell),body:has(.money-cockpit-shell) { overscroll-behav
 @media (prefers-reduced-motion: reduce) {
   .receipt-price-page .animate-spin { animation: none; }
   .receipt-price-page * { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+  .receipt-price-reveal,.receipt-price-app-frame { transition-duration: .01ms !important; }
 }
 .cockpit-topbar {
   position: sticky;
@@ -218,6 +228,16 @@ html:has(.money-cockpit-shell),body:has(.money-cockpit-shell) { overscroll-behav
 .cockpit-icon-button:focus-visible,.cockpit-period-row button:focus-visible,.cockpit-period-row select:focus-visible,.cockpit-dock a:focus-visible,.cockpit-dock button:focus-visible { outline: 3px solid color-mix(in srgb, var(--cockpit-accent) 80%, transparent); outline-offset: 2px; }
 .cockpit-icon-button:disabled { cursor: wait; opacity: .72; }
 .cockpit-icon-button .spin { animation: cockpit-spin 1s linear infinite; }
+
+/* Sticky headers should travel with the page during the vertical handoff. */
+.receipt-price-app-frame[data-pull-dragging="true"] .cockpit-topbar,
+.receipt-price-app-frame[data-pull-released="true"] .cockpit-topbar,
+.receipt-price-app-frame[data-assistant-open="true"] .cockpit-topbar,
+.receipt-price-app-frame[data-assistant-closing="true"] .cockpit-topbar {
+  position: relative;
+  top: auto;
+  z-index: auto;
+}
 
 .cockpit-period-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 24px 0 18px; }
 .cockpit-period-tabs { display: inline-flex; gap: 2px; padding: 3px; background: #eef2ff; border: 1px solid var(--cockpit-line); border-radius: 12px; }

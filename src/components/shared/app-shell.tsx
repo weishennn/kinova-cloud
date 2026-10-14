@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { RecordPaymentModal } from './record-modal';
@@ -25,20 +25,52 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
   const appFrameRef = useRef<HTMLDivElement>(null);
   const [isPriceAssistantOpen, setIsPriceAssistantOpen] = useState(false);
+  const [isPriceAssistantPageActive, setIsPriceAssistantPageActive] = useState(false);
   const isCockpit = pathname === '/';
   const isReceiptPriceSearchPage = pathname === RECEIPT_PRICE_SEARCH_PATH;
 
   const closePriceAssistant = () => {
     setIsPriceAssistantOpen(false);
+    setIsPriceAssistantPageActive(false);
     const appFrame = appFrameRef.current;
-    if (!appFrame) return;
-    appFrame.style.setProperty('--receipt-price-pull-offset', '0px');
-    delete appFrame.dataset.pullDragging;
-    delete appFrame.dataset.pullReleased;
+    appFrame?.style.setProperty('--receipt-price-pull-offset', '0px');
+    if (appFrame) {
+      delete appFrame.dataset.pullDragging;
+      delete appFrame.dataset.pullReleased;
+      delete appFrame.dataset.assistantClosing;
+      delete appFrame.dataset.assistantDismissDragging;
+      appFrame.style.setProperty('--receipt-price-dismiss-offset', '0px');
+    }
+    const pricePage = document.querySelector<HTMLElement>('.receipt-price-reveal');
+    pricePage?.removeAttribute('data-dismissing');
+    pricePage?.style.setProperty('--receipt-price-dismiss-offset', '0px');
+  };
+
+  const handleAppFrameTransitionEnd = (event: React.TransitionEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget || event.propertyName !== 'transform') return;
+    if (event.currentTarget.dataset.assistantClosing === 'true') {
+      closePriceAssistant();
+    } else if (event.currentTarget.dataset.assistantOpen === 'true') {
+      setIsPriceAssistantPageActive(true);
+    }
   };
 
   // Global non-blocking Cloud SOT sync (zero latency, zero data loss)
   useCloudSettingsSync();
+
+  // Match the mobile browser/status bar to the assistant as soon as its reveal begins.
+  useLayoutEffect(() => {
+    if (!isPriceAssistantOpen) return;
+    const themeColorMetas = Array.from(document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]'));
+    const previousColors = themeColorMetas.map((meta) => [meta, meta.getAttribute('content')] as const);
+    themeColorMetas.forEach((meta) => meta.setAttribute('content', '#12163c'));
+    return () => {
+      previousColors.forEach(([meta, color]) => {
+        if (color === null) meta.removeAttribute('content');
+        else meta.setAttribute('content', color);
+      });
+    };
+  }, [isPriceAssistantOpen]);
 
   // Register PWA Service Worker so Kinova opens offline (Airplane Mode)
   useEffect(() => {
@@ -150,9 +182,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {!isReceiptPriceSearchPage && (
         <div
           className="receipt-price-reveal"
-          data-open={isPriceAssistantOpen}
-          aria-hidden={!isPriceAssistantOpen}
-          inert={!isPriceAssistantOpen}
+          data-open={isPriceAssistantPageActive}
+          aria-hidden={!isPriceAssistantPageActive}
+          inert={!isPriceAssistantPageActive}
         >
           <ReceiptPriceSearch
             returnTo={pathname || '/'}
@@ -165,8 +197,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {!isReceiptPriceSearchPage && (
         <PullToRefresh
           isAskPriceOpen={isPriceAssistantOpen}
-          onAskPrice={() => setIsPriceAssistantOpen(true)}
-          onCloseAskPrice={closePriceAssistant}
+          onAskPrice={() => {
+            setIsPriceAssistantPageActive(false);
+            setIsPriceAssistantOpen(true);
+          }}
           onAskPriceProgress={(distance, dragging) => {
             const appFrame = appFrameRef.current;
             if (!appFrame) return;
@@ -180,6 +214,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               else delete appFrame.dataset.pullReleased;
             }
           }}
+          onAskPriceDismissProgress={(distance, dragging, closing) => {
+            const appFrame = appFrameRef.current;
+            if (!appFrame) return;
+            appFrame.style.setProperty('--receipt-price-dismiss-offset', `${distance}px`);
+            if (dragging || closing) {
+              appFrame.dataset.assistantClosing = 'true';
+              if (dragging) appFrame.dataset.assistantDismissDragging = 'true';
+              else delete appFrame.dataset.assistantDismissDragging;
+            } else {
+              delete appFrame.dataset.assistantClosing;
+              delete appFrame.dataset.assistantDismissDragging;
+            }
+          }}
         />
       )}
 
@@ -190,6 +237,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         data-assistant-open={isPriceAssistantOpen}
         aria-hidden={isPriceAssistantOpen}
         inert={isPriceAssistantOpen}
+        onTransitionEnd={handleAppFrameTransitionEnd}
       >
         <div className={`relative flex-1 flex flex-col min-w-0 ${isReceiptPriceSearchPage ? 'receipt-price-shell' : isCockpit ? 'money-cockpit-content' : 'money-legacy-content pb-28 lg:pb-24'}`}>
           {!isReceiptPriceSearchPage && <AppHeader />}
