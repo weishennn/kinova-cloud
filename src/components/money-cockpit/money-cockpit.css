@@ -19,16 +19,16 @@
 }
 
 .dark .money-cockpit-shell {
-  --cockpit-canvas: radial-gradient(ellipse at 22% -12%, rgba(83, 102, 190, .2), transparent 49%), radial-gradient(ellipse at 83% 4%, rgba(119, 82, 150, .15), transparent 42%), linear-gradient(165deg, #1c2038 0%, #181b30 48%, #151725 100%);
-  --cockpit-bg: #1a1d35;
-  --cockpit-surface: #222640;
-  --cockpit-surface-soft: #272d48;
-  --cockpit-line: rgba(190, 198, 255, .13);
-  --cockpit-line-strong: rgba(190, 198, 255, .22);
+  --cockpit-canvas: radial-gradient(ellipse at 22% -12%, rgba(24, 80, 244, .95), transparent 47%), radial-gradient(ellipse at 83% 4%, rgba(132, 48, 198, .76), transparent 39%), linear-gradient(165deg, #12163c 0%, #0b0c22 47%, #090a1b 100%);
+  --cockpit-bg: #12163c;
+  --cockpit-surface: #111827;
+  --cockpit-surface-soft: #151e2e;
+  --cockpit-line: rgba(255, 255, 255, .09);
+  --cockpit-line-strong: rgba(255, 255, 255, .18);
   --cockpit-text: #f8fafc;
   --cockpit-muted: #b4bdcb;
   --cockpit-subtle: #909bac;
-  --cockpit-accent: #b2baff;
+  --cockpit-accent: #a5b4fc;
   --cockpit-green: #66c28e;
   --cockpit-red: #f1847e;
   --cockpit-amber: #edbd6d;
@@ -57,8 +57,6 @@
 .cockpit-module-page [class*="shadow-xl"][class*="rounded-3xl"],.cockpit-module-page [class*="shadow-lg"][class*="rounded-3xl"] { box-shadow: 0 2px 8px rgba(15, 23, 42, .04); }
 .cockpit-module-page [class*="rounded-3xl"][class*="border"][class*="bg-"]:not([class*="border-dashed"]) { border-color: var(--cockpit-line); background: var(--cockpit-surface) !important; box-shadow: 0 2px 9px rgba(15, 23, 42, .035); }
 .dark .cockpit-module-page [class*="rounded-3xl"][class*="border"][class*="bg-"]:not([class*="border-dashed"]) { box-shadow: 0 2px 12px rgba(0, 0, 0, .16); }
-.dark .money-cockpit-shell .cockpit-quick-input-frame { border-color: var(--cockpit-line-strong) !important; background: var(--cockpit-surface) !important; }
-.dark .money-cockpit-shell .cockpit-quick-input-field { border-color: var(--cockpit-line) !important; background-color: var(--cockpit-surface-soft) !important; box-shadow: none; }
 .cockpit-module-page .cockpit-segmented-control { background: var(--cockpit-surface-soft) !important; border-color: var(--cockpit-line) !important; }
 .cockpit-module-page .cockpit-segmented-pill { background: color-mix(in srgb, var(--cockpit-accent) 9%, var(--cockpit-surface)) !important; border-color: color-mix(in srgb, var(--cockpit-accent) 20%, var(--cockpit-line)) !important; box-shadow: none !important; }
 .cockpit-page-actions .cockpit-primary-action,.cockpit-page-actions .cockpit-secondary-action { min-height: 46px; }
@@ -141,20 +139,20 @@ html:has(.money-cockpit-shell),body:has(.money-cockpit-shell) { overscroll-behav
   --rp-body: rgba(233,235,255,.82);
   --rp-muted: rgba(225,228,250,.74);
   --rp-subtle: rgba(225,228,250,.62);
-  --rp-line: rgba(198,204,255,.16);
-  --rp-surface: rgba(111,119,169,.2);
-  --rp-surface-strong: rgba(111,119,169,.3);
+  --rp-line: rgba(223,228,255,.15);
+  --rp-surface: rgba(255,255,255,.06);
+  --rp-surface-strong: rgba(34,36,61,.94);
   --rp-accent: #c6c9ff;
   --rp-accent-ink: #e1e1ff;
   --rp-accent-soft: rgba(111,104,211,.24);
-  --rp-user: rgba(105,101,178,.27);
-  --rp-user-line: rgba(185,190,255,.24);
-  --rp-composer: rgba(37,40,67,.96);
+  --rp-user: rgba(93,89,176,.34);
+  --rp-user-line: rgba(185,190,255,.2);
+  --rp-composer: rgba(34,36,61,.94);
   --rp-focus: #c1c4ff;
   --rp-error: #ffc0d0;
   --rp-error-bg: rgba(244,63,94,.12);
   --rp-success: #86edca;
-  --rp-footer: linear-gradient(180deg,rgba(21,23,37,0),rgba(21,23,37,.96) 35%);
+  --rp-footer: linear-gradient(180deg,rgba(9,10,27,0),rgba(9,10,27,.94) 35%);
   --rp-shadow: 0 13px 35px rgba(0,0,0,.24);
 }
 .receipt-price-page-inner { width: min(100%,760px); min-height: 100dvh; margin: 0 auto; display: flex; flex-direction: column; }
