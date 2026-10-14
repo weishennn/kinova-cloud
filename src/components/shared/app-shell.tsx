@@ -196,6 +196,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (!isKinovaAIOpen || isReceiptPriceSearchPage) return;
 
     const handleSwipeUpStart = (e: TouchEvent) => {
+      // Only trigger swipe-up dismiss if gesture initiates in bottom dock/handle zone
+      const windowHeight = typeof window !== 'undefined' ? window.innerHeight : 800;
+      if (e.touches[0].clientY < windowHeight - 120) {
+        openTouchStartYRef.current = null;
+        return;
+      }
       openTouchStartYRef.current = e.touches[0].clientY;
       openTouchStartXRef.current = e.touches[0].clientX;
     };
@@ -207,8 +213,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       const deltaY = endY - openTouchStartYRef.current;
       const deltaX = endX - (openTouchStartXRef.current ?? endX);
 
-      // User swiped up by > 30px
-      if (deltaY < -30 && Math.abs(deltaY) > Math.abs(deltaX) * 1.1) {
+      // User swiped up by > 25px from bottom handle
+      if (deltaY < -25 && Math.abs(deltaY) > Math.abs(deltaX) * 1.1) {
         setKinovaAIOpen(false);
       }
       openTouchStartYRef.current = null;

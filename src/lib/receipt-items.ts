@@ -97,6 +97,7 @@ const QUERY_STOP_WORDS = new Set([
   'pay', 'please', 'price', 'product', 'products', 'previously', 'recent', 'remember', 'search', 'show', 'some',
   'something', 'tell', 'the', 'that', 'these', 'thing', 'things', 'this', 'those', 'time', 'was', 'what', 'when',
   'where', 'were', 'with', 'you', 'your',
+  '多少', '多少钱', '价格', '请问', '查', '查一下', '买', '过', '什么', '的', '有', '记录', '之前', '最近', '哪个', '哪',
 ]);
 
 function tokenize(value: string): string[] {
@@ -132,15 +133,47 @@ function tokenSimilarity(left: string, right: string): number {
 }
 
 export function scoreReceiptItemQuery(item: StoredReceiptItem, query: string): number {
-  const queryTokens = tokenize(query);
+  const cleanQuery = query.toLowerCase().trim();
+  if (!cleanQuery) return 0;
+
+  const itemFullText = `${item.name} ${item.brand || ''} ${item.productType || ''} ${item.category || ''}`.toLowerCase().trim();
+  if (!itemFullText) return 0;
+
+  // 1. Exact or contiguous phrase match (e.g. "chicken rice" in "Hainanese Chicken Rice", or "鸡饭" in "海南鸡饭")
+  if (itemFullText.includes(cleanQuery)) {
+    return 100;
+  }
+  if (item.name.toLowerCase().trim() && cleanQuery.includes(item.name.toLowerCase().trim())) {
+    return 95;
+  }
+
+  const queryTokens = tokenize(cleanQuery);
   if (queryTokens.length === 0) return 0;
 
-  const itemTokens = tokenize(`${item.name} ${item.brand || ''} ${item.productType || ''} ${item.category || ''}`);
+  const itemTokens = tokenize(itemFullText);
   if (itemTokens.length === 0) return 0;
 
-  const matched = queryTokens.filter((queryToken) =>
-    itemTokens.some((itemToken) => tokenSimilarity(queryToken, itemToken) >= 0.78),
-  ).length;
+  // Count which query tokens are matched in item
+  const matchedTokens = queryTokens.filter((queryToken) => {
+    if (itemFullText.includes(queryToken)) return true;
+    return itemTokens.some((itemToken) => tokenSimilarity(queryToken, itemToken) >= 0.8);
+  });
 
-  return matched === 0 ? 0 : Math.round((matched / queryTokens.length) * 100);
+  const matchCount = matchedTokens.length;
+
+  // Strict multi-token requirement:
+  // - 1 token: requires 1 match
+  // - 2 tokens (e.g. "chicken rice"): MUST match both tokens! Never let "omu rice" match "chicken rice"!
+  // - 3+ tokens: requires at least 75% coverage
+  if (queryTokens.length === 1) {
+    return matchCount === 1 ? 88 : 0;
+  }
+
+  if (queryTokens.length === 2) {
+    return matchCount === 2 ? 92 : 0;
+  }
+
+  const ratio = matchCount / queryTokens.length;
+  if (ratio < 0.75) return 0;
+  return Math.round(ratio * 100);
 }
