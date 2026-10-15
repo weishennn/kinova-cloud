@@ -1122,11 +1122,16 @@ export function RecordPaymentModal() {
       closeModal();
       toast.success(receiptQueued ? 'Transaction updated. Receipt upload is queued! ⚡' : 'Transaction updated! ⚡');
 
+      void queryClient.invalidateQueries({ queryKey: ['sheet'] });
+      void queryClient.invalidateQueries({ queryKey: ['months'] });
+      void queryClient.invalidateQueries({ queryKey: ['overview'] });
+
       // Upload and link the receipt only after the transaction write is durable.
       void (async () => {
         try {
           await ledgerWrite;
           if (receiptQueued) notifyReceiptUploadQueueChanged();
+          queryClient.invalidateQueries({ queryKey: ['sheet'] });
           queryClient.invalidateQueries({ queryKey: ['months'] });
           queryClient.invalidateQueries({ queryKey: ['overview'] });
         } catch (err: unknown) {
@@ -1294,11 +1299,16 @@ export function RecordPaymentModal() {
       );
     }
 
+    void queryClient.invalidateQueries({ queryKey: ['sheet'] });
+    void queryClient.invalidateQueries({ queryKey: ['months'] });
+    void queryClient.invalidateQueries({ queryKey: ['overview'] });
+
     void (async () => {
       try {
         if (ledgerWrite) await ledgerWrite;
         if (receiptQueued) notifyReceiptUploadQueueChanged();
 
+        queryClient.invalidateQueries({ queryKey: ['sheet'] });
         queryClient.invalidateQueries({ queryKey: ['months'] });
         queryClient.invalidateQueries({ queryKey: ['overview'] });
       } catch (err: unknown) {

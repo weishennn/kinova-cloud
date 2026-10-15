@@ -227,7 +227,7 @@ export function useTransactions(filters?: { period?: string; month?: string; fro
     });
   }, [rows, tripsRows, trixpenseTick, period, filterFrom, filterTo, filterType, filterCategory]);
 
-  return { transactions, isLoading, error };
+  return { transactions, isLoading, error, refetch };
 }
 
 export function useTransactionSummary(period?: { from: string; to: string }) {

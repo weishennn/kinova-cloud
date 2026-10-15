@@ -97,11 +97,14 @@ const QUERY_STOP_WORDS = new Set([
   'pay', 'please', 'price', 'product', 'products', 'previously', 'recent', 'remember', 'search', 'show', 'some',
   'something', 'tell', 'the', 'that', 'these', 'thing', 'things', 'this', 'those', 'time', 'was', 'what', 'when',
   'where', 'were', 'with', 'you', 'your',
-  '多少', '多少钱', '价格', '请问', '查', '查一下', '买', '过', '什么', '的', '有', '记录', '之前', '最近', '哪个', '哪',
+  '多少', '多少钱', '价格', '价钱', '市价', '请问', '请', '查', '查一下', '查查', '查一查', '查询', '我查', '我想查', '要查',
+  '找', '找找', '找一下', '找一找', '我想找', '帮我找', '搜', '搜一下', '搜搜', '搜一搜', '搜索', '我搜',
+  '看', '看看', '看一下', '看下', '看一看', '买', '买过', '买的', '买了', '吃', '吃过', '吃了', '吃的',
+  '什么', '的', '有', '有没有', '记录', '之前', '上次', '最近', '哪个', '哪',
 ]);
 
-const CHINESE_PREFIX_REGEX = /^(我找|我想找|帮我找|请帮我找|请问|请帮我查|帮我查|查一下|查查|查|问一下|有没有|看看|我买过的|买过的|买过|我买的|买的|吃过的|吃过|之前买的|之前的|上次买的|上次的)\s*/i;
-const CHINESE_SUFFIX_REGEX = /\s*(多少钱|几多钱|多贵|什么价钱|什么价|价钱|价格|是多少|大约多少|多少|记录|呢|呀|啊|？|\?)+$/i;
+const CHINESE_PREFIX_REGEX = /^(请问|我想要找|我想找|我找|帮我找|请帮我找|找一找|找找|找|我想查|我要查|要查|请帮我查|帮我查查|帮我查|查一查|查一下|查查|查询|我查|查|我想搜|我要搜|我搜|搜一搜|搜一下|搜索|搜|我想看|我想看看|帮我看看|看看|看下|看一下|看一看|问一下|有没有买过|有没有买|有没有|有买过|有买|我买过的|买过的|买过|我买的|买的|买了|我吃过的|吃过的|吃过|吃了|之前买的|之前的|之前|上次买的|上次的|上次|最近买的|最近的|最近)\s*/i;
+const CHINESE_SUFFIX_REGEX = /\s*(多少钱|几多钱|多贵|什么价钱|什么价|价钱|价格|是多少|大约多少|多少|市价|售价|记录|呢|呀|啊|啦|吧|么|吗|？|\?)+$/i;
 const ENGLISH_PREFIX_REGEX = /^(how much (is|was|did i pay for|are)|what (is|was|did i pay for) the (price|cost) of|can you check (the price of)?|check (the price of)?|find (my)?|tell me the price of|show me (the)?|i bought|i paid for)\s+/i;
 const ENGLISH_SUFFIX_REGEX = /\s+(cost|price|how much|i paid|i bought|last time|\?)$/i;
 
@@ -110,10 +113,36 @@ const COMMON_BILINGUAL_SYNONYMS: Record<string, string[]> = {
   '鸡饭': ['chicken rice', 'nasi ayam', '鸡饭', '海南鸡饭', '烧鸡饭', '白鸡饭'],
   'chicken rice': ['chicken rice', '鸡饭', 'nasi ayam', 'hainanese chicken rice'],
   'nasi ayam': ['nasi ayam', 'chicken rice', '鸡饭'],
-  '蛋': ['egg', 'eggs', '鸡蛋', 'telur'],
-  '鸡蛋': ['egg', 'eggs', '鸡蛋', 'telur'],
-  'egg': ['egg', 'eggs', '鸡蛋', '蛋'],
-  'eggs': ['egg', 'eggs', '鸡蛋', '蛋'],
+  '蛋': ['egg', 'eggs', '鸡蛋', '蛋', 'telur', 'telur ayam'],
+  '鸡蛋': ['egg', 'eggs', '鸡蛋', '蛋', 'telur', 'telur ayam'],
+  'egg': ['egg', 'eggs', '鸡蛋', '蛋', 'telur', 'telur ayam'],
+  'eggs': ['egg', 'eggs', '鸡蛋', '蛋', 'telur', 'telur ayam'],
+  'telur': ['telur', 'telur ayam', 'egg', 'eggs', '鸡蛋', '蛋'],
+  'telur ayam': ['telur ayam', 'telur', 'egg', 'eggs', '鸡蛋', '蛋'],
+  '鸡': ['chicken', 'ayam', '鸡', '鸡肉'],
+  '鸡肉': ['chicken', 'ayam', '鸡', '鸡肉'],
+  'chicken': ['chicken', '鸡', '鸡肉', 'ayam'],
+  'ayam': ['ayam', 'chicken', '鸡', '鸡肉'],
+  '猪肉': ['pork', '猪肉'],
+  'pork': ['pork', '猪肉'],
+  '牛肉': ['beef', 'daging', '牛肉'],
+  'beef': ['beef', 'daging', '牛肉'],
+  '鱼': ['fish', 'ikan', '鱼'],
+  'fish': ['fish', 'ikan', '鱼'],
+  '虾': ['prawn', 'shrimp', 'udang', '虾'],
+  'prawn': ['prawn', 'shrimp', 'udang', '虾'],
+  'shrimp': ['shrimp', 'prawn', 'udang', '虾'],
+  '菜': ['vegetable', 'vegetables', 'sayur', '菜', '蔬菜'],
+  '蔬菜': ['vegetable', 'vegetables', 'sayur', '菜', '蔬菜'],
+  'vegetable': ['vegetable', 'vegetables', 'sayur', '菜', '蔬菜'],
+  'vegetables': ['vegetables', 'vegetable', 'sayur', '菜', '蔬菜'],
+  '水果': ['fruit', 'fruits', 'buah', '水果'],
+  'fruit': ['fruit', 'fruits', 'buah', '水果'],
+  'fruits': ['fruits', 'fruit', 'buah', '水果'],
+  '苹果': ['apple', '苹果'],
+  'apple': ['apple', '苹果'],
+  '香蕉': ['banana', 'pisang', '香蕉'],
+  'banana': ['banana', 'pisang', '香蕉'],
   '咖啡': ['coffee', 'kopi', '咖啡', 'cafe', 'latte', 'cappuccino'],
   'coffee': ['coffee', '咖啡', 'kopi', 'cafe'],
   'kopi': ['kopi', 'coffee', '咖啡'],
@@ -128,18 +157,18 @@ const COMMON_BILINGUAL_SYNONYMS: Record<string, string[]> = {
   '杂菜饭': ['mixed rice', 'economy rice', '杂饭', '杂菜饭', '经济饭'],
   'mixed rice': ['mixed rice', 'economy rice', '杂饭', '经济饭'],
   'economy rice': ['economy rice', 'mixed rice', '经济饭', '杂饭'],
-  '炒饭': ['fried rice', '炒饭'],
-  'fried rice': ['fried rice', '炒饭'],
+  '炒饭': ['fried rice', 'nasi goreng', '炒饭'],
+  'fried rice': ['fried rice', 'nasi goreng', '炒饭'],
   '面': ['noodle', 'noodles', 'mee', '面', '面条', '云吞面', '板面'],
   '面条': ['noodle', 'noodles', 'mee', '面', '面条'],
   'noodle': ['noodle', 'noodles', 'mee', '面', '面条'],
   'noodles': ['noodle', 'noodles', 'mee', '面', '面条'],
   'mee': ['mee', 'noodle', 'noodles', '面'],
   '面包': ['bread', 'roti', '面包', 'toast'],
-  'bread': ['bread', 'roti', '面包'],
+  'bread': ['bread', 'roti', '面包', 'toast'],
   'roti': ['roti', 'bread', '面包', 'roti canai'],
-  '牛奶': ['milk', '牛奶', '鲜奶'],
-  'milk': ['milk', '牛奶'],
+  '牛奶': ['milk', 'susu', '牛奶', '鲜奶'],
+  'milk': ['milk', 'susu', '牛奶', '鲜奶'],
 
   // Daily Essentials
   '洗发水': ['shampoo', '洗发水', '洗发精', '洗发露'],
@@ -158,12 +187,17 @@ const COMMON_BILINGUAL_SYNONYMS: Record<string, string[]> = {
 export function extractCleanItemKeyword(query: string): string {
   let cleaned = query.trim();
 
+  // Separate Chinese characters from alphanumeric words (e.g. "我查egg" -> "我查 egg")
+  cleaned = cleaned
+    .replace(/([\u4e00-\u9fa5])([a-zA-Z0-9])/g, '$1 $2')
+    .replace(/([a-zA-Z0-9])([\u4e00-\u9fa5])/g, '$1 $2');
+
   // Strip English prefix/suffix
   cleaned = cleaned.replace(ENGLISH_PREFIX_REGEX, '');
   cleaned = cleaned.replace(ENGLISH_SUFFIX_REGEX, '');
 
-  // Strip Chinese prefix/suffix
-  for (let i = 0; i < 3; i++) {
+  // Strip Chinese prefix/suffix iteratively
+  for (let i = 0; i < 4; i++) {
     const prev = cleaned;
     cleaned = cleaned.replace(CHINESE_PREFIX_REGEX, '');
     cleaned = cleaned.replace(CHINESE_SUFFIX_REGEX, '');
@@ -183,9 +217,27 @@ export function getItemSearchTarget(rawQuery: string): { coreKeyword: string; sy
   synonymsSet.add(cleanKeyword);
   synonymsSet.add(lowerKeyword);
 
+  const queryWordCount = lowerKeyword.split(/\s+/).filter(Boolean).length;
+
   for (const [key, synList] of Object.entries(COMMON_BILINGUAL_SYNONYMS)) {
     const keyLower = key.toLowerCase();
-    if (lowerKeyword === keyLower || lowerKeyword.includes(keyLower) || keyLower.includes(lowerKeyword)) {
+    const isCjk = /[\u4e00-\u9fa5]/.test(keyLower);
+    const keyWordCount = keyLower.split(/\s+/).filter(Boolean).length;
+
+    let isMatch = false;
+    if (lowerKeyword === keyLower) {
+      isMatch = true;
+    } else if (keyLower.includes(lowerKeyword)) {
+      isMatch = true;
+    } else if (lowerKeyword.includes(keyLower)) {
+      // In non-CJK (English/Malay), only match if key has the same or greater word count
+      // so multi-word queries like "chicken rice" never pick up single-word "chicken" synonyms!
+      if (isCjk || keyWordCount >= queryWordCount) {
+        isMatch = true;
+      }
+    }
+
+    if (isMatch) {
       for (const syn of synList) {
         synonymsSet.add(syn.toLowerCase());
       }
@@ -203,6 +255,8 @@ function tokenize(value: string): string[] {
     .toLocaleLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+    .replace(/([\u4e00-\u9fa5])([a-z0-9])/gi, '$1 $2')
+    .replace(/([a-z0-9])([\u4e00-\u9fa5])/gi, '$1 $2')
     .replace(/(\d)([a-z])/g, '$1 $2')
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim()
@@ -250,7 +304,9 @@ export function scoreReceiptItemQuery(item: StoredReceiptItem, query: string): n
   const coreLower = coreKeyword.toLowerCase().trim();
 
   for (const syn of [coreLower, ...synonyms]) {
-    if (!syn || syn.length < 2) continue;
+    if (!syn) continue;
+    const isCjk = /[\u4e00-\u9fa5]/.test(syn);
+    if (!isCjk && syn.length < 2) continue;
     if (itemFullText.includes(syn)) return 100;
     if (item.name.toLowerCase().trim() && syn.includes(item.name.toLowerCase().trim())) return 95;
   }

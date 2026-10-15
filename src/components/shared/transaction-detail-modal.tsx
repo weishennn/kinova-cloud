@@ -354,6 +354,7 @@ function TransactionDetailContent({
     onClose();
 
     void deleteInstallmentPlan(relatedPlan.transactions, relatedPlan.name).then(() => {
+      queryClient.invalidateQueries({ queryKey: ['sheet'] });
       queryClient.invalidateQueries({ queryKey: ['overview'] });
     });
   };

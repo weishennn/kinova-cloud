@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState, useRef, type FormEvent } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMemo, useState, useRef, useEffect, type FormEvent } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowUp,
   CalendarDays,
@@ -29,6 +29,7 @@ import { getActiveUserCacheScope } from '@/lib/sheets-api';
 import {
   scoreReceiptItemQuery,
   extractCleanItemKeyword,
+  stripReceiptItemsFromNotes,
   type StoredReceiptItem,
 } from '@/lib/receipt-items';
 import { TransactionDetailModal } from '@/components/shared/transaction-detail-modal';
@@ -41,6 +42,7 @@ import {
 interface ReceiptPriceSearchProps {
   returnTo?: string;
   onClose?: () => void;
+  isOpen?: boolean;
 }
 
 interface OnlineSource {
@@ -96,7 +98,7 @@ function stableItemKey(item: StoredReceiptItem): string {
     .trim();
 }
 
-export function ReceiptPriceSearch({ returnTo = '/', onClose }: ReceiptPriceSearchProps) {
+export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptPriceSearchProps) {
   const [draftQuery, setDraftQuery] = useState('');
   const [query, setQuery] = useState('');
   const [activeIntent, setActiveIntent] = useState<'none' | 'price' | 'analytics' | 'stock'>('none');
@@ -124,24 +126,37 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose }: ReceiptPriceSear
   const inputRef = useRef<HTMLInputElement>(null);
   const bottomTouchStartRef = useRef<number | null>(null);
 
-  const { transactions = [] } = useTransactions();
+  const queryClient = useQueryClient();
+  const { transactions = [], refetch: refetchTransactions } = useTransactions();
   const cacheScope = getActiveUserCacheScope();
 
+  // Scoped under ['sheet', 'Transactions'] so any ledger write that invalidates 'sheet'
+  // will immediately refresh receipt search history without waiting for stale cache.
   const historyQuery = useQuery({
-    queryKey: ['receipt-price-history', cacheScope],
+    queryKey: ['sheet', 'Transactions', 'receipt-price-history', cacheScope],
     queryFn: async () => {
       const result = await getUnifiedSheetData('Transactions', 'all');
       return (result.rows || []).map((row) => normalizeTransaction(row));
     },
-    staleTime: 5 * 60 * 1000,
+    staleTime: 30 * 1000,
     retry: 1,
   });
 
+  // Automatically refresh latest ledger entries as soon as the user pulls down Kinova AI
+  useEffect(() => {
+    if (isOpen) {
+      void historyQuery.refetch();
+      void refetchTransactions();
+      void queryClient.invalidateQueries({ queryKey: ['sheet'] });
+    }
+  }, [isOpen, historyQuery, refetchTransactions, queryClient]);
+
   const allTransactions = useMemo(() => {
-    const combined = [...(historyQuery.data || []), ...transactions];
+    // Put current active transactions first so optimistic mutations win over older cached history
+    const combined = [...transactions, ...(historyQuery.data || [])];
     const seen = new Set<string>();
     return combined.filter((t) => {
-      if (seen.has(t.id)) return false;
+      if (!t.id || seen.has(t.id)) return false;
       seen.add(t.id);
       return true;
     });
@@ -166,8 +181,14 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose }: ReceiptPriceSear
         }
       } else {
         // Direct expense without receipt itemization
-        const desc = (transaction.description || transaction.category || '').trim();
+        const cleanNotes = stripReceiptItemsFromNotes(transaction.notes || '').trim();
+        const desc = (transaction.description || cleanNotes || transaction.category || '').trim();
         if (desc) {
+          const brandParts = [
+            transaction.category && transaction.category !== desc ? transaction.category : '',
+            cleanNotes && cleanNotes !== desc ? cleanNotes : '',
+          ].filter(Boolean);
+
           entries.push({
             transaction,
             item: {
@@ -175,7 +196,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose }: ReceiptPriceSear
               quantity: 1,
               unitPrice: transaction.amount,
               amount: transaction.amount,
-              brand: transaction.description && transaction.category !== transaction.description ? transaction.category : undefined,
+              brand: brandParts.length > 0 ? brandParts.join(' ') : undefined,
               productType: transaction.category,
             },
             isDetailed: false,

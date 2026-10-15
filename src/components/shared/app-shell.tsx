@@ -53,6 +53,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (isReceiptPriceSearchPage) return;
 
     if (isKinovaAIOpen) {
+      void queryClient.invalidateQueries({ queryKey: ['sheet'] });
       const targetHeight = typeof window !== 'undefined' ? window.innerHeight + 80 : 960;
       animate(y, targetHeight, {
         type: 'spring',
@@ -73,7 +74,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setPullDistance(0);
       setIsPastThreshold(false);
     }
-  }, [isKinovaAIOpen, isReceiptPriceSearchPage, y]);
+  }, [isKinovaAIOpen, isReceiptPriceSearchPage, y, queryClient]);
 
   // Pull-down gesture listener (active only when at top of page, window.scrollY <= 0)
   useEffect(() => {
@@ -400,6 +401,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           <ReceiptPriceSearch
             returnTo={pathname || '/'}
+            isOpen={isKinovaAIOpen}
             onClose={() => setKinovaAIOpen(false)}
           />
         </div>

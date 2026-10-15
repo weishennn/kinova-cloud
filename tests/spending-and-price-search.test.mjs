@@ -136,3 +136,78 @@ test('computeSpendingAnalytics correctly aggregates category spending and calcul
   assert.ok(result.conversationalSummary.includes('100.50'));
   assert.ok(result.conversationalSummary.includes('Haidilao Hotpot'));
 });
+
+test('scoreReceiptItemQuery & extractCleanItemKeyword handle egg / 鸡蛋 / telur seamlessly', () => {
+  const eggItemChinese = {
+    name: '鸡蛋',
+    quantity: 1,
+    unitPrice: 8.5,
+    amount: 8.5,
+    category: 'Groceries',
+  };
+
+  const eggItemWithBrand = {
+    name: '买鸡蛋',
+    quantity: 1,
+    unitPrice: 12.0,
+    amount: 12.0,
+    brand: 'Farm Fresh',
+    category: 'Food',
+  };
+
+  const singleCharEgg = {
+    name: '买蛋',
+    quantity: 1,
+    unitPrice: 6.0,
+    amount: 6.0,
+    category: 'Groceries',
+  };
+
+  const malayEgg = {
+    name: 'Telur Ayam Gred A 30s',
+    quantity: 1,
+    unitPrice: 14.5,
+    amount: 14.5,
+    category: 'Groceries',
+  };
+
+  const englishEgg = {
+    name: 'Grade A Eggs 10s',
+    quantity: 1,
+    unitPrice: 7.2,
+    amount: 7.2,
+    category: 'Groceries',
+  };
+
+  // 1. "egg" must match Chinese "鸡蛋", "买鸡蛋", "买蛋", Malay "Telur Ayam", and English "Grade A Eggs"
+  assert.ok(scoreReceiptItemQuery(eggItemChinese, 'egg') >= 90, 'egg should match 鸡蛋');
+  assert.ok(scoreReceiptItemQuery(eggItemWithBrand, 'egg') >= 90, 'egg should match 买鸡蛋');
+  assert.ok(scoreReceiptItemQuery(singleCharEgg, 'egg') >= 90, 'egg should match 买蛋');
+  assert.ok(scoreReceiptItemQuery(malayEgg, 'egg') >= 90, 'egg should match Telur Ayam');
+  assert.ok(scoreReceiptItemQuery(englishEgg, 'egg') >= 90, 'egg should match Grade A Eggs');
+
+  // 2. "eggs" plural must also match
+  assert.ok(scoreReceiptItemQuery(eggItemChinese, 'eggs') >= 90, 'eggs should match 鸡蛋');
+  assert.ok(scoreReceiptItemQuery(singleCharEgg, 'eggs') >= 90, 'eggs should match 买蛋');
+
+  // 3. "我查egg" (user conversational inquiry) must cleanly match 鸡蛋
+  assert.ok(scoreReceiptItemQuery(eggItemChinese, '我查egg') >= 90, '我查egg should match 鸡蛋');
+  assert.ok(scoreReceiptItemQuery(eggItemWithBrand, '我查egg') >= 90, '我查egg should match 买鸡蛋');
+  assert.ok(scoreReceiptItemQuery(eggItemChinese, '查egg') >= 90, '查egg should match 鸡蛋');
+  assert.ok(scoreReceiptItemQuery(eggItemChinese, '找egg') >= 90, '找egg should match 鸡蛋');
+  assert.ok(scoreReceiptItemQuery(eggItemChinese, 'how much is egg') >= 90, 'how much is egg should match 鸡蛋');
+
+  // 4. Reverse: "鸡蛋" must match English "Grade A Eggs" and Malay "Telur Ayam"
+  assert.ok(scoreReceiptItemQuery(englishEgg, '鸡蛋') >= 90, '鸡蛋 should match Grade A Eggs');
+  assert.ok(scoreReceiptItemQuery(malayEgg, '鸡蛋') >= 90, '鸡蛋 should match Telur Ayam');
+
+  // 5. Negative matching: "egg" must NOT match unrelated items
+  const chickenRice = {
+    name: 'Hainanese Chicken Rice',
+    quantity: 1,
+    unitPrice: 12.5,
+    amount: 12.5,
+    category: 'Food',
+  };
+  assert.equal(scoreReceiptItemQuery(chickenRice, 'egg'), 0, 'egg must NOT match chicken rice');
+});

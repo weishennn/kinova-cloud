@@ -699,12 +699,17 @@ export function SmartQuickInput() {
       : `✨ Recorded: ${recordedText}!`;
     toast.success(toastMsg, toastOptions);
 
+    void queryClient.invalidateQueries({ queryKey: ['sheet'] });
+    void queryClient.invalidateQueries({ queryKey: ['months'] });
+    void queryClient.invalidateQueries({ queryKey: ['overview'] });
+
     // Wake the global retry worker after the ledger write has acknowledged or
     // safely entered its offline outbox. The receipt itself is already in IndexedDB.
     void (async () => {
       try {
         await ledgerWrite;
         if (receiptQueued) notifyReceiptUploadQueueChanged();
+        queryClient.invalidateQueries({ queryKey: ['sheet'] });
         queryClient.invalidateQueries({ queryKey: ['months'] });
         queryClient.invalidateQueries({ queryKey: ['overview'] });
       } catch (err) {
