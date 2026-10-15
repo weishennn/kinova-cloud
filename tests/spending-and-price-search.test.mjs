@@ -52,6 +52,17 @@ test('scoreReceiptItemQuery strictly requires all tokens for 2-word queries like
   };
   const chineseScore = scoreReceiptItemQuery(chineseItem, '鸡饭');
   assert.equal(chineseScore, 100, '鸡饭 should match 传统海南鸡饭');
+
+  // 5. Conversational query: "我找我买过的鸡饭多少钱" MUST match English "Hainanese Chicken Rice" & Chinese "传统海南鸡饭"
+  const convScoreEnglish = scoreReceiptItemQuery(chickenRice, '我找我买过的鸡饭多少钱');
+  assert.ok(convScoreEnglish >= 90, '我找我买过的鸡饭多少钱 must match Hainanese Chicken Rice');
+
+  const convScoreChinese = scoreReceiptItemQuery(chineseItem, '我买过鸡饭多少钱？');
+  assert.ok(convScoreChinese >= 90, '我买过鸡饭多少钱？ must match 传统海南鸡饭');
+
+  // 6. Conversational query for chicken rice MUST NOT match Omu Rice
+  const convOmuScore = scoreReceiptItemQuery(omuRice, '我找我买过的鸡饭多少钱');
+  assert.equal(convOmuScore, 0, '我找我买过的鸡饭多少钱 must NOT match Omu Rice');
 });
 
 test('isSpendingAnalyticsQuery distinguishes spending queries from item price checks', () => {

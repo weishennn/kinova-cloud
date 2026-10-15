@@ -138,7 +138,7 @@ Structure your answer with clarity:
 4. ⚠️ 严正免责声明:
    "免责声明：以上内容基于公开市场资讯及 AI 整理分析，仅供参考，不构成任何投资建议或买卖邀约。金融市场有风险，投资需独立决策并做好风控。"
 
-Keep your response concise, readable, and under 380 words. Use clear bullet points and markdown bold headers.`;
+Keep your response well-structured, readable, and under 500 words. CRITICAL: Always finish all sentences and conclusions completely without trailing off or cutting off. Use clear bullet points and markdown bold headers.`;
 
     const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
     let response: Response | null = null;
@@ -157,10 +157,10 @@ Keep your response concise, readable, and under 380 words. Use clear bullet poin
             tools: [{ google_search: {} }],
             generationConfig: {
               temperature: 0.2,
-              maxOutputTokens: 1200,
+              maxOutputTokens: 3500,
             },
           }),
-          signal: AbortSignal.timeout(15_000),
+          signal: AbortSignal.timeout(18_000),
         }
       ).catch(() => null);
 
@@ -191,10 +191,10 @@ Keep your response concise, readable, and under 380 words. Use clear bullet poin
     const candidate = data?.candidates?.[0];
     const summary = Array.isArray(candidate?.content?.parts)
       ? candidate.content.parts
-          .map((part: { text?: unknown }) => safeText(part?.text, 2500))
+          .map((part: { text?: unknown }) => safeText(part?.text, 9000))
           .filter(Boolean)
           .join('\n')
-          .slice(0, 3000)
+          .slice(0, 10000)
       : '';
 
     if (!summary) {

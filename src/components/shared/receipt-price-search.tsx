@@ -26,7 +26,11 @@ import {
 import { normalizeTransaction, useTransactions, type Transaction } from '@/hooks/useTransactions';
 import { getUnifiedSheetData } from '@/hooks/useSheets';
 import { getActiveUserCacheScope } from '@/lib/sheets-api';
-import { scoreReceiptItemQuery, type StoredReceiptItem } from '@/lib/receipt-items';
+import {
+  scoreReceiptItemQuery,
+  extractCleanItemKeyword,
+  type StoredReceiptItem,
+} from '@/lib/receipt-items';
 import { TransactionDetailModal } from '@/components/shared/transaction-detail-modal';
 import {
   computeSpendingAnalytics,
@@ -96,6 +100,10 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose }: ReceiptPriceSear
   const [draftQuery, setDraftQuery] = useState('');
   const [query, setQuery] = useState('');
   const [activeIntent, setActiveIntent] = useState<'none' | 'price' | 'analytics' | 'stock'>('none');
+
+  const displayItemName = useMemo(() => {
+    return extractCleanItemKeyword(query) || query;
+  }, [query]);
 
   // Analytics state
   const [analyticsResult, setAnalyticsResult] = useState<SpendingAnalyticsResult<Transaction> | null>(null);
@@ -687,9 +695,26 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose }: ReceiptPriceSear
 
                 {/* Ready Analysis Content */}
                 {stockInsight.status === 'ready' && stockInsight.summary && (
-                  <div className="flex flex-col gap-3">
-                    <div className="text-xs sm:text-sm text-white/90 leading-relaxed whitespace-pre-wrap font-sans">
-                      {stockInsight.summary}
+                  <div className="flex flex-col gap-3.5">
+                    <div className="text-xs sm:text-sm text-white/90 leading-relaxed space-y-2.5 font-sans">
+                      {stockInsight.summary.split('\n\n').map((paragraph, pIdx) => {
+                        const trimmed = paragraph.trim();
+                        if (!trimmed) return null;
+                        const isHeader = /^(\d+\.|\#\#\#|\#\#|\🎯|\💡|\⚖️|\🛡️|\🚀|\⚠️)/.test(trimmed);
+
+                        return (
+                          <div
+                            key={pIdx}
+                            className={isHeader ? 'pt-1 font-semibold text-white' : 'text-white/85'}
+                          >
+                            {trimmed.split('\n').map((line, lIdx) => (
+                              <p key={lIdx} className={line.startsWith('-') || line.startsWith('•') ? 'pl-2 text-white/90 my-0.5' : 'my-0.5'}>
+                                {line}
+                              </p>
+                            ))}
+                          </div>
+                        );
+                      })}
                     </div>
 
                     {/* Sources */}
@@ -753,15 +778,15 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose }: ReceiptPriceSear
                   <div className="flex flex-col items-center justify-center py-8 px-4 rounded-3xl bg-white/[0.04] border border-white/10 text-center">
                     <PackageSearch size={32} className="text-white/40 mb-3" />
                     <div className="text-base font-bold text-white mb-1">
-                      你的个人账本中暂无「{query}」的记录
+                      你的个人账本中暂无「{displayItemName}」的记录
                     </div>
                     <p className="text-xs text-white/60 max-w-sm mb-5 leading-relaxed">
-                      历史账单和小票中未查到此商品。想让 Kinova AI 使用 Google 搜索查询当前公开发售参考价吗？
+                      历史账单和小票中未查到此商品。想让 Kinova AI 使用 Google 搜索查询「{displayItemName}」当前公开发售参考价吗？
                     </p>
 
                     <button
                       type="button"
-                      onClick={() => void searchMarketPriceOnline(query)}
+                      onClick={() => void searchMarketPriceOnline(displayItemName)}
                       disabled={isGeneralLoading}
                       className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 active:scale-95 text-white font-semibold text-xs flex items-center gap-2 shadow-lg cursor-pointer transition-all disabled:opacity-50"
                     >
@@ -770,7 +795,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose }: ReceiptPriceSear
                       ) : (
                         <Globe2 size={15} />
                       )}
-                      <span>🌐 立即全网查询「{query}」参考价格</span>
+                      <span>🌐 立即全网查询「{displayItemName}」参考价格</span>
                     </button>
                   </div>
                 )}
