@@ -28,6 +28,7 @@ import { confirmAction } from '@/stores/confirm-dialog-store';
 import { toast } from 'sonner';
 import { CockpitPageHeading } from '@/components/money-cockpit/cockpit-page-heading';
 import { GoogleAccountAndAdminPanel } from '@/components/settings/google-account-admin-panel';
+import { MerchantRulesManager } from '@/components/settings/merchant-rules-manager';
 import { saveSettingWithCloudSync, syncCloudSettingsWithLocal, SETTINGS_UPDATED_EVENT } from '@/lib/cloud-settings-sync';
 import {
   getPlanMigrationComparisons,
@@ -744,6 +745,8 @@ export default function SettingsPage() {
       />
 
       <GoogleAccountAndAdminPanel />
+
+      <MerchantRulesManager />
 
       {/* Cloud Architecture & 60-Day Cache Manager */}
       <section className="space-y-4">

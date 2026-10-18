@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { matchMerchantCategoryRule } from './merchant-rules.ts';
 
 export type ShortcutTriggerSource = 'back_tap_screenshot' | 'apple_pay_wallet';
 
@@ -29,6 +30,9 @@ export interface ShortcutQuickDraft {
   taxRate?: number | null;
   taxIncluded?: boolean;
   taxLabel?: string;
+  discountAmount?: number | null;
+  dealsDescription?: string | null;
+  billAmount?: number | null;
   items?: ShortcutDraftItem[];
   ocrSummary?: string;
   notes: string;
@@ -79,11 +83,11 @@ const UNAMBIGUOUS_SYMBOL_MAP: Array<{ pattern: RegExp; currency: string }> = [
 
 const MERCHANT_CATEGORY_RULES: Array<{ regex: RegExp; category: string }> = [
   {
-    regex: /\b(grab|airasia|shell|petronas|petron|caltex|touch\s*n\s*go|tng|rapidkl|mrt|lrt|ktm|erl|parking|toll|beam|socars|uber|taxi)\b/i,
+    regex: /\b(grab|airasia|shell|petronas|petron|caltex|bhpetrol|touch\s*n\s*go|tng|rapidkl|mrt|lrt|ktm|erl|parking|toll|beam|socars|uber|taxi|fuelsave|ron95|ron97|diesel|petrol|stesen\s*minyak|budi\s*madani)\b/i,
     category: 'Transport',
   },
   {
-    regex: /\b(starbucks|zus|tealive|chagee|mcdonald|kfc|nando|pelita|kopitiam|cafe|coffee|bakery|ramen|sushi|bistro|restaurant|restoran|mamak|foodpanda|grabfood|dining|kitchen|hotpot|barbecue|bbq)\b/i,
+    regex: /\b(starbucks|zus|tealive|chagee|mcdonald|kfc|nando|pelita|kopitiam|cafe|coffee|bakery|ramen|sushi|bistro|restaurant|restoran|mamak|foodpanda|grabfood|dining|kitchen|hotpot|barbecue|bbq|four\s*beans|豆花|dessert|tea|boba|noodles?|rice|dim\s*sum|bakery|cake|bread)\b/i,
     category: 'Food & Dining',
   },
   {
@@ -107,6 +111,64 @@ const MERCHANT_CATEGORY_RULES: Array<{ regex: RegExp; category: string }> = [
     category: 'Insurance',
   },
 ];
+
+/**
+ * System and notification noise terms that must NEVER be accepted as merchant names.
+ */
+export const SYSTEM_NOTIFICATION_NOISE_REGEX =
+  /^(?:kinova(?:\s*automation)?|automation|shortcuts?|screenshot|dynamic\s*island|notification|back\s*tap|now|payment\s*successful?|payment\s*success|payment\s*completed?|transaction\s*successful?|transaction\s*details|order\s*details|order\s*id(?::\s*[A-Z0-9_-]+)?|successful|receipt)$/i;
+
+/**
+ * Sanitizes candidate merchant names, stripping notification titles or extracting
+ * the true merchant from contextual OCR text or in-app navigation headers.
+ */
+export function sanitizeMerchantCandidate(rawName: string, contextText?: string): string {
+  let cleaned = String(rawName || '').trim();
+  if (!cleaned || SYSTEM_NOTIFICATION_NOISE_REGEX.test(cleaned)) {
+    cleaned = '';
+  }
+
+  // If candidate was noise or empty, try extracting known merchants from context text
+  if (!cleaned && contextText) {
+    const text = contextText.trim();
+    // 1. Try extracting merchant from in-app navigation title bars (e.g. "✕ Four Beans 四夕豆花 - Taman Me...")
+    const headerMatch = text.match(/(?:✕|X|<)\s*([A-Za-z0-9\u4e00-\u9fa5\s&'-]+?)(?:\s*-\s*[A-Za-z0-9\s]*\.\.\.|\s*-\s*[A-Za-z0-9\s]+|\n|$)/i);
+    if (headerMatch && headerMatch[1] && !SYSTEM_NOTIFICATION_NOISE_REGEX.test(headerMatch[1].trim())) {
+      cleaned = headerMatch[1].trim();
+    }
+
+    // 2. Check known brands
+    if (!cleaned) {
+      const brandMatches = [
+        /\b(SHELL(?:\s+[A-Z0-9\s/]+)?)\b/i,
+        /\b(PETRONAS(?:\s+[A-Z0-9\s/]+)?)\b/i,
+        /\b(CALTEX(?:\s+[A-Z0-9\s/]+)?)\b/i,
+        /\b(BHPETROL(?:\s+[A-Z0-9\s/]+)?)\b/i,
+        /(Four\s*Beans(?:\s*四夕豆花)?)/i,
+        /(四夕豆花)/i,
+        /\b(MCDONALD'?S?)\b/i,
+        /\b(KFC)\b/i,
+        /\b(STARBUCKS)\b/i,
+        /\b(FAMILYMART)\b/i,
+        /\b(7-ELEVEN)\b/i,
+        /\b(TOUCH\s*'N\s*GO|TNG)\b/i,
+        /\b(GRAB(?:\s*FOOD)?)\b/i,
+      ];
+      for (const rx of brandMatches) {
+        const m = text.match(rx);
+        if (m && m[1] && !SYSTEM_NOTIFICATION_NOISE_REGEX.test(m[1].trim())) {
+          cleaned = m[1].trim();
+          break;
+        }
+      }
+    }
+  }
+
+  // Clean trailing truncated UI text (e.g. "Four Beans 四夕豆花 - Taman Me...")
+  cleaned = cleaned.replace(/\s*-\s*[A-Za-z0-9\s]*\.\.\.$/, '').trim();
+  return cleaned;
+}
+
 
 export interface ShortcutAutoRecordedEntry {
   transactionId: string;
@@ -298,6 +360,14 @@ export function inferCategoryFromMerchant(merchantOrDesc: string, explicitCatego
   if (!text) {
     return { category: 'Food & Dining', isUncertain: true };
   }
+
+  // 1. Prioritize user remembered merchant category rules
+  const userRule = matchMerchantCategoryRule(text);
+  if (userRule) {
+    return { category: userRule.category, isUncertain: false };
+  }
+
+  // 2. Predefined pattern rules
   for (const rule of MERCHANT_CATEGORY_RULES) {
     if (rule.regex.test(text)) {
       return { category: rule.category, isUncertain: false };
@@ -767,14 +837,14 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
       : splitKeys(options.geminiKey);
   const effectiveKeys = candidateKeys.length > 0 ? candidateKeys : [''];
 
-  const preferred = (options.preferredModel || 'gemini-2.5-flash').trim();
+  const preferred = (options.preferredModel || 'gemini-flash-latest').trim();
   const candidateModels = [
     preferred,
+    'gemini-flash-latest',
+    'gemini-3.8-flash',
     'gemini-2.5-flash',
-    'gemini-flash-lite-latest',
   ]
-    .filter((v, i, a) => Boolean(v) && a.indexOf(v) === i)
-    .slice(0, 2);
+    .filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
 
   let parsedOcr: Record<string, unknown> = {};
   let ocrFallbackNotice = '';
@@ -810,10 +880,7 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
               generationConfig: {
                 responseMimeType: 'application/json',
                 temperature: 0.1,
-                maxOutputTokens: 512,
-                thinkingConfig: {
-                  thinkingBudget: 0,
-                },
+                maxOutputTokens: 2048,
               },
             }),
             signal: AbortSignal.timeout(timeoutMs),

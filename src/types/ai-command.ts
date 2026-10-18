@@ -13,6 +13,9 @@ export interface AiTransactionData {
   taxIncluded?: boolean;
   taxLabel?: string;
   taxes?: Array<{ label: string; rate?: number | null; amount?: number | null }>;
+  discountAmount?: number | null;
+  dealsDescription?: string | null;
+  billAmount?: number | null;
   notes?: string;
 }
 

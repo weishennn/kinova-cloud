@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getValidGoogleSession } from '@/lib/google-auth';
 import { recordUserAiCall } from '@/lib/admin-registry';
-import { getLoadBalancedGeminiKeys, reportGeminiKeyFailure } from '@/lib/gemini-key-pool';
+import { getLoadBalancedGeminiKeys, reportGeminiKeyFailure, STANDARD_GEMINI_MODEL, STANDARD_GEMINI_MODELS } from '@/lib/gemini-key-pool';
 import { extractCleanItemKeyword } from '@/lib/receipt-items';
 
 interface GroundedWebSource {
@@ -62,103 +62,147 @@ export async function POST(req: NextRequest) {
       )
       .join(' · ');
 
-    const prompt = `Provide the current typical market price and price range in Malaysia for this item/food/product, priced in MYR:
+    const prompt = `给出该商品/餐食在马来西亚的当前典型公开发售价格与参考区间（以 MYR 计）：
 ${JSON.stringify(productDescription)}
 
-Instructions:
-1. If this is a food dish, dining item, or meal (e.g. 鸡饭 / chicken rice, 椰浆饭, 咖啡, 杂饭, 面食, hawker food, or cafe dining):
-   - Explain the current typical price range in Malaysia across common dining settings:
-     • 普通茶餐室 / 小贩中心 (Hawker / Kopitiam): typically around RM 8.00 - RM 13.00.
-     • 空调餐馆 / 商场美食广场 (Cafe / Mall food court): typically RM 15.00 - RM 25.00.
-   - Mention common variations affecting price (e.g. 加料/鸡腿/配料/饮料套餐等带来的差异).
-2. If this is a retail consumer product or grocery (e.g. shampoo, eggs, milk, groceries):
-   - Use Google Search to find current listings across major Malaysian retailers (Lotus's, Giant, Watsons, Guardian, Shopee, etc.).
-   - Give a clear price comparison or typical price range.
-3. Match the user's language (respond in Simplified Chinese if the input is in Chinese; English if English).
-4. Keep the answer structured, concise, and helpful (under 140 words).`;
+【回答要求】：
+1. 语言：中文提问用简体中文，英文用英文。
+2. 极度精炼！整体 60~100 字以内，杜绝冗长废话，排版清爽如下：
+• 🛒 典型参考价：
+  - 普通小贩/茶餐室/平价超市：RM X - RM Y
+  - 商场美食广场/中高档餐馆：RM A - RM B
+• 💡 差价原因：(一句话简述，如加鸡腿/加料/大包装/品牌差异)`;
 
-    const model = process.env.GEMINI_PRICE_SEARCH_MODEL || 'gemini-2.5-flash';
-    let response: Response | null = null;
+    const preferredModel = process.env.GEMINI_PRICE_SEARCH_MODEL || process.env.GEMINI_MODEL || STANDARD_GEMINI_MODEL;
+    const models = [preferredModel, ...STANDARD_GEMINI_MODELS].filter((v, i, a) => a.indexOf(v) === i);
 
-    for (const apiKey of apiKeys) {
-      response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': apiKey,
-          },
-          body: JSON.stringify({
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            tools: [{ google_search: {} }],
-            generationConfig: {
-              temperature: 0.1,
-              maxOutputTokens: 800,
-            },
-          }),
-          signal: AbortSignal.timeout(14_000),
+    let summary = '';
+    let sources: GroundedWebSource[] = [];
+
+    // Phase 1: Try with Google Search tool (Fast 5.5s timeout)
+    searchLoop: for (const apiKey of apiKeys) {
+      for (const model of models) {
+        try {
+          const searchRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-goog-api-key': apiKey,
+              },
+              body: JSON.stringify({
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                tools: [{ google_search: {} }],
+                generationConfig: {
+                  temperature: 0.1,
+                  maxOutputTokens: 800,
+                  thinkingConfig: {
+                    thinkingBudget: 0,
+                  },
+                },
+              }),
+              signal: AbortSignal.timeout(5500),
+            }
+          ).catch(() => null);
+
+          if (searchRes && searchRes.ok) {
+            const data = await searchRes.json();
+            const candidate = data?.candidates?.[0];
+            const text = Array.isArray(candidate?.content?.parts)
+              ? candidate.content.parts
+                  .map((part: { text?: unknown }) => safeText(part?.text, 2000))
+                  .filter(Boolean)
+                  .join('\n')
+                  .slice(0, 2500)
+              : '';
+            if (text) {
+              summary = text;
+              const groundingChunks = candidate?.groundingMetadata?.groundingChunks;
+              if (Array.isArray(groundingChunks)) {
+                sources = groundingChunks
+                  .flatMap((chunk: Record<string, unknown>) => {
+                    const web = chunk?.web as Record<string, unknown> | undefined;
+                    const uri = safeText(web?.uri, 500);
+                    const title = safeText(web?.title, 160);
+                    if (!uri || !/^https:\/\//i.test(uri)) return [];
+                    return [{ title: title || new URL(uri).hostname, uri }];
+                  })
+                  .filter(
+                    (source, index, all) =>
+                      all.findIndex((candidateSource) => candidateSource.uri === source.uri) === index
+                  )
+                  .slice(0, 5);
+              }
+              break searchLoop;
+            }
+          } else if (searchRes && (searchRes.status === 429 || searchRes.status === 401 || searchRes.status === 403 || searchRes.status >= 500)) {
+            reportGeminiKeyFailure(apiKey, searchRes.status);
+          }
+        } catch {
+          // Continue to next model/key
         }
-      ).catch(() => null);
-
-      if (response?.ok) break;
-      if (response && (response.status === 429 || response.status === 401 || response.status === 403)) {
-        reportGeminiKeyFailure(apiKey, response.status);
-        if (apiKeys.indexOf(apiKey) + 1 < apiKeys.length) continue;
       }
-      break;
     }
 
-    if (!response) {
-      return NextResponse.json(
-        { success: false, error: 'Online price search timed out. Try again in a moment.' },
-        { status: 504 }
-      );
-    }
+    // Phase 2: If Search failed, hit rate limit, or timed out, fall back immediately to direct generation!
+    // Direct generation takes only 2-3s and delivers full Malaysian price intelligence reliably.
+    if (!summary) {
+      directLoop: for (const apiKey of apiKeys) {
+        for (const model of models) {
+          try {
+            const directRes = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-goog-api-key': apiKey,
+                },
+                body: JSON.stringify({
+                  contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                  generationConfig: {
+                    temperature: 0.1,
+                    maxOutputTokens: 800,
+                    thinkingConfig: {
+                      thinkingBudget: 0,
+                    },
+                  },
+                }),
+                signal: AbortSignal.timeout(7000),
+              }
+            ).catch(() => null);
 
-    if (!response.ok) {
-      const message =
-        response.status === 429
-          ? 'Gemini search quota is temporarily exhausted. Try again later.'
-          : response.status === 401 || response.status === 403
-            ? 'Gemini rejected the configured server key.'
-            : 'Online price search failed. Try again in a moment.';
-      return NextResponse.json({ success: false, error: message }, { status: 502 });
+            if (directRes && directRes.ok) {
+              const data = await directRes.json();
+              const candidate = data?.candidates?.[0];
+              const text = Array.isArray(candidate?.content?.parts)
+                ? candidate.content.parts
+                    .map((part: { text?: unknown }) => safeText(part?.text, 2000))
+                    .filter(Boolean)
+                    .join('\n')
+                    .slice(0, 2500)
+                : '';
+              if (text) {
+                summary = text;
+                break directLoop;
+              }
+            } else if (directRes && (directRes.status === 429 || directRes.status === 401 || directRes.status === 403 || directRes.status >= 500)) {
+              reportGeminiKeyFailure(apiKey, directRes.status);
+            }
+          } catch {
+            // Continue
+          }
+        }
+      }
     }
-
-    const data = await response.json();
-    const candidate = data?.candidates?.[0];
-    const summary = Array.isArray(candidate?.content?.parts)
-      ? candidate.content.parts
-          .map((part: { text?: unknown }) => safeText(part?.text, 2000))
-          .filter(Boolean)
-          .join('\n')
-          .slice(0, 2500)
-      : '';
 
     if (!summary) {
       return NextResponse.json(
-        { success: false, error: 'Google Search did not return a comparable price result.' },
-        { status: 502 }
+        { success: false, error: 'AI 比价服务当前繁忙（已尝试多通道重试），请稍后再试。' },
+        { status: 503 }
       );
     }
-
-    const groundingChunks = candidate?.groundingMetadata?.groundingChunks;
-    const sources: GroundedWebSource[] = Array.isArray(groundingChunks)
-      ? groundingChunks
-          .flatMap((chunk: Record<string, unknown>) => {
-            const web = chunk?.web as Record<string, unknown> | undefined;
-            const uri = safeText(web?.uri, 500);
-            const title = safeText(web?.title, 160);
-            if (!uri || !/^https:\/\//i.test(uri)) return [];
-            return [{ title: title || new URL(uri).hostname, uri }];
-          })
-          .filter(
-            (source, index, all) =>
-              all.findIndex((candidateSource) => candidateSource.uri === source.uri) === index
-          )
-          .slice(0, 5)
-      : [];
 
     return NextResponse.json({
       success: true,

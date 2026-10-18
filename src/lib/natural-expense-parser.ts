@@ -1,5 +1,6 @@
 import { getLocalDateString, getRelativeDateString, getDaysInMonth } from '@/lib/date-helper';
 import { evaluateMoneyExpression } from '@/components/shared/money-calculator';
+import { matchMerchantCategoryRule } from '@/lib/merchant-rules';
 
 export interface ParsedExpense {
   amount: number;
@@ -280,15 +281,23 @@ export function parseNaturalExpense(input: string): ParsedExpense | null {
   let detectedType: 'Expense' | 'Income' = 'Expense';
   let highestScore = 0;
 
-  for (const [catName, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
-    for (const kw of keywords) {
-      if (lower.includes(kw)) {
-        // Longer keyword matches get higher priority (e.g. "grabfood" > "food")
-        const score = kw.length;
-        if (score > highestScore) {
-          highestScore = score;
-          detectedCategory = catName;
-          detectedType = INCOME_CATEGORIES.includes(catName) ? 'Income' : 'Expense';
+  // 1. User-remembered merchant rules take highest precedence
+  const userRule = matchMerchantCategoryRule(text);
+  if (userRule) {
+    detectedCategory = userRule.category;
+    detectedType = INCOME_CATEGORIES.includes(userRule.category) ? 'Income' : 'Expense';
+    highestScore = 999;
+  } else {
+    for (const [catName, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
+      for (const kw of keywords) {
+        if (lower.includes(kw)) {
+          // Longer keyword matches get higher priority (e.g. "grabfood" > "food")
+          const score = kw.length;
+          if (score > highestScore) {
+            highestScore = score;
+            detectedCategory = catName;
+            detectedType = INCOME_CATEGORIES.includes(catName) ? 'Income' : 'Expense';
+          }
         }
       }
     }

@@ -15,6 +15,7 @@ import {
   parseAmountAndCurrencyFromRawInput,
   recordShortcutDraftToLedger,
   runShortcutGeminiOcrWithFastFail,
+  sanitizeMerchantCandidate,
   saveShortcutQuickDraft,
   type ShortcutDraftItem,
 } from '@/lib/shortcut-draft-store';
@@ -53,11 +54,24 @@ function getMalaysiaTodayDateString(): string {
   return getLocalDateString();
 }
 
+function getRequestOrigin(req: NextRequest): string {
+  const envAppUrl = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || '').replace(/\/$/, '');
+  const forwardedHost = req.headers.get('x-forwarded-host');
+  const host = forwardedHost || req.headers.get('host');
+  const forwardedProto = req.headers.get('x-forwarded-proto') || 'https';
+  if (host && !host.startsWith('localhost') && !host.startsWith('127.0.0.1')) {
+    const proto = forwardedHost ? forwardedProto : (host.startsWith('192.168.') || host.startsWith('10.') || host.startsWith('172.') ? 'http' : 'https');
+    return `${proto}://${host}`;
+  }
+  if (envAppUrl) return envAppUrl;
+  return new URL(req.url).origin;
+}
+
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
-    const origin = new URL(req.url).origin;
+    const origin = getRequestOrigin(req);
 
     // 1. Enforce URL privacy: reject if secret, screenshot, or financial details were placed in URL query params
     const urlSafety = inspectShortcutUrlSafety(req.url);
@@ -275,22 +289,61 @@ export async function POST(req: NextRequest) {
     const preferredModel = (
       process.env.GEMINI_OCR_MODEL ||
       process.env.GEMINI_MODEL ||
-      'gemini-2.5-flash'
+      'gemini-flash-latest'
     ).trim();
 
-    const prompt = `Read this payment/receipt screenshot and return ONLY valid JSON. Today is ${today}.
-Fields:
-- amount: primary payment amount (number, e.g. 25.50, or null if no money amount is visible)
-- currency: 3-letter ISO code (MYR, SGD, USD, JPY, CNY, THB, EUR, GBP, AUD). Default "MYR" for RM / Malaysian apps.
-- currencySymbol: symbol shown ("RM", "$", "S$", "¥", "AUD", or "")
-- currencyAmbiguous: true ONLY if bare "$" or "¥" without country context
-- merchant: store, payee, recipient, or app name (e.g. "FamilyMart", "Grab", "Touch 'n Go")
-- category: one of [Food & Dining, Transport, Shopping, Housing & Bills, Parents, Insurance, Entertainment, Health, Education, Other]
-- categoryConfidence: 0.0 to 1.0
-- date: YYYY-MM-DD from the receipt/payment (Malaysian format is DD/MM/YYYY; if year is omitted, use ${today.slice(0, 4)}; if no date is visible, use ${today})
-- ocrSummary: 1 short Chinese sentence summarizing the payment
-- notes: short note
-Shape: {"amount": number|null, "currency": string, "currencySymbol": string, "currencyAmbiguous": boolean, "merchant": string, "category": string, "categoryConfidence": number, "date": "YYYY-MM-DD", "ocrSummary": string, "notes": string}`;
+    const prompt = `You are an intelligent financial OCR and receipt analysis AI.
+Analyze this payment / receipt / transaction screenshot carefully and return ONLY valid JSON.
+Today is ${today}.
+
+CRITICAL INSTRUCTIONS:
+1. NOTIFICATION BANNER / UI CHROME FILTERING:
+   - Screenshots often have mobile UI chrome: iOS status bar (time, 5G, battery), Dynamic Island, or NOTIFICATION BANNERS at the top (e.g. from "Kinova Automation", "Shortcuts", "Automation", "Screenshot", "now", notification icons).
+   - NEVER EVER use "Kinova Automation", "Kinova", "Shortcuts", or any system app/shortcut name as the merchant, store, or item name!
+   - NEVER use generic screen status titles like "Payment successful", "Payment success", "Order details", or "Order ID" as the merchant name!
+   - Look UNDERNEATH or PAST any notification banner to find the ACTUAL store/merchant (e.g. Shell, Petronas, Four Beans 四夕豆花, etc.).
+
+2. APP HEADER & WEBH5 SHOP NAME EXTRACTION:
+   - On payment success screens (e.g. Touch 'n Go, GrabPay, WeChat mini-programs, food order webviews), the shop name is often located at the top navigation bar next to a close button '✕' or '<' (e.g. '✕ Four Beans 四夕豆花 - Taman Me...').
+   - You MUST extract the merchant name from this top bar if it is not inside the card body!
+   - Clean branch suffixes or trailing truncation dots: e.g. "Four Beans 四夕豆花".
+   - FOOD INFERENCE: If the payment confirmation does not list individual dishes (e.g. only shows Order ID, Bill amount, Deals and offers), extract the signature food from the merchant name into 'items' (e.g. for 'Four Beans 四夕豆花', extract { "name": "四夕豆花 / 甜品", "quantity": 1, "unitPrice": 18.74, "amount": 18.74 }).
+
+3. FUEL / PETROL RECEIPTS (CRITICAL PRICE EXTRACTION):
+   - Gas stations (Shell, Petronas, Caltex, Petron, BHPetrol) belong to category "Transport".
+   - Extract purchased fuel line items into "items": e.g. "FuelSave 95", "RON95", "RON97", "Diesel", with litres and unit price per litre.
+   - CRITICAL PRICE RULE: Petrol receipts frequently show an unsubsidized pump gross total (e.g. "Total Paid RM 202.82") alongside Government Subsidies (e.g. "Subsidy (BUDI MADANI) RM 115.46"), Loyalty Vouchers (e.g. "Loyalty Voucher RM 5.00"), and the actual user card debit (e.g. "VISA Shell App - RHB Visa Debit RM 82.36").
+   - "amount" MUST BE THE NET OUT-OF-POCKET AMOUNT CHARGED TO THE USER'S CARD OR PAID IN CASH (e.g. 82.36)! NEVER use the unsubsidized pump total (202.82) when government subsidy or vouchers paid for part of the fuel!
+   - Set "billAmount": 202.82 (gross pump price), "discountAmount": 120.46 (115.46 subsidy + 5.00 voucher), and "dealsDescription": "Subsidy (BUDI MADANI) RM 115.46 + Loyalty Voucher RM 5.00".
+
+4. NET AMOUNT PAID VS PRE-DISCOUNT BILL:
+   - "amount" MUST ALWAYS BE THE ACTUAL NET OUT-OF-POCKET AMOUNT PAID (e.g. 18.74 for Four Beans, 82.36 for Shell).
+   - NEVER record the pre-discount bill amount as the expense "amount".
+   - Extract "billAmount" (e.g. 22.05), "discountAmount" (e.g. 3.31), and "dealsDescription" (e.g. "Deals and offers -RM3.31 (10% off bill -2.21, 5% off bill -1.10)").
+
+5. CATEGORIES:
+   - [Food & Dining, Transport, Shopping, Housing & Bills, Parents, Insurance, Entertainment, Health, Education, Other].
+
+Return JSON shape:
+{
+  "amount": number,
+  "currency": "MYR",
+  "currencySymbol": "RM",
+  "currencyAmbiguous": false,
+  "merchant": string,
+  "category": string,
+  "categoryConfidence": number,
+  "date": "YYYY-MM-DD",
+  "billAmount": number | null,
+  "discountAmount": number | null,
+  "dealsDescription": string | null,
+  "items": [
+    { "name": string, "quantity": number, "unitPrice": number, "amount": number }
+  ],
+  "paymentMethod": string | null,
+  "ocrSummary": string,
+  "notes": string
+}`;
 
     const { parsedOcr, ocrFallbackNotice } = await runShortcutGeminiOcrWithFastFail({
       geminiKeys,
@@ -302,18 +355,29 @@ Shape: {"amount": number|null, "currency": string, "currencySymbol": string, "cu
       timeoutMs: 18000,
     });
 
-    const rawMerchant = (
+    const ocrSummary =
+      (typeof parsedOcr.ocrSummary === 'string' && parsedOcr.ocrSummary.trim()) ||
+      (typeof parsedOcr.notes === 'string' && parsedOcr.notes.trim()) ||
+      ocrFallbackNotice ||
+      '';
+
+    const candidateMerchantText = (
       (typeof parsedOcr.merchant === 'string' && parsedOcr.merchant.trim()) ||
+      (typeof parsedOcr.store === 'string' && parsedOcr.store.trim()) ||
       (typeof parsedOcr.payee === 'string' && parsedOcr.payee.trim()) ||
       (typeof parsedOcr.recipient === 'string' && parsedOcr.recipient.trim()) ||
-      (typeof parsedOcr.store === 'string' && parsedOcr.store.trim()) ||
       (typeof parsedOcr.to === 'string' && parsedOcr.to.trim()) ||
       (typeof parsedOcr.seller === 'string' && parsedOcr.seller.trim()) ||
       (typeof parsedOcr.description === 'string' && parsedOcr.description.trim()) ||
       ''
     );
 
-    const rawAmountValue = (
+    const rawMerchant = sanitizeMerchantCandidate(
+      candidateMerchantText,
+      `${ocrSummary} ${typeof parsedOcr.notes === 'string' ? parsedOcr.notes : ''}`
+    );
+
+    let rawAmountValue = (
       parsedOcr.amount ??
       parsedOcr.total ??
       parsedOcr.totalAmount ??
@@ -323,11 +387,19 @@ Shape: {"amount": number|null, "currency": string, "currencySymbol": string, "cu
       null
     );
 
-    let moneyRes = parseAmountAndCurrencyFromRawInput(
-      rawAmountValue,
-      parsedOcr.currencySymbol || parsedOcr.currency,
-      'MYR'
-    );
+    // If Gemini mistakenly returned pre-discount bill amount when discount was present, enforce net amount paid
+    const discountAmount =
+      typeof parsedOcr.discountAmount === 'number' && Number.isFinite(parsedOcr.discountAmount) && parsedOcr.discountAmount > 0
+        ? Number(parsedOcr.discountAmount.toFixed(2))
+        : null;
+    const billAmount =
+      typeof parsedOcr.billAmount === 'number' && Number.isFinite(parsedOcr.billAmount) && parsedOcr.billAmount > 0
+        ? Number(parsedOcr.billAmount.toFixed(2))
+        : null;
+    const dealsDescription =
+      typeof parsedOcr.dealsDescription === 'string' && parsedOcr.dealsDescription.trim()
+        ? parsedOcr.dealsDescription.trim()
+        : null;
 
     const items: ShortcutDraftItem[] = Array.isArray(parsedOcr.items)
       ? parsedOcr.items
@@ -340,28 +412,54 @@ Shape: {"amount": number|null, "currency": string, "currencySymbol": string, "cu
           .slice(0, 12)
       : [];
 
-    if ((moneyRes.amount === null || moneyRes.amount <= 0) && items.length > 0) {
-      const itemsSum = Number(items.reduce((s, it) => s + it.amount, 0).toFixed(2));
-      if (itemsSum > 0) {
-        moneyRes = {
-          ...moneyRes,
-          amount: itemsSum,
-        };
+    const itemsSum = items.length > 0 ? Number(items.reduce((s, it) => s + it.amount, 0).toFixed(2)) : 0;
+    const grossCandidate = billAmount ?? (itemsSum > 0 ? itemsSum : null);
+
+    if (
+      grossCandidate != null &&
+      discountAmount != null &&
+      typeof rawAmountValue === 'number' &&
+      Math.abs(rawAmountValue - grossCandidate) < 0.15 &&
+      grossCandidate > discountAmount
+    ) {
+      rawAmountValue = Number((grossCandidate - discountAmount).toFixed(2));
+    }
+
+    let moneyRes = parseAmountAndCurrencyFromRawInput(
+      rawAmountValue,
+      parsedOcr.currencySymbol || parsedOcr.currency,
+      'MYR'
+    );
+
+    if ((moneyRes.amount === null || moneyRes.amount <= 0) && grossCandidate != null) {
+      const net = discountAmount && discountAmount > 0 && grossCandidate > discountAmount
+        ? Number((grossCandidate - discountAmount).toFixed(2))
+        : grossCandidate;
+      moneyRes = {
+        ...moneyRes,
+        amount: net,
+      };
+    }
+
+    // Align single item amount to net amount paid if discount/subsidy was applied
+    if (items.length === 1 && moneyRes.amount != null && moneyRes.amount > 0 && items[0].amount > moneyRes.amount) {
+      items[0].amount = moneyRes.amount;
+    }
+
+    // Fallback: If receipt items list is empty, infer signature item from merchant name so user's food records are preserved
+    if (items.length === 0 && moneyRes.amount != null && moneyRes.amount > 0) {
+      if (/豆花|four\s*beans/i.test(rawMerchant)) {
+        items.push({ name: '四夕豆花 / 甜品', amount: moneyRes.amount });
       }
     }
 
     const currencyAmbiguous = Boolean(parsedOcr.currencyAmbiguous) || moneyRes.currencyAmbiguous;
     const catRes = inferCategoryFromMerchant(
-      rawMerchant,
+      rawMerchant || (items.length > 0 ? items[0].name : ''),
       typeof parsedOcr.category === 'string' ? parsedOcr.category : undefined
     );
     const catConfidence = typeof parsedOcr.categoryConfidence === 'number' ? parsedOcr.categoryConfidence : 0.5;
     const dateStr = sanitizeDate(parsedOcr.date) || today;
-    const ocrSummary =
-      (typeof parsedOcr.ocrSummary === 'string' && parsedOcr.ocrSummary.trim()) ||
-      (typeof parsedOcr.notes === 'string' && parsedOcr.notes.trim()) ||
-      ocrFallbackNotice ||
-      '';
 
     const effectiveDescription = rawMerchant || (catRes.category && catRes.category !== 'Other' ? catRes.category : '');
 
@@ -400,10 +498,16 @@ Shape: {"amount": number|null, "currency": string, "currencySymbol": string, "cu
       description: effectiveDescription,
       merchant: rawMerchant,
       date: dateStr,
+      discountAmount,
+      dealsDescription,
+      billAmount,
       items: items.length > 0 ? items : undefined,
       ocrSummary,
       notes: [
         '快捷指令截图草稿（待核对确认）',
+        discountAmount && discountAmount > 0
+          ? `[优惠抵扣: -${moneyRes.currency} ${discountAmount.toFixed(2)}${dealsDescription ? ` (${dealsDescription})` : ''}]`
+          : '',
         ocrSummary,
       ]
         .filter(Boolean)
@@ -436,9 +540,9 @@ Shape: {"amount": number|null, "currency": string, "currencySymbol": string, "cu
         notificationTitle: ledgerRes.notificationTitle,
         notificationText: ledgerRes.notificationText,
         draftId: saved.draftId,
-        redirectPath: `/?quickDraft=${encodeURIComponent(saved.draftId)}`,
-        openUrl: `${origin}/?quickDraft=${encodeURIComponent(saved.draftId)}`,
-        pwaUrl: `webapp://${new URL(req.url).host}/?quickDraft=${encodeURIComponent(saved.draftId)}`,
+        redirectPath: ledgerRes.autoRecorded ? '/' : `/?quickDraft=${encodeURIComponent(saved.draftId)}`,
+        openUrl: ledgerRes.autoRecorded ? `${origin}/` : `${origin}/?quickDraft=${encodeURIComponent(saved.draftId)}`,
+        pwaUrl: `${origin}/`,
         missingFields: saved.missingFields,
         uncertainFields: saved.uncertainFields,
         suspectedDuplicateOfDraftId: saved.suspectedDuplicateOfDraftId || null,
@@ -458,7 +562,7 @@ Shape: {"amount": number|null, "currency": string, "currencySymbol": string, "cu
         error: 'Failed to process shortcut quick draft.',
         notificationTitle: '❌ 记账处理异常',
         notificationText: '❌ 快捷指令服务器处理异常，请稍后重试',
-        openUrl: `${new URL(req.url).origin}/?shortcutError=${encodeURIComponent('快捷指令服务器内部处理异常')}`,
+        openUrl: `${getRequestOrigin(req)}/?shortcutError=${encodeURIComponent('快捷指令服务器内部处理异常')}`,
       },
       { status: 500 }
     );

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kinova-pwa-v8';
+const CACHE_NAME = 'kinova-pwa-v9';
 const APP_SHELL = [
   '/',
   '/manifest.json',
@@ -64,13 +64,18 @@ self.addEventListener('fetch', (event) => {
   // and the full Next.js app shell + static chunks open seamlessly when offline.
   event.respondWith(
     fetch(request)
-      .then((response) => {
+      .then(async (response) => {
         if (response && response.status === 200) {
           const clone = response.clone();
           caches
             .open(CACHE_NAME)
             .then((cache) => cache.put(request, clone))
             .catch(() => {});
+        } else if (response && response.status === 404 && request.mode === 'navigate') {
+          // If a page navigation hits a 404 (e.g. stale deployment chunk or unmapped route),
+          // fallback to cached root shell so client-side router can gracefully mount or redirect
+          const rootShell = await caches.match('/');
+          if (rootShell) return rootShell;
         }
         return response;
       })

@@ -380,7 +380,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* Background Layer: Kinova AI & Pull-down Pill (Inspired by Ryt Bank) */}
       {!isReceiptPriceSearchPage && (
         <div
-          className="fixed inset-0 z-0 overflow-hidden"
+          className={`fixed inset-0 z-0 overflow-hidden ${!isKinovaAIOpen && pullDistance <= 0 ? 'invisible pointer-events-none' : ''}`}
           aria-hidden={!isKinovaAIOpen}
           inert={!isKinovaAIOpen}
         >

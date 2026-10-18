@@ -30,6 +30,9 @@ import {
 import { MoneyCalculator } from '@/components/shared/money-calculator';
 import { toast } from 'sonner';
 import { withReceiptItemsInNotes } from '@/lib/receipt-items';
+import { confirmAction } from '@/stores/confirm-dialog-store';
+import { findSuspectedDuplicates } from '@/lib/duplicate-detector';
+import { mineUserHabitSuggestions } from '@/lib/habit-suggestions';
 
 const CATEGORY_EMOJIS: Record<string, string> = {
   'Food & Dining': '🍔',
@@ -96,6 +99,11 @@ export function SmartQuickInput() {
   const [receiptRawText, setReceiptRawText] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const receiptInputRef = useRef<HTMLInputElement>(null);
+
+  // Habit-driven personalized contextual suggestions
+  const timeOfDaySuggestions = useMemo(() => {
+    return mineUserHabitSuggestions(transactions);
+  }, [transactions]);
 
   // Parse in real-time as user types or dictates (0ms instant local preview)
   const localParsed: ParsedExpense | null = useMemo(() => {
@@ -174,6 +182,13 @@ export function SmartQuickInput() {
     });
   };
 
+  const isDiscreteMultiQty = (it: AiReceiptItem) => {
+    const qty = Number(it.quantity) || 1;
+    if (!Number.isInteger(qty) || qty <= 1 || qty > 20) return false;
+    if (/litre|liter|\bltr\b|\bl\b|kg|gram|\bg\b|ml/i.test(`${it.name} ${it.unitPrice ?? ''}`)) return false;
+    return true;
+  };
+
   const toggleReceiptItem = (index: number) => {
     if (receiptItems.length <= 1 || !aiParsed || aiParsed.intent !== 'transaction' || !originalReceiptData) return;
     const nextSelected = selectedReceiptItems.includes(index)
@@ -195,7 +210,7 @@ export function SmartQuickInput() {
           subtotal: originalReceiptData.subtotal,
           taxRate: activeTaxRate,
           taxAmount: recomputedTax,
-          amount: Number((originalReceiptData.subtotal + recomputedTax).toFixed(2)),
+          amount: originalReceiptData.totalAmount,
           description: originalReceiptData.description,
         });
       } else {
@@ -227,7 +242,12 @@ export function SmartQuickInput() {
       allocatedTax = Number(((selectedSubtotal / fullItemsTotal) * impliedFullTax).toFixed(2));
     }
 
-    const nextAmount = Number((selectedSubtotal + allocatedTax).toFixed(2));
+    const discountAmount = currentTx.discountAmount && currentTx.discountAmount > 0 ? currentTx.discountAmount : 0;
+    const allocatedDiscount = discountAmount > 0 && fullItemsTotal > 0
+      ? Number(((selectedSubtotal / fullItemsTotal) * discountAmount).toFixed(2))
+      : 0;
+
+    const nextAmount = Math.max(0, Number((selectedSubtotal + allocatedTax - allocatedDiscount).toFixed(2)));
     const chosenFoods = nextSelected.map((i) => receiptItems[i].name).join(', ');
     const baseMerchant = originalReceiptData.description.split(' (')[0].trim();
     const updatedDesc = `${baseMerchant} (${chosenFoods})`;
@@ -247,8 +267,7 @@ export function SmartQuickInput() {
 
     receiptItems.forEach((item, idx) => {
       const wasSelected = selectedReceiptItems.includes(idx);
-      const qty = Math.round(Number(item.quantity) || 1);
-      const shouldSplit = (targetIndex === undefined || targetIndex === idx) && qty > 1 && qty <= 20;
+      const shouldSplit = (targetIndex === undefined || targetIndex === idx) && isDiscreteMultiQty(item);
 
       if (!shouldSplit) {
         const newIdx = nextItems.length;
@@ -257,6 +276,7 @@ export function SmartQuickInput() {
         return;
       }
 
+      const qty = Math.round(Number(item.quantity) || 1);
       const totalCents = Math.round(item.amount * 100);
       const baseUnitCents = Math.floor(totalCents / qty);
       const remainderCents = totalCents - baseUnitCents * qty;
@@ -327,10 +347,12 @@ export function SmartQuickInput() {
         activeTaxRate != null && activeTaxRate > 0
           ? Number(((selectedSubtotal * activeTaxRate) / 100).toFixed(2))
           : nextOrigTax || 0;
+      const currentTx = aiParsed?.data as AiTransactionData | undefined;
+      const discount = currentTx?.discountAmount && currentTx.discountAmount > 0 ? currentTx.discountAmount : 0;
       updateTransactionData({
         subtotal: selectedSubtotal,
         taxAmount: allocatedTax,
-        amount: Number((selectedSubtotal + allocatedTax).toFixed(2)),
+        amount: Math.max(0, Number((selectedSubtotal + allocatedTax - discount).toFixed(2))),
       });
     }
   };
@@ -427,17 +449,41 @@ export function SmartQuickInput() {
         ? items
         : [{ name: tx.description, amount: tx.subtotal || tx.amount, category: tx.category }];
 
+      const hasDiscount = Boolean(tx.discountAmount && tx.discountAmount > 0);
+      if (hasDiscount && tx.amount > 0) {
+        const singleItem = safeItems[0];
+        if (safeItems.length === 1 && singleItem && singleItem.amount > tx.amount) {
+          singleItem.amount = tx.amount;
+          if (singleItem.quantity && singleItem.quantity > 0) {
+            singleItem.unitPrice = Number((tx.amount / singleItem.quantity).toFixed(2));
+          }
+        }
+      }
+
       const itemsSum = Number(safeItems.reduce((sum, item) => sum + item.amount, 0).toFixed(2));
-      const origSubtotal = tx.subtotal && tx.subtotal > 0 ? tx.subtotal : itemsSum;
+      const origSubtotal = hasDiscount && tx.subtotal && tx.subtotal > tx.amount
+        ? (itemsSum > 0 && itemsSum <= tx.amount ? itemsSum : tx.amount)
+        : (tx.subtotal && tx.subtotal > 0 ? tx.subtotal : itemsSum);
       const origTotal = tx.amount;
 
       // Reconcile combined tax rate & amount (e.g. Service Charge 10% + SST 6% = 16%)
+      // Filter out rounding adjustments from tx.taxes
+      const ROUNDING_LABEL_REGEX = /rounding|round|pelarasan|genap/i;
+      const cleanTaxes = Array.isArray(tx.taxes)
+        ? tx.taxes.filter((t) => !ROUNDING_LABEL_REGEX.test(String(t?.label || '')))
+        : [];
+      if (tx.taxLabel && ROUNDING_LABEL_REGEX.test(tx.taxLabel)) {
+        tx.taxLabel = undefined;
+        tx.taxAmount = null;
+        tx.taxRate = null;
+      }
+
       let effectiveTaxAmount = tx.taxAmount && tx.taxAmount >= 0 ? tx.taxAmount : 0;
       let effectiveTaxRate: number | null = tx.taxRate ?? null;
 
-      if (Array.isArray(tx.taxes) && tx.taxes.length > 0) {
-        const summedRate = Number(tx.taxes.reduce((s, t) => s + (Number(t?.rate) > 0 ? Number(t.rate) : 0), 0).toFixed(2));
-        const summedAmt = Number(tx.taxes.reduce((s, t) => s + (Number(t?.amount) > 0 ? Number(t.amount) : 0), 0).toFixed(2));
+      if (cleanTaxes.length > 0) {
+        const summedRate = Number(cleanTaxes.reduce((s, t) => s + (Number(t?.rate) > 0 ? Number(t.rate) : 0), 0).toFixed(2));
+        const summedAmt = Number(cleanTaxes.reduce((s, t) => s + (Number(t?.amount) > 0 ? Number(t.amount) : 0), 0).toFixed(2));
         if (summedRate > 0 && (effectiveTaxRate == null || summedRate > effectiveTaxRate)) {
           effectiveTaxRate = summedRate;
         }
@@ -446,22 +492,33 @@ export function SmartQuickInput() {
         }
       }
 
-      const impliedTaxAmount = origTotal > origSubtotal + 0.01 ? Number((origTotal - origSubtotal).toFixed(2)) : 0;
-      if (origSubtotal > 0 && impliedTaxAmount > 0) {
+      // In Malaysia, cash/card rounding (pelarasan genapan) is ±0.01 to ±0.05.
+      // Differences <= 0.05 are purely rounding adjustments, NEVER tax!
+      // Also, if the receipt has discounts/deals, differences are discounts, NEVER tax!
+      const rawDiff = origTotal - origSubtotal;
+      const impliedTaxAmount = !hasDiscount && rawDiff > 0.05 ? Number(rawDiff.toFixed(2)) : 0;
+      if (!hasDiscount && origSubtotal > 0 && impliedTaxAmount > 0) {
         const impliedRate = Number(((impliedTaxAmount / origSubtotal) * 100).toFixed(2));
-        if (effectiveTaxRate == null || Math.abs(impliedRate - effectiveTaxRate) > 1.2) {
-          const commonRates = [6, 8, 10, 16, 18, 5, 7, 9, 12, 15];
-          const snapped = commonRates.find((r) => Math.abs(r - impliedRate) <= 0.85);
-          effectiveTaxRate = snapped ?? Number((Math.round(impliedRate * 2) / 2).toFixed(1));
-          effectiveTaxAmount = impliedTaxAmount;
-        } else if (effectiveTaxAmount <= 0 || Math.abs(impliedTaxAmount - effectiveTaxAmount) > 0.05) {
-          effectiveTaxAmount = impliedTaxAmount;
+        // Valid consumer tax rates in Malaysia / ASEAN are >= 3% (e.g. SST 6%, 8%, Service Charge 10%, GST 9%)
+        if (impliedRate >= 3) {
+          if (effectiveTaxRate == null || Math.abs(impliedRate - effectiveTaxRate) > 1.2) {
+            const commonRates = [6, 8, 10, 16, 18, 5, 7, 9, 12, 15];
+            const snapped = commonRates.find((r) => Math.abs(r - impliedRate) <= 0.85);
+            effectiveTaxRate = snapped ?? Number((Math.round(impliedRate * 2) / 2).toFixed(1));
+            effectiveTaxAmount = impliedTaxAmount;
+          } else if (effectiveTaxAmount <= 0 || Math.abs(impliedTaxAmount - effectiveTaxAmount) > 0.05) {
+            effectiveTaxAmount = impliedTaxAmount;
+          }
         }
+      } else if (Math.abs(rawDiff) <= 0.05 && cleanTaxes.length === 0) {
+        // Difference is 1-5 cents and no explicit SST lines were found -> tax is 0
+        effectiveTaxAmount = 0;
+        effectiveTaxRate = null;
       }
 
       tx.subtotal = origSubtotal;
-      tx.taxAmount = effectiveTaxAmount > 0 ? effectiveTaxAmount : tx.taxAmount;
-      tx.taxRate = effectiveTaxRate;
+      tx.taxAmount = effectiveTaxAmount > 0 ? effectiveTaxAmount : null;
+      tx.taxRate = effectiveTaxAmount > 0 ? effectiveTaxRate : null;
 
       setOriginalReceiptData({
         totalAmount: origTotal,
@@ -479,7 +536,10 @@ export function SmartQuickInput() {
       setIsAiEnhanced(true);
       setSaveReceiptPhoto(true);
       setInput(tx.description);
-      toast.success(`✨ Receipt read: ${tx.currency} ${tx.amount.toFixed(2)} (${tx.description})`, { id: toastId });
+      const discountSuffix = tx.discountAmount && tx.discountAmount > 0
+        ? ` · Saved ${tx.currency} ${tx.discountAmount.toFixed(2)} with Deals & Offers!`
+        : '';
+      toast.success(`✨ Receipt read: ${tx.currency} ${tx.amount.toFixed(2)} (${tx.description})${discountSuffix}`, { id: toastId });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Receipt scanning failed';
       setScanError(message);
@@ -550,177 +610,243 @@ export function SmartQuickInput() {
     }
 
     setIsSubmitting(true);
-    const safeDate = normalizeDateString(activeParsed.date);
-    const monthStr = safeDate.substring(0, 7);
-    const tempId = `tx_${Date.now()}`;
+    try {
+      const safeDate = normalizeDateString(activeParsed.date);
+      const monthStr = safeDate.substring(0, 7);
+      const tempId = `tx_${Date.now()}`;
 
-    let finalNotes = activeParsed.notes || '';
-    if (activeParsed.taxAmount != null && activeParsed.taxAmount > 0) {
-      const taxRateStr = activeParsed.taxRate != null ? ` (${activeParsed.taxRate}%)` : '';
-      const taxNote = `[Tax: ${activeParsed.currency || 'MYR'} ${activeParsed.taxAmount.toFixed(2)}${taxRateStr}]`;
-      if (!finalNotes.includes(taxNote)) {
-        finalNotes = finalNotes ? `${finalNotes} ${taxNote}` : taxNote;
-      }
-    }
-    if (receiptItems.length > 0 && selectedReceiptItems.length < receiptItems.length) {
-      const chosenFoods = selectedReceiptItems
-        .map((idx) => `${receiptItems[idx].name} (${activeParsed.currency || 'MYR'} ${receiptItems[idx].amount.toFixed(2)})`)
-        .join(', ');
-      finalNotes = finalNotes ? `${finalNotes} [Paid items: ${chosenFoods}]` : `[Paid items: ${chosenFoods}]`;
-    }
-
-    const currentReceipt = receiptAttachment;
-    const shouldUploadPhoto = saveReceiptPhoto && Boolean(currentReceipt?.base64);
-
-    let finalSubCategory = '';
-    if (taxPreviewInfo?.isEligible && taxPreviewInfo.category) {
-      const tagged = applyTaxReliefTag(taxPreviewInfo.category.id, finalNotes);
-      finalSubCategory = tagged.subCategory;
-      finalNotes = tagged.notes;
-    }
-
-    if (hasScannedReceiptLineItems && receiptItems.length > 0) {
-      finalNotes = withReceiptItemsInNotes(finalNotes, receiptItems.map((item, index) => ({
-        ...item,
-        quantity: Math.max(1, Math.round(Number(item.quantity) || 1)),
-        unitPrice: Number(item.unitPrice) > 0
-          ? Number(item.unitPrice)
-          : Number(item.amount) / Math.max(1, Math.round(Number(item.quantity) || 1)),
-        includedInExpense: selectedReceiptItems.includes(index),
-      })));
-    }
-
-    const rowData: Record<string, any> = {
-      Id: tempId,
-      id: tempId,
-      Date: safeDate,
-      date: safeDate,
-      Type: activeParsed.type.toLowerCase(),
-      type: activeParsed.type.toLowerCase(),
-      Category: activeParsed.category,
-      category: activeParsed.category,
-      SubCategory: finalSubCategory,
-      subCategory: finalSubCategory,
-      Description: activeParsed.description,
-      description: activeParsed.description,
-      Amount: activeParsed.amount,
-      amount: activeParsed.amount,
-      Currency: activeParsed.currency || 'MYR',
-      currency: activeParsed.currency || 'MYR',
-      TripTag: '',
-      tripTag: '',
-      ReceiptUrl: '',
-      receiptUrl: '',
-      Notes: finalNotes,
-      notes: finalNotes,
-      _month: monthStr,
-      _rowIndex: 2,
-    };
-
-    // Instant Optimistic Feedback (<10ms) across all active transaction queries + local SWR cache
-    applyOptimisticAddToQueryCache(queryClient, monthStr, rowData);
-
-    // Persist the financial row first; the row outbox is written synchronously
-    // before addUnifiedRow waits for the Google Sheets response.
-    const ledgerWrite = addUnifiedRow(monthStr, {
-      Id: tempId,
-      id: tempId,
-      Date: safeDate,
-      Type: activeParsed.type,
-      Category: activeParsed.category,
-      SubCategory: finalSubCategory,
-      Description: activeParsed.description,
-      Amount: activeParsed.amount,
-      Currency: activeParsed.currency || 'MYR',
-      TripTag: '',
-      ReceiptUrl: '',
-      Notes: finalNotes,
-    });
-
-    let receiptQueued = false;
-    if (shouldUploadPhoto && currentReceipt?.base64) {
-      const fileCatLabel = taxPreviewInfo?.isEligible && taxPreviewInfo.category
-        ? `LHDN_${taxPreviewInfo.category.shortName}`
-        : activeParsed.category;
-      const fileName = formatClaimFileName(
-        activeParsed.date,
-        fileCatLabel,
-        activeParsed.amount,
-        activeParsed.description,
-        currentReceipt.fileName
+      // Check for suspected duplicates in existing transactions
+      const suspectedDupes = findSuspectedDuplicates(
+        {
+          amount: activeParsed.amount,
+          date: safeDate,
+          currency: activeParsed.currency || 'MYR',
+          description: activeParsed.description,
+          notes: activeParsed.notes,
+          items: receiptItems,
+        },
+        transactions
       );
-      try {
-        await enqueueReceiptUpload({
-          accountScope: getActiveUserCacheScope(),
-          transactionId: tempId,
-          sheetName: monthStr,
-          rowIndex: 2,
-          fileName,
-          mimeType: currentReceipt.mimeType || 'image/jpeg',
-          base64: currentReceipt.base64,
-          createdAt: Date.now(),
+
+      if (suspectedDupes.length > 0) {
+        const topDupe = suspectedDupes[0];
+        const isPhoto = Boolean(receiptAttachment);
+        const confirmMsg = isPhoto
+          ? '请核对是否重复扫描了同一张收据？确定要作为另一笔真实消费继续入账吗？'
+          : '检测到与已有记录高度相似，确定要作为另一笔新账单入账吗？';
+
+        const proceed = await confirmAction({
+          title: '⚠️ 检测到疑似重复记账',
+          description: (
+            <div className="space-y-3 text-left text-xs text-slate-300">
+              <p className="font-semibold text-amber-300 leading-relaxed">
+                {topDupe.explanation}
+              </p>
+              <div className="rounded-xl bg-slate-800/90 p-3 border border-white/10 space-y-1 shadow-inner">
+                <div className="text-[11px] font-medium text-slate-400">已存在的一笔记录：</div>
+                <div className="font-mono font-bold text-white text-sm">
+                  {topDupe.record.date} · {topDupe.record.currency || 'MYR'} {Number(topDupe.record.amount).toFixed(2)}
+                </div>
+                <div className="text-slate-200 truncate font-medium">
+                  {topDupe.record.description}
+                </div>
+              </div>
+              <p className="text-slate-400 text-[11px] leading-normal">
+                {confirmMsg}
+              </p>
+            </div>
+          ),
+          confirmText: '确认继续入账（这是另一笔）',
+          cancelText: '取消（不重复记）',
+          variant: 'warning',
+          icon: 'alert',
         });
-        receiptQueued = true;
-      } catch (error) {
-        console.warn('Could not queue the receipt for retry:', error);
-        toast.error('Transaction saved, but the receipt could not be safely queued. Please attach it again from transaction details.');
-      }
-    }
 
-    const recordedText = `${activeParsed.currency || 'MYR'} ${activeParsed.amount.toFixed(2)} for ${activeParsed.description}`;
-    const savedTaxCat = taxPreviewInfo?.isEligible ? taxPreviewInfo.category : null;
-    setInput('');
-    setAiParsed(null);
-    setIsAiEnhanced(false);
-    clearReceiptState();
-    setIsSubmitting(false);
-
-    const isOtherPeriod =
-      Boolean(monthStr) &&
-      monthStr !== selectedMonth &&
-      selectedMonth !== 'all' &&
-      selectedMonth !== `year-${monthStr.slice(0, 4)}`;
-    const toastOptions = isOtherPeriod
-      ? {
-          action: {
-            label: `View ${monthStr}`,
-            onClick: () => setSelectedMonth(monthStr),
-          },
-          duration: 5000,
+        if (!proceed) {
+          setIsSubmitting(false);
+          return;
         }
-      : undefined;
-
-    const toastMsg = receiptQueued
-      ? `📸 Recorded; receipt upload is queued: ${recordedText}!`
-      : savedTaxCat
-      ? `🇲🇾 Recorded (${savedTaxCat.shortName} Tax Relief): ${recordedText}! Remember to attach your receipt in Invoices & Tax.`
-      : isOtherPeriod
-      ? `✨ Recorded to ${monthStr}: ${recordedText}!`
-      : `✨ Recorded: ${recordedText}!`;
-    toast.success(toastMsg, toastOptions);
-
-    void queryClient.invalidateQueries({ queryKey: ['sheet'] });
-    void queryClient.invalidateQueries({ queryKey: ['months'] });
-    void queryClient.invalidateQueries({ queryKey: ['overview'] });
-
-    // Wake the global retry worker after the ledger write has acknowledged or
-    // safely entered its offline outbox. The receipt itself is already in IndexedDB.
-    void (async () => {
-      try {
-        await ledgerWrite;
-        if (receiptQueued) notifyReceiptUploadQueueChanged();
-        queryClient.invalidateQueries({ queryKey: ['sheet'] });
-        queryClient.invalidateQueries({ queryKey: ['months'] });
-        queryClient.invalidateQueries({ queryKey: ['overview'] });
-      } catch (err) {
-        console.warn('Background sync failed', err);
       }
-    })();
+
+      let finalNotes = activeParsed.notes || '';
+      if (activeParsed.taxAmount != null && activeParsed.taxAmount > 0) {
+        const taxRateStr = activeParsed.taxRate != null ? ` (${activeParsed.taxRate}%)` : '';
+        const taxNote = `[Tax: ${activeParsed.currency || 'MYR'} ${activeParsed.taxAmount.toFixed(2)}${taxRateStr}]`;
+        if (!finalNotes.includes(taxNote)) {
+          finalNotes = finalNotes ? `${finalNotes} ${taxNote}` : taxNote;
+        }
+      }
+      if (receiptItems.length > 0 && selectedReceiptItems.length < receiptItems.length) {
+        const chosenFoods = selectedReceiptItems
+          .map((idx) => `${receiptItems[idx].name} (${activeParsed.currency || 'MYR'} ${receiptItems[idx].amount.toFixed(2)})`)
+          .join(', ');
+        finalNotes = finalNotes ? `${finalNotes} [Paid items: ${chosenFoods}]` : `[Paid items: ${chosenFoods}]`;
+      }
+
+      const currentReceipt = receiptAttachment;
+      const shouldUploadPhoto = saveReceiptPhoto && Boolean(currentReceipt?.base64);
+
+      let finalSubCategory = '';
+      if (taxPreviewInfo?.isEligible && taxPreviewInfo.category) {
+        const tagged = applyTaxReliefTag(taxPreviewInfo.category.id, finalNotes);
+        finalSubCategory = tagged.subCategory;
+        finalNotes = tagged.notes;
+      }
+
+      if (hasScannedReceiptLineItems && receiptItems.length > 0) {
+        finalNotes = withReceiptItemsInNotes(finalNotes, receiptItems.map((item, index) => ({
+          ...item,
+          quantity: Math.max(1, Math.round(Number(item.quantity) || 1)),
+          unitPrice: Number(item.unitPrice) > 0
+            ? Number(item.unitPrice)
+            : Number(item.amount) / Math.max(1, Math.round(Number(item.quantity) || 1)),
+          includedInExpense: selectedReceiptItems.includes(index),
+        })));
+      }
+
+      const rowData: Record<string, any> = {
+        Id: tempId,
+        id: tempId,
+        Date: safeDate,
+        date: safeDate,
+        Type: activeParsed.type.toLowerCase(),
+        type: activeParsed.type.toLowerCase(),
+        Category: activeParsed.category,
+        category: activeParsed.category,
+        SubCategory: finalSubCategory,
+        subCategory: finalSubCategory,
+        Description: activeParsed.description,
+        description: activeParsed.description,
+        Amount: activeParsed.amount,
+        amount: activeParsed.amount,
+        Currency: activeParsed.currency || 'MYR',
+        currency: activeParsed.currency || 'MYR',
+        TripTag: '',
+        tripTag: '',
+        ReceiptUrl: '',
+        receiptUrl: '',
+        Notes: finalNotes,
+        notes: finalNotes,
+        _month: monthStr,
+        _rowIndex: 2,
+      };
+
+      // Instant Optimistic Feedback (<10ms) across all active transaction queries + local SWR cache
+      applyOptimisticAddToQueryCache(queryClient, monthStr, rowData);
+
+      // Persist the financial row first; the row outbox is written synchronously
+      // before addUnifiedRow waits for the Google Sheets response.
+      const ledgerWrite = addUnifiedRow(monthStr, {
+        Id: tempId,
+        id: tempId,
+        Date: safeDate,
+        Type: activeParsed.type,
+        Category: activeParsed.category,
+        SubCategory: finalSubCategory,
+        Description: activeParsed.description,
+        Amount: activeParsed.amount,
+        Currency: activeParsed.currency || 'MYR',
+        TripTag: '',
+        ReceiptUrl: '',
+        Notes: finalNotes,
+      });
+
+      let receiptQueued = false;
+      if (shouldUploadPhoto && currentReceipt?.base64) {
+        const fileCatLabel = taxPreviewInfo?.isEligible && taxPreviewInfo.category
+          ? `LHDN_${taxPreviewInfo.category.shortName}`
+          : activeParsed.category;
+        const fileName = formatClaimFileName(
+          activeParsed.date,
+          fileCatLabel,
+          activeParsed.amount,
+          activeParsed.description,
+          currentReceipt.fileName
+        );
+        try {
+          await enqueueReceiptUpload({
+            accountScope: getActiveUserCacheScope(),
+            transactionId: tempId,
+            sheetName: monthStr,
+            rowIndex: 2,
+            fileName,
+            mimeType: currentReceipt.mimeType || 'image/jpeg',
+            base64: currentReceipt.base64,
+            createdAt: Date.now(),
+          });
+          receiptQueued = true;
+        } catch (error) {
+          console.warn('Could not queue the receipt for retry:', error);
+          toast.error('Transaction saved, but the receipt could not be safely queued. Please attach it again from transaction details.');
+        }
+      }
+
+      const recordedText = `${activeParsed.currency || 'MYR'} ${activeParsed.amount.toFixed(2)} for ${activeParsed.description}`;
+      const savedTaxCat = taxPreviewInfo?.isEligible ? taxPreviewInfo.category : null;
+      setInput('');
+      setAiParsed(null);
+      setIsAiEnhanced(false);
+      clearReceiptState();
+
+      const isOtherPeriod =
+        Boolean(monthStr) &&
+        monthStr !== selectedMonth &&
+        selectedMonth !== 'all' &&
+        selectedMonth !== `year-${monthStr.slice(0, 4)}`;
+      const toastOptions = isOtherPeriod
+        ? {
+            action: {
+              label: `View ${monthStr}`,
+              onClick: () => setSelectedMonth(monthStr),
+            },
+            duration: 5000,
+          }
+        : undefined;
+
+      const toastMsg = receiptQueued
+        ? `📸 Recorded; receipt upload is queued: ${recordedText}!`
+        : savedTaxCat
+        ? `🇲🇾 Recorded (${savedTaxCat.shortName} Tax Relief): ${recordedText}! Remember to attach your receipt in Invoices & Tax.`
+        : isOtherPeriod
+        ? `✨ Recorded to ${monthStr}: ${recordedText}!`
+        : `✨ Recorded: ${recordedText}!`;
+      toast.success(toastMsg, toastOptions);
+
+      void queryClient.invalidateQueries({ queryKey: ['sheet'] });
+      void queryClient.invalidateQueries({ queryKey: ['months'] });
+      void queryClient.invalidateQueries({ queryKey: ['overview'] });
+
+      // Wake the global retry worker after the ledger write has acknowledged or
+      // safely entered its offline outbox. The receipt itself is already in IndexedDB.
+      void (async () => {
+        try {
+          await ledgerWrite;
+          if (receiptQueued) notifyReceiptUploadQueueChanged();
+          queryClient.invalidateQueries({ queryKey: ['sheet'] });
+          queryClient.invalidateQueries({ queryKey: ['months'] });
+          queryClient.invalidateQueries({ queryKey: ['overview'] });
+        } catch (err) {
+          console.warn('Background sync failed', err);
+        }
+      })();
+    } catch (err) {
+      console.error('Failed to submit transaction:', err);
+      toast.error('Failed to record transaction. Please verify the amount and date.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
     <div className="relative rounded-2xl border border-indigo-500/25 bg-white dark:bg-zinc-950 p-2.5 sm:p-3 shadow-sm space-y-1.5 transition-colors focus-within:border-indigo-500/60">
-      <form onSubmit={handleQuickSubmit} className="relative flex items-center gap-2">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          void handleQuickSubmit(e);
+        }}
+        className="relative flex items-center gap-2"
+      >
         <div className="relative flex-1">
           <Sparkles className={`absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 shrink-0 pointer-events-none transition-colors ${
             isAiParsing ? 'text-amber-800 dark:text-amber-400 animate-spin' : isAiEnhanced ? 'text-emerald-800 dark:text-emerald-400' : 'text-indigo-800 dark:text-indigo-400'
@@ -738,6 +864,13 @@ export function SmartQuickInput() {
                 setAiParsed(null);
                 setIsAiEnhanced(false);
                 setScanError('');
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                e.stopPropagation();
+                void handleQuickSubmit(e);
               }
             }}
             onPointerDown={(e) => {
@@ -787,7 +920,12 @@ export function SmartQuickInput() {
         </div>
 
         <motion.button
-          type="submit"
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void handleQuickSubmit(e);
+          }}
           disabled={!activeCommand || isSubmitting}
           whileTap={{ scale: 0.95 }}
           className={`h-11 px-4 rounded-2xl flex items-center gap-1.5 text-xs font-semibold shadow-md transition-all shrink-0 cursor-pointer ${
@@ -806,6 +944,26 @@ export function SmartQuickInput() {
           )}
         </motion.button>
       </form>
+
+      {/* Time-of-day Contextual Quick Suggestions */}
+      {!input && !receiptAttachment && !isScanningReceipt && (
+        <div className="flex flex-wrap items-center gap-1.5 pt-0.5 px-0.5">
+          <span className="text-[10px] font-semibold text-slate-500 dark:text-zinc-400">💡 推荐快捷记账：</span>
+          {timeOfDaySuggestions.map((item) => (
+            <button
+              key={item.text}
+              type="button"
+              onClick={() => {
+                setInput(item.text);
+                inputRef.current?.focus();
+              }}
+              className="text-[11px] px-2 py-0.5 rounded-lg bg-slate-100/90 dark:bg-zinc-800/70 border border-slate-200 dark:border-white/[0.06] text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white hover:bg-slate-200/80 dark:hover:bg-zinc-700/80 transition-colors cursor-pointer"
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Loading state for OCR receipt scanning */}
       {isScanningReceipt && (
@@ -895,13 +1053,34 @@ export function SmartQuickInput() {
                   )}
                 </div>
 
-                {/* Food / Items Selector (if multiple items or multi-quantity items detected) */}
-                {(receiptItems.length > 1 || receiptItems.some((it) => (Number(it.quantity) || 1) > 1)) && (
+                {/* Discount & Savings Info Banner */}
+                {typeof activeCommand.data.discountAmount === 'number' && activeCommand.data.discountAmount > 0 && (
+                  <div className="flex items-start gap-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-2.5 text-xs text-emerald-900 dark:text-emerald-200">
+                    <span className="text-base leading-none">🎉</span>
+                    <div className="space-y-0.5">
+                      <div className="font-semibold text-emerald-950 dark:text-emerald-100">
+                        已自动扣减优惠：实付金额 {activeCommand.data.currency} {activeCommand.data.amount.toFixed(2)}
+                        {activeCommand.data.billAmount != null && activeCommand.data.billAmount > activeCommand.data.amount ? (
+                          <span className="font-normal opacity-80 text-[11px] ml-1.5 line-through">
+                            (原账单 {activeCommand.data.currency} {activeCommand.data.billAmount.toFixed(2)})
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="text-[11px] text-emerald-800 dark:text-emerald-300">
+                        立减优惠: -{activeCommand.data.currency} {activeCommand.data.discountAmount.toFixed(2)}
+                        {activeCommand.data.dealsDescription ? ` (${activeCommand.data.dealsDescription})` : ''}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Food / Items Selector (if multiple items or discrete multi-quantity items detected) */}
+                {(receiptItems.length > 1 || receiptItems.some(isDiscreteMultiQty)) && (
                   <div className="space-y-1.5 rounded-xl bg-white/90 dark:bg-zinc-900/70 p-2.5 border border-slate-200 dark:border-white/[0.04]">
                     <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
                       <span className="font-semibold text-slate-800 dark:text-zinc-200">Which items did you pay for?</span>
                       <div className="flex items-center gap-2">
-                        {receiptItems.some((it) => (Number(it.quantity) || 1) > 1) && (
+                        {receiptItems.some(isDiscreteMultiQty) && (
                           <button
                             type="button"
                             onClick={() => splitMultiQuantityReceiptItem()}
@@ -923,7 +1102,7 @@ export function SmartQuickInput() {
                                 subtotal: originalReceiptData.subtotal,
                                 taxRate: activeTaxRate,
                                 taxAmount: fullTax,
-                                amount: Number((originalReceiptData.subtotal + fullTax).toFixed(2)),
+                                amount: originalReceiptData.totalAmount,
                                 description: originalReceiptData.description,
                               });
                             } else {
@@ -1240,6 +1419,11 @@ export function SmartQuickInput() {
                         {(activeCommand.data.taxAmount != null || activeCommand.data.taxRate != null) && (
                           <span className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:text-amber-300">
                             Tax {activeCommand.data.taxRate != null ? `${activeCommand.data.taxRate}%` : activeCommand.data.taxAmount?.toFixed(2)}
+                          </span>
+                        )}
+                        {typeof activeCommand.data.discountAmount === 'number' && activeCommand.data.discountAmount > 0 && (
+                          <span className="rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:text-emerald-300">
+                            🎉 优惠 -{activeCommand.data.currency} {activeCommand.data.discountAmount.toFixed(2)}
                           </span>
                         )}
                         <span className="text-slate-800 dark:text-zinc-200 font-semibold truncate max-w-[160px]">

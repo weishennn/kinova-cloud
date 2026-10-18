@@ -96,17 +96,17 @@ const QUERY_STOP_WORDS = new Set([
   'for', 'have', 'how', 'i', 'is', 'item', 'items', 'last', 'like', 'me', 'much', 'my', 'of', 'on', 'paid',
   'pay', 'please', 'price', 'product', 'products', 'previously', 'recent', 'remember', 'search', 'show', 'some',
   'something', 'tell', 'the', 'that', 'these', 'thing', 'things', 'this', 'those', 'time', 'was', 'what', 'when',
-  'where', 'were', 'with', 'you', 'your',
+  'where', 'were', 'with', 'you', 'your', 'cheapest', 'cheaper', 'lowest', 'highest',
   '多少', '多少钱', '价格', '价钱', '市价', '请问', '请', '查', '查一下', '查查', '查一查', '查询', '我查', '我想查', '要查',
   '找', '找找', '找一下', '找一找', '我想找', '帮我找', '搜', '搜一下', '搜搜', '搜一搜', '搜索', '我搜',
   '看', '看看', '看一下', '看下', '看一看', '买', '买过', '买的', '买了', '吃', '吃过', '吃了', '吃的',
-  '什么', '的', '有', '有没有', '记录', '之前', '上次', '最近', '哪个', '哪',
+  '什么', '的', '有', '有没有', '记录', '之前', '上次', '最近', '哪个', '哪', '哪家', '哪间', '哪里', '最便宜', '便宜', '最贵', '贵',
 ]);
 
-const CHINESE_PREFIX_REGEX = /^(请问|我想要找|我想找|我找|帮我找|请帮我找|找一找|找找|找|我想查|我要查|要查|请帮我查|帮我查查|帮我查|查一查|查一下|查查|查询|我查|查|我想搜|我要搜|我搜|搜一搜|搜一下|搜索|搜|我想看|我想看看|帮我看看|看看|看下|看一下|看一看|问一下|有没有买过|有没有买|有没有|有买过|有买|我买过的|买过的|买过|我买的|买的|买了|我吃过的|吃过的|吃过|吃了|之前买的|之前的|之前|上次买的|上次的|上次|最近买的|最近的|最近)\s*/i;
-const CHINESE_SUFFIX_REGEX = /\s*(多少钱|几多钱|多贵|什么价钱|什么价|价钱|价格|是多少|大约多少|多少|市价|售价|记录|呢|呀|啊|啦|吧|么|吗|？|\?)+$/i;
-const ENGLISH_PREFIX_REGEX = /^(how much (is|was|did i pay for|are)|what (is|was|did i pay for) the (price|cost) of|can you check (the price of)?|check (the price of)?|find (my)?|tell me the price of|show me (the)?|i bought|i paid for)\s+/i;
-const ENGLISH_SUFFIX_REGEX = /\s+(cost|price|how much|i paid|i bought|last time|\?)$/i;
+const CHINESE_PREFIX_REGEX = /^(请问|我想要找|我想找|我找|帮我找|请帮我找|找一找|找找|找|我想查|我要查|要查|请帮我查|帮我查查|帮我查|查一查|查一下|查查|查询|我查|查|我想搜|我要搜|我搜|搜一搜|搜一下|搜索|搜|我想看|我想看看|帮我看看|看看|看下|看一下|看一看|问一下|有没有买过|有没有买|有没有|有买过|有买|我买过的|买过的|买过|我买的|买的|买了|我吃过的|吃过的|吃过|吃了|之前买的|之前的|之前|上次买的|上次的|上次|最近买的|最近的|最近|我在|在|我想要|想要|我|这里|这家|这间|这|那里|那家|那间|那)\s*/i;
+const CHINESE_SUFFIX_REGEX = /\s*(多少钱|几多钱|多贵|什么价钱|什么价|价钱|价格|是多少|大约多少|多少|市价|售价|记录|呢|呀|啊|啦|吧|么|吗|？|\?|买过|买的|买了|吃过|吃了|吃的|消费多少|消费)+$/i;
+const ENGLISH_PREFIX_REGEX = /^(how much (is|was|did i pay for|are)|what (is|was|did i pay for) the (price|cost) of|can you check (the price of)?|check (the price of)?|find (my)?|tell me the price of|show me (the)?|i bought|i paid for|where (is|was|did i buy|were))\s+/i;
+const ENGLISH_SUFFIX_REGEX = /\s+(cost|price|how much|i paid|i bought|last time|cheapest|cheaper|\?)$/i;
 
 const COMMON_BILINGUAL_SYNONYMS: Record<string, string[]> = {
   // Food & Dining
@@ -176,9 +176,30 @@ const COMMON_BILINGUAL_SYNONYMS: Record<string, string[]> = {
   'shampoo': ['shampoo', '洗发水', '洗发精'],
   '沐浴露': ['body wash', 'shower gel', '沐浴露', '沐浴乳'],
   'body wash': ['body wash', 'shower gel', '沐浴露'],
-  '汽油': ['petrol', 'fuel', 'ron95', 'ron97', '汽油', '油钱', 'shell', 'petronas'],
-  '油钱': ['petrol', 'fuel', 'ron95', 'ron97', '汽油', '油钱'],
-  'petrol': ['petrol', 'fuel', 'ron95', 'ron97', '汽油'],
+  '汽油': ['petrol', 'fuel', 'ron95', 'ron97', 'fuelsave', 'fuelsave 95', '汽油', '油钱', 'shell', 'petronas', 'budi madani'],
+  '油钱': ['petrol', 'fuel', 'ron95', 'ron97', 'fuelsave', 'fuelsave 95', '汽油', '油钱'],
+  'petrol': ['petrol', 'fuel', 'ron95', 'ron97', 'fuelsave', 'fuelsave 95', '汽油', 'shell', 'petronas'],
+  'fuelsave': ['fuelsave', 'fuelsave 95', 'ron95', 'petrol', 'fuel', '汽油', 'shell'],
+  'fuelsave 95': ['fuelsave 95', 'fuelsave', 'ron95', 'petrol', 'fuel', '汽油', 'shell'],
+  'ron95': ['ron95', 'fuelsave', 'fuelsave 95', 'petrol', 'fuel', '汽油', 'shell', 'petronas', 'budi madani'],
+  'ron97': ['ron97', 'petrol', 'fuel', '汽油', 'shell', 'petronas'],
+  'shell': ['shell', 'shell app', 'fuelsave', 'fuelsave 95', 'petrol', '汽油'],
+  'budi madani': ['budi madani', 'subsidy', 'petrol subsidy', 'fuelsave 95', 'ron95', 'petrol'],
+
+  // Local Delights & Desserts
+  '豆花': ['豆花', '四夕豆花', 'four beans', 'tau foo fah', 'tofu pudding', '甜品', 'dessert'],
+  '四夕豆花': ['四夕豆花', '豆花', 'four beans', 'tau foo fah', 'tofu pudding'],
+  'four beans': ['four beans', '四夕豆花', '豆花', 'tau foo fah'],
+  'tau foo fah': ['tau foo fah', '豆花', '四夕豆花', 'four beans'],
+  '粿条': ['粿条', '炒粿条', 'kuey teow', 'char kuey teow', 'char kway teow'],
+  'kuey teow': ['kuey teow', 'char kuey teow', 'char kway teow', '粿条', '炒粿条'],
+  'char kuey teow': ['char kuey teow', 'kuey teow', '炒粿条', '粿条'],
+  'laksa': ['laksa', 'curry laksa', 'asam laksa', '叻沙'],
+  '叻沙': ['叻沙', 'laksa', 'curry laksa', 'asam laksa'],
+  'roti canai': ['roti canai', 'roti', 'canai', '印度煎饼'],
+  'teh tarik': ['teh tarik', '拉茶', 'teh', '奶茶'],
+  'milo': ['milo', 'milo ais', '美禄'],
+  'maggi': ['maggi', 'maggi mee', 'maggi goreng', '快熟面', '方便面'],
   '泊车': ['parking', '泊车', '停车', '停车费'],
   '停车': ['parking', '泊车', '停车', '停车费'],
   'parking': ['parking', '泊车', '停车'],
@@ -192,13 +213,11 @@ export function extractCleanItemKeyword(query: string): string {
     .replace(/([\u4e00-\u9fa5])([a-zA-Z0-9])/g, '$1 $2')
     .replace(/([a-zA-Z0-9])([\u4e00-\u9fa5])/g, '$1 $2');
 
-  // Strip English prefix/suffix
-  cleaned = cleaned.replace(ENGLISH_PREFIX_REGEX, '');
-  cleaned = cleaned.replace(ENGLISH_SUFFIX_REGEX, '');
-
-  // Strip Chinese prefix/suffix iteratively
-  for (let i = 0; i < 4; i++) {
+  // Strip English and Chinese prefix/suffix iteratively
+  for (let i = 0; i < 6; i++) {
     const prev = cleaned;
+    cleaned = cleaned.replace(ENGLISH_PREFIX_REGEX, '');
+    cleaned = cleaned.replace(ENGLISH_SUFFIX_REGEX, '');
     cleaned = cleaned.replace(CHINESE_PREFIX_REGEX, '');
     cleaned = cleaned.replace(CHINESE_SUFFIX_REGEX, '');
     cleaned = cleaned.replace(/^[？?！!，,。.\s]+|[？?！!，,。.\s]+$/g, '');

@@ -361,8 +361,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'GEMINI_API_KEY is not configured in environment' }, { status: 500 });
     }
 
-    const preferredModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-    const models = [preferredModel, 'gemini-3.5-flash-lite'].filter((v, i, a) => a.indexOf(v) === i);
+    const preferredModel = (process.env.GEMINI_MODEL || 'gemini-flash-latest').trim();
+    const models = [preferredModel, 'gemini-flash-latest', 'gemini-3.8-flash', 'gemini-2.5-flash'].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
     let lastError = 'No response from model';
 
     for (const model of models) {
@@ -391,18 +391,19 @@ export async function POST(req: NextRequest) {
             },
           }),
           signal: AbortSignal.timeout(12000),
-        });
+        }).catch(() => null);
 
-        if (!res.ok) {
-          lastError = `Gemini ${res.status}`;
-          if (res.status === 429 || res.status === 401 || res.status === 403) {
+        if (!res || !res.ok) {
+          lastError = res ? `Gemini ${res.status}` : 'Request timeout';
+          if (res && (res.status === 429 || res.status === 401 || res.status === 403 || res.status >= 500)) {
             reportGeminiKeyFailure(apiKey, res.status);
             if (keyIdx + 1 < apiKeys.length) {
               continue; // Failover to next configured API key
             }
           }
-          if (res.status === 404) {
+          if (!res || res.status === 404 || res.status >= 500) {
             shouldTryNextModel = true;
+            break;
           }
           break;
         }

@@ -11,6 +11,29 @@ const nextConfig: NextConfig = {
     'localhost',
     '127.0.0.1',
   ],
+  async redirects() {
+    return [
+      { source: '/dashboard', destination: '/', permanent: false },
+      { source: '/home', destination: '/', permanent: false },
+      { source: '/cockpit', destination: '/', permanent: false },
+      { source: '/expenses', destination: '/transactions', permanent: false },
+      { source: '/expense', destination: '/transactions', permanent: false },
+      { source: '/flow', destination: '/transactions', permanent: false },
+      { source: '/receipt', destination: '/receipt-prices', permanent: false },
+      { source: '/receipts', destination: '/receipt-prices', permanent: false },
+      { source: '/ai', destination: '/receipt-prices', permanent: false },
+      { source: '/ask-ai', destination: '/receipt-prices', permanent: false },
+      { source: '/stock', destination: '/investments', permanent: false },
+      { source: '/stocks', destination: '/investments', permanent: false },
+      { source: '/trade', destination: '/investments', permanent: false },
+      { source: '/trades', destination: '/investments', permanent: false },
+      { source: '/budgeting', destination: '/budget', permanent: false },
+      { source: '/trip', destination: '/trips', permanent: false },
+      { source: '/invoice', destination: '/invoices', permanent: false },
+      { source: '/claims', destination: '/invoices', permanent: false },
+      { source: '/setting', destination: '/settings', permanent: false },
+    ];
+  },
   async headers() {
     return [
       {

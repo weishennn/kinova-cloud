@@ -3,12 +3,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { 
-  Sparkles, ShieldCheck, TrendingUp, Edit3, Check, ArrowUpRight, Plus, X, Wallet
+  Sparkles, ShieldCheck, TrendingUp, Edit3, Check, ArrowUpRight, Plus, X, Wallet, Settings
 } from 'lucide-react';
 import { Transaction } from '@/hooks/useTransactions';
 import { useAppStore } from '@/stores/app-store';
 import { getAmountInBaseCurrency } from '@/lib/currency';
 import { saveSettingWithCloudSync, SETTINGS_UPDATED_EVENT } from '@/lib/cloud-settings-sync';
+
+import { getLocalDateString } from '@/lib/date-helper';
 
 interface IncomeAdvisorProps {
   liveIncome: number;
@@ -27,17 +29,29 @@ export function IncomeAdvisor({ liveIncome, liveExpense, transactions, monthLabe
   const [reserveInput, setReserveInput] = useState<string>('');
   const [isEditingReserve, setIsEditingReserve] = useState(false);
 
+  // User customizable targets
+  const [savingsTargetPct, setSavingsTargetPct] = useState<number>(20);
+  const [investmentTargetPct, setInvestmentTargetPct] = useState<number>(20);
+  const [emergencyMonthsGoal, setEmergencyMonthsGoal] = useState<number>(6);
+  const [isCustomizingGoals, setIsCustomizingGoals] = useState(false);
+
   useEffect(() => {
-    const loadReserve = () => {
+    const loadSettings = () => {
       const savedReserve = localStorage.getItem('cashflow_emergency_reserve');
       if (savedReserve && parseFloat(savedReserve) >= 0) {
         setCurrentReserve(parseFloat(savedReserve));
         setReserveInput(savedReserve);
       }
+      const s = localStorage.getItem('cashflow_savings_target_pct');
+      if (s && !isNaN(parseFloat(s))) setSavingsTargetPct(parseFloat(s));
+      const i = localStorage.getItem('cashflow_investment_target_pct');
+      if (i && !isNaN(parseFloat(i))) setInvestmentTargetPct(parseFloat(i));
+      const m = localStorage.getItem('cashflow_emergency_months_goal');
+      if (m && !isNaN(parseInt(m, 10))) setEmergencyMonthsGoal(parseInt(m, 10));
     };
-    loadReserve();
-    window.addEventListener(SETTINGS_UPDATED_EVENT, loadReserve);
-    return () => window.removeEventListener(SETTINGS_UPDATED_EVENT, loadReserve);
+    loadSettings();
+    window.addEventListener(SETTINGS_UPDATED_EVENT, loadSettings);
+    return () => window.removeEventListener(SETTINGS_UPDATED_EVENT, loadSettings);
   }, []);
 
   const handleSaveReserve = (e: React.FormEvent) => {
@@ -75,33 +89,78 @@ export function IncomeAdvisor({ liveIncome, liveExpense, transactions, monthLabe
     }
   };
 
+  // 1. Compute historical rolling monthly average expense & income volatility
+  const { rollingMonthlyExpense, incomeVolatility, completedMonthsCount } = useMemo(() => {
+    const currentMonthPrefix = getLocalDateString().slice(0, 7);
+    const monthExpenses = new Map<string, number>();
+    const monthIncomes = new Map<string, number>();
+
+    for (const t of transactions) {
+      if (!t.date || t.date.length < 7) continue;
+      const m = t.date.slice(0, 7);
+      if (m === currentMonthPrefix) continue; // Skip current incomplete month
+
+      const baseAmt = getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount);
+      if (t.type === 'expense') {
+        monthExpenses.set(m, (monthExpenses.get(m) || 0) + baseAmt);
+      } else if (t.type === 'income') {
+        monthIncomes.set(m, (monthIncomes.get(m) || 0) + baseAmt);
+      }
+    }
+
+    const expValues = Array.from(monthExpenses.values()).filter((v) => v > 0);
+    const completedMonthsCount = expValues.length;
+
+    let rollingMonthlyExpense = liveExpense;
+    if (expValues.length > 0) {
+      const recentExp = expValues.slice(0, 6);
+      rollingMonthlyExpense = recentExp.reduce((a, b) => a + b, 0) / recentExp.length;
+    } else if (effectiveIncome > 0 && liveExpense === 0) {
+      rollingMonthlyExpense = effectiveIncome * 0.5;
+    } else {
+      rollingMonthlyExpense = Math.max(liveExpense, 1);
+    }
+
+    // Income volatility (CV = stdDev / mean)
+    const incValues = Array.from(monthIncomes.values()).filter((v) => v > 0);
+    let incomeVolatility: number | null = null;
+    if (incValues.length >= 2) {
+      const mean = incValues.reduce((a, b) => a + b, 0) / incValues.length;
+      if (mean > 0) {
+        const variance = incValues.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / incValues.length;
+        incomeVolatility = Math.sqrt(variance) / mean;
+      }
+    }
+
+    return { rollingMonthlyExpense, incomeVolatility, completedMonthsCount };
+  }, [transactions, liveExpense, effectiveIncome]);
+
   // Actual monthly figures from transactions
   const actualInvested = useMemo(() => {
     return transactions
-      .filter(t => t.type === 'investment')
+      .filter((t) => t.type === 'investment')
       .reduce((sum, t) => sum + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount), 0);
   }, [transactions]);
 
   // Actual net saved cash (Income - Expenses - Invested)
   const actualSavedCash = Math.max(0, liveIncome - liveExpense - actualInvested);
 
-  // Suggested Targets: 20% Emergency Savings, 20% Investments
-  const emergencyTarget = effectiveIncome * 0.20;
-  const investmentTarget = effectiveIncome * 0.20;
+  // Suggested Targets: customizable percentage of income
+  const emergencyTarget = effectiveIncome * (savingsTargetPct / 100);
+  const investmentTarget = effectiveIncome * (investmentTargetPct / 100);
 
   // Transactions explicitly logged under 'Emergency Savings' or 'Fixed Deposit'
   const emergencyDeposits = useMemo(() => {
     return transactions
-      .filter(t => t.category === 'Emergency Savings' || t.category === 'Fixed Deposit')
+      .filter((t) => t.category === 'Emergency Savings' || t.category === 'Fixed Deposit')
       .reduce((sum, t) => sum + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount), 0);
   }, [transactions]);
 
   // Total accumulated emergency reserve (baseline + recorded deposits)
   const totalEmergencyReserve = currentReserve + emergencyDeposits;
 
-  // Emergency reserve target is six months of actual spending. Do not mix an
-  // arbitrary income fallback into a value presented as a six-month goal.
-  const emergencyReserveGoal = liveExpense * 6;
+  // Emergency reserve goal is based on rolling monthly expense * target months
+  const emergencyReserveGoal = rollingMonthlyExpense * emergencyMonthsGoal;
   const reserveGoalProgress = emergencyReserveGoal > 0 ? Math.min((totalEmergencyReserve / emergencyReserveGoal) * 100, 100) : 0;
 
   const emergencyProgress = emergencyTarget > 0 ? Math.min((actualSavedCash / emergencyTarget) * 100, 100) : 0;
@@ -125,8 +184,20 @@ export function IncomeAdvisor({ liveIncome, liveExpense, transactions, monthLabe
           </div>
         </div>
 
-        {/* Income Selector / Modifier */}
-        <div className="flex items-center gap-2">
+        {/* Controls: Income & Customize Targets */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Customize Targets Button */}
+          <button
+            type="button"
+            onClick={() => setIsCustomizingGoals((v) => !v)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-indigo-500/20 text-xs font-semibold transition-colors cursor-pointer"
+            title="自定义储蓄/投资比例与应急金月数"
+          >
+            <Settings className="h-3.5 w-3.5" />
+            <span>目标: {savingsTargetPct}% / {investmentTargetPct}% / {emergencyMonthsGoal}M</span>
+          </button>
+
+          {/* Income Selector / Modifier */}
           {!isEditing ? (
             <div className="flex items-center gap-2 bg-white/90 dark:bg-zinc-900/80 px-3.5 py-1.5 rounded-2xl border border-slate-200 dark:border-white/[0.08] shadow-sm">
               <span className="text-xs text-slate-700 dark:text-zinc-300">Monthly Income:</span>
@@ -164,6 +235,111 @@ export function IncomeAdvisor({ liveIncome, liveExpense, transactions, monthLabe
         </div>
       </div>
 
+      {/* Target Customizer Panel */}
+      {isCustomizingGoals && (
+        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-zinc-900/90 border border-slate-200 dark:border-white/10 space-y-3">
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+              <span>🎯</span>
+              <span>个性化财务目标偏好配置</span>
+            </h4>
+            <button
+              type="button"
+              onClick={() => setIsCustomizingGoals(false)}
+              className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {/* Savings % */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] text-slate-600 dark:text-zinc-400 font-medium">储蓄目标比例 (Savings):</label>
+              <div className="flex items-center gap-1">
+                {[10, 15, 20, 25, 30].map((pct) => (
+                  <button
+                    key={pct}
+                    type="button"
+                    onClick={() => {
+                      setSavingsTargetPct(pct);
+                      saveSettingWithCloudSync('cashflow_savings_target_pct', pct.toString());
+                    }}
+                    className={`px-2 py-1 rounded-lg text-xs font-mono font-bold transition-colors cursor-pointer ${
+                      savingsTargetPct === pct
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-white dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-slate-200 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-700'
+                    }`}
+                  >
+                    {pct}%
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* Investment % */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] text-slate-600 dark:text-zinc-400 font-medium">投资目标比例 (Invest):</label>
+              <div className="flex items-center gap-1">
+                {[10, 15, 20, 25, 30].map((pct) => (
+                  <button
+                    key={pct}
+                    type="button"
+                    onClick={() => {
+                      setInvestmentTargetPct(pct);
+                      saveSettingWithCloudSync('cashflow_investment_target_pct', pct.toString());
+                    }}
+                    className={`px-2 py-1 rounded-lg text-xs font-mono font-bold transition-colors cursor-pointer ${
+                      investmentTargetPct === pct
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-white dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-slate-200 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-700'
+                    }`}
+                  >
+                    {pct}%
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* Emergency Months */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] text-slate-600 dark:text-zinc-400 font-medium">应急金覆盖月数 (Tenure):</label>
+              <div className="flex items-center gap-1">
+                {[3, 6, 9, 12].map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => {
+                      setEmergencyMonthsGoal(m);
+                      saveSettingWithCloudSync('cashflow_emergency_months_goal', m.toString());
+                    }}
+                    className={`px-2 py-1 rounded-lg text-xs font-mono font-bold transition-colors cursor-pointer ${
+                      emergencyMonthsGoal === m
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-white dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-slate-200 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-700'
+                    }`}
+                  >
+                    {m}M
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Income Volatility Awareness Banner */}
+      {incomeVolatility !== null && incomeVolatility >= 0.25 && (
+        <div className="flex items-start gap-3 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-amber-900 dark:text-amber-200 text-xs">
+          <span className="text-base">⚡</span>
+          <div>
+            <div className="font-bold text-amber-800 dark:text-amber-300">
+              收入波动感知 (波动率约 {Math.round(incomeVolatility * 100)}%)
+            </div>
+            <div className="text-[11px] opacity-90 mt-0.5">
+              检测到你的历史月收入存在起伏。对于弹性收入者，建议将应急金储备目标设定为 6-9 个月（基于往期月均支出 RM {rollingMonthlyExpense.toFixed(0)} 测算），以保障低谷月份的财务韧性。
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Two Pillars Grid: Emergency Savings & Investment */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* 1. Emergency Savings Card */}
@@ -177,11 +353,11 @@ export function IncomeAdvisor({ liveIncome, liveExpense, transactions, monthLabe
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-950 dark:text-white tracking-tight">Emergency Savings</h3>
-                  <span className="text-xs text-indigo-800 dark:text-indigo-400 font-semibold">Suggested: 20% of Income</span>
+                  <span className="text-xs text-indigo-800 dark:text-indigo-400 font-semibold">Suggested: {savingsTargetPct}% of Income</span>
                 </div>
               </div>
               <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-xl bg-indigo-500/15 text-indigo-800 dark:text-indigo-300 border border-indigo-500/30 shadow-sm">
-                20%
+                {savingsTargetPct}%
               </span>
             </div>
 
@@ -236,10 +412,10 @@ export function IncomeAdvisor({ liveIncome, liveExpense, transactions, monthLabe
                 )}
               </div>
 
-              {/* Progress towards 6-Month Safety Net Goal */}
+              {/* Progress towards Safety Net Goal */}
               <div className="space-y-1">
                 <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-zinc-400">
-                  <span>6-Month Goal (RM {emergencyReserveGoal.toLocaleString('en-MY', { maximumFractionDigits: 0 })}):</span>
+                  <span>{emergencyMonthsGoal}-Month Goal (RM {emergencyReserveGoal.toLocaleString('en-MY', { maximumFractionDigits: 0 })}):</span>
                   <span className="font-semibold text-indigo-800 dark:text-indigo-400 font-mono">{reserveGoalProgress.toFixed(0)}% Funded</span>
                 </div>
                 <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-zinc-800/90 overflow-hidden p-0.5 border border-slate-300 dark:border-zinc-700/40">
@@ -247,6 +423,9 @@ export function IncomeAdvisor({ liveIncome, liveExpense, transactions, monthLabe
                     className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-indigo-500 transition-all duration-500 shadow-sm"
                     style={{ width: `${reserveGoalProgress}%` }}
                   />
+                </div>
+                <div className="text-[10px] text-slate-500 dark:text-zinc-500 pt-0.5">
+                  基于{completedMonthsCount > 0 ? `往期月均支出 RM ${rollingMonthlyExpense.toFixed(0)}` : '月度基准支出'}测算
                 </div>
               </div>
             </div>
@@ -257,7 +436,7 @@ export function IncomeAdvisor({ liveIncome, liveExpense, transactions, monthLabe
                 <span className="text-xl md:text-2xl font-black text-slate-950 dark:text-white font-mono">
                   RM {emergencyTarget.toLocaleString('en-MY', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                 </span>
-                <span className="text-xs text-slate-600 dark:text-zinc-400">/ month target</span>
+                <span className="text-xs text-slate-600 dark:text-zinc-400">/ month target ({savingsTargetPct}%)</span>
               </div>
               <p className="text-[11px] text-slate-600 dark:text-zinc-400 mt-1">
                 Keep in liquid cash (Versa Cash, KDI Save, GXBank, Rize, Maybank MAE) for unexpected bills.
@@ -294,7 +473,7 @@ export function IncomeAdvisor({ liveIncome, liveExpense, transactions, monthLabe
               <span>Record Savings Deposit</span>
             </button>
             <span className="text-[11px] text-slate-500 dark:text-zinc-400 font-mono">
-              6M: RM {emergencyReserveGoal.toLocaleString('en-MY', { maximumFractionDigits: 0 })}
+              {emergencyMonthsGoal}M: RM {emergencyReserveGoal.toLocaleString('en-MY', { maximumFractionDigits: 0 })}
             </span>
           </div>
         </div>
@@ -310,11 +489,11 @@ export function IncomeAdvisor({ liveIncome, liveExpense, transactions, monthLabe
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-950 dark:text-white tracking-tight">Wealth & Investments</h3>
-                  <span className="text-xs text-indigo-800 dark:text-indigo-400 font-semibold">Suggested: 20% of Income</span>
+                  <span className="text-xs text-indigo-800 dark:text-indigo-400 font-semibold">Suggested: {investmentTargetPct}% of Income</span>
                 </div>
               </div>
               <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-xl bg-indigo-500/15 text-indigo-800 dark:text-indigo-300 border border-indigo-500/30 shadow-sm">
-                20%
+                {investmentTargetPct}%
               </span>
             </div>
 
@@ -323,7 +502,7 @@ export function IncomeAdvisor({ liveIncome, liveExpense, transactions, monthLabe
                 <span className="text-2xl md:text-3xl font-black text-slate-950 dark:text-white font-mono">
                   RM {investmentTarget.toLocaleString('en-MY', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                 </span>
-                <span className="text-xs text-slate-600 dark:text-zinc-400">/ month</span>
+                <span className="text-xs text-slate-600 dark:text-zinc-400">/ month ({investmentTargetPct}%)</span>
               </div>
               <p className="text-xs text-slate-600 dark:text-zinc-400 mt-1">
                 Auto-DCA into broad market ETFs (S&P 500 VOO/CSPX, Bursa Blue Chips), EPF self-contribution, or dividend stocks.

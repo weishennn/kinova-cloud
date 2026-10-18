@@ -40,22 +40,68 @@ export function getDaysInMonth(year: number, month: number): number {
  * If day exceeds the month's maximum days (e.g. Sept 31 -> Sept 30, Feb 30 -> Feb 28/29),
  * it clamps the day to the last valid day of that month.
  */
+const MONTH_NAMES_MAP: Record<string, number> = {
+  jan: 1, january: 1,
+  feb: 2, february: 2,
+  mar: 3, march: 3,
+  apr: 4, april: 4,
+  may: 5,
+  jun: 6, june: 6,
+  jul: 7, july: 7,
+  aug: 8, august: 8,
+  sep: 9, sept: 9, september: 9,
+  oct: 10, october: 10,
+  nov: 11, november: 11,
+  dec: 12, december: 12,
+};
+
 export function normalizeDateString(dateStr: string, fallbackDate: Date = new Date()): string {
   if (!dateStr || typeof dateStr !== 'string') return getLocalDateString(fallbackDate);
   const trimmed = dateStr.trim();
 
-  // Format: YYYY-MM-DD or YYYY/MM/DD or DD-MM-YYYY / DD/MM/YYYY
-  const parts = trimmed.split(/[-/]/).map(Number);
+  // Match e.g. "16 Oct 2026", "16-OCT-2026", "16-OCT-26", "05-October-2026"
+  const alphaMatch = trimmed.match(/^(\d{1,2})[-/\s]+([A-Za-z]+)[-/\s]+(\d{2,4})$/);
+  if (alphaMatch) {
+    const day = Number(alphaMatch[1]);
+    const mName = alphaMatch[2].toLowerCase();
+    let year = Number(alphaMatch[3]);
+    if (year < 100) year += 2000;
+    const month = MONTH_NAMES_MAP[mName];
+    if (month && year >= 2000 && year <= 2100) {
+      const maxDays = getDaysInMonth(year, month);
+      const clampedDay = Math.max(1, Math.min(day, maxDays));
+      return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}`;
+    }
+  }
+
+  // Format: YYYY-MM-DD or YYYY/MM/DD or DD-MM-YYYY / DD/MM/YYYY / DD/MM/YY
+  const parts = trimmed.split(/[-/.]/).map(Number);
   if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
     let year = parts[0];
     let month = parts[1];
     let day = parts[2];
 
-    // If format is DD-MM-YYYY or MM-DD-YYYY
+    // Case A: 4-digit year at end: DD-MM-YYYY (e.g. 05-10-2026)
     if (parts[2] >= 1000 && parts[0] <= 31) {
       year = parts[2];
       month = parts[1];
       day = parts[0];
+    }
+    // Case B: 2-digit year at end: DD-MM-YY (e.g. 05-10-26)
+    else if (parts[2] >= 20 && parts[2] < 100 && parts[0] <= 31 && parts[1] <= 12) {
+      year = parts[2] + 2000;
+      month = parts[1];
+      day = parts[0];
+    }
+    // Case C: 2-digit year at start: YY-MM-DD (e.g. 26-10-05)
+    else if (parts[0] >= 20 && parts[0] < 100 && parts[1] <= 12 && parts[2] <= 31) {
+      year = parts[0] + 2000;
+      month = parts[1];
+      day = parts[2];
+    }
+
+    if (year < 2000 || year > 2100) {
+      return getLocalDateString(fallbackDate);
     }
 
     if (month < 1) month = 1;
@@ -71,7 +117,7 @@ export function normalizeDateString(dateStr: string, fallbackDate: Date = new Da
   }
 
   const parsed = new Date(trimmed);
-  if (isNaN(parsed.getTime())) {
+  if (isNaN(parsed.getTime()) || parsed.getFullYear() < 2000 || parsed.getFullYear() > 2100) {
     return getLocalDateString(fallbackDate);
   }
   return getLocalDateString(parsed);

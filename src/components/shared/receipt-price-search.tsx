@@ -5,12 +5,15 @@ import { useMemo, useState, useRef, useEffect, type FormEvent } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowUp,
+  Award,
+  Bot,
   CalendarDays,
   ChevronDown,
   ChevronUp,
   ExternalLink,
   Globe2,
   LoaderCircle,
+  Mic,
   PackageSearch,
   PieChart,
   ReceiptText,
@@ -38,6 +41,10 @@ import {
   isSpendingAnalyticsQuery,
   type SpendingAnalyticsResult,
 } from '@/lib/spending-analytics';
+import {
+  computeDeterministicLedgerFacts,
+  type DeterministicLedgerFacts,
+} from '@/lib/copilot-ledger-facts';
 
 interface ReceiptPriceSearchProps {
   returnTo?: string;
@@ -69,6 +76,32 @@ interface StockInsightState {
   message?: string;
 }
 
+interface CopilotResult {
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  headline?: string;
+  answer?: string;
+  type?: 'price_ladder' | 'analytics' | 'market_benchmark' | 'conversational';
+  timeframe?: string;
+  matchedCount?: number;
+  exactTotalSpent?: number;
+  isFoundInPersonalLedger?: boolean;
+  matchingTransactionIds?: string[];
+  priceLadder?: Array<{
+    store: string;
+    unitPrice: number;
+    unit: string;
+    date: string;
+    isLowest: boolean;
+  }>;
+  savingsSummary?: {
+    totalSaved: number;
+    details: string;
+  } | null;
+  actionTip?: string | null;
+  message?: string;
+  deterministicFacts?: DeterministicLedgerFacts;
+}
+
 interface SearchableItemEntry {
   transaction: Transaction;
   item: StoredReceiptItem;
@@ -98,10 +131,39 @@ function stableItemKey(item: StoredReceiptItem): string {
     .trim();
 }
 
+function formatAiErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error) {
+    if (
+      err.name === 'AbortError' ||
+      err.name === 'TimeoutError' ||
+      /abort|aborted|timeout|timed out|cancelled/i.test(err.message) ||
+      /abort|timeout/i.test(err.name)
+    ) {
+      return 'AI 联网搜索耗时较长（已超过等待时限），可能是网络波动或 Google 服务响应延迟，请点击重试。';
+    }
+    return err.message;
+  }
+  return fallback;
+}
+
+function renderMarkdownInline(text: string) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return (
+        <strong key={i} className="font-bold text-white">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    return part;
+  });
+}
+
 export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptPriceSearchProps) {
   const [draftQuery, setDraftQuery] = useState('');
   const [query, setQuery] = useState('');
-  const [activeIntent, setActiveIntent] = useState<'none' | 'price' | 'analytics' | 'stock'>('none');
+  const [activeIntent, setActiveIntent] = useState<'none' | 'price' | 'analytics' | 'stock' | 'copilot'>('none');
 
   const displayItemName = useMemo(() => {
     return extractCleanItemKeyword(query) || query;
@@ -113,6 +175,14 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
 
   // Stock insight state
   const [stockInsight, setStockInsight] = useState<StockInsightState>({ status: 'idle' });
+
+  // Kinova Copilot state
+  const [copilotState, setCopilotState] = useState<CopilotResult>({ status: 'idle' });
+  const [showCopilotMatchingTxs, setShowCopilotMatchingTxs] = useState(false);
+
+  // Voice speech-to-text state
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
 
   // Online item price search states
   const [onlineResults, setOnlineResults] = useState<Record<string, OnlineResult>>({});
@@ -223,15 +293,117 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
       .slice(0, 30);
   }, [activeIntent, query, searchableEntries]);
 
+  // Visual Price Ladder across stores/merchants
+  const storePriceLadder = useMemo(() => {
+    if (activeIntent !== 'price' || matches.length < 2) return [];
+    const storeMap = new Map<string, { store: string; minUnitPrice: number; latestDate: string; count: number; currency: string }>();
+    for (const m of matches) {
+      const store = (m.transaction.description || m.transaction.category || 'Store').trim();
+      const existing = storeMap.get(store);
+      const curr = m.transaction.currency || 'MYR';
+      if (!existing) {
+        storeMap.set(store, { store, minUnitPrice: m.item.unitPrice, latestDate: m.transaction.date, count: 1, currency: curr });
+      } else {
+        if (m.item.unitPrice < existing.minUnitPrice) {
+          existing.minUnitPrice = m.item.unitPrice;
+        }
+        if (m.transaction.date > existing.latestDate) {
+          existing.latestDate = m.transaction.date;
+        }
+        existing.count += 1;
+      }
+    }
+    return Array.from(storeMap.values()).sort((a, b) => a.minUnitPrice - b.minUnitPrice);
+  }, [activeIntent, matches]);
+
   // Dynamic quick suggestions
   const suggestions = useMemo(() => [
+    { text: '我在四夕豆花吃过什么？消费多少？', type: 'copilot', icon: '🍨' },
+    { text: '今年我在哪里打汽油最便宜？', type: 'copilot', icon: '⛽' },
     { text: '这个月在餐饮 Food 花了多少？', type: 'analytics', icon: '📊' },
-    { text: '我买过鸡饭多少钱？', type: 'price', icon: '🍗' },
-    { text: '现在有什么美股/ETF值得买？', type: 'stock', icon: '📈' },
     { text: '查上个月交通与汽油总支出', type: 'analytics', icon: '🚗' },
-    { text: 'NVDA 现在可以买吗？走势如何', type: 'stock', icon: '💻' },
+    { text: '我买过鸡饭多少钱？', type: 'price', icon: '🍗' },
     { text: '查鸡蛋/牛奶公开发售参考价', type: 'price', icon: '🛒' },
+    { text: '现在有什么美股/ETF值得买？', type: 'stock', icon: '📈' },
+    { text: 'NVDA 现在可以买吗？走势如何', type: 'stock', icon: '💻' },
   ], []);
+
+  const copilotMatchingTransactions = useMemo(() => {
+    const ids = copilotState.matchingTransactionIds || copilotState.deterministicFacts?.matchingTransactionIds;
+    if (!ids || ids.length === 0) return [];
+    const idSet = new Set(ids);
+    return allTransactions.filter((t) => idSet.has(t.id));
+  }, [allTransactions, copilotState.matchingTransactionIds, copilotState.deterministicFacts]);
+
+  // Fetch Kinova Copilot reasoning
+  const fetchCopilot = async (userQuery: string) => {
+    setCopilotState({ status: 'loading' });
+    setShowCopilotMatchingTxs(false);
+    try {
+      const deterministicFacts = computeDeterministicLedgerFacts(userQuery, allTransactions);
+      const res = await fetch('/api/ai/copilot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: userQuery,
+          deterministicFacts,
+          transactions: deterministicFacts.relevantTransactionsSample,
+        }),
+        signal: AbortSignal.timeout(35_000),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.data) {
+        throw new Error(data.error || 'Kinova Copilot 暂时无法回答，请重试');
+      }
+      setCopilotState({
+        status: 'ready',
+        ...data.data,
+        deterministicFacts,
+      });
+    } catch (err) {
+      setCopilotState({
+        status: 'error',
+        message: formatAiErrorMessage(err, 'AI 思考超时，请稍后重试'),
+      });
+    }
+  };
+
+  // Toggle voice speech-to-text dictation
+  const toggleListening = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+    const SpeechRecognition =
+      typeof window !== 'undefined'
+        ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+        : null;
+    if (!SpeechRecognition) {
+      alert('Your browser does not support Web Speech recognition.');
+      return;
+    }
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.lang = typeof navigator !== 'undefined' && navigator.language?.includes('zh') ? 'zh-CN' : 'en-US';
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.onstart = () => setIsListening(true);
+      recognition.onend = () => setIsListening(false);
+      recognition.onerror = () => setIsListening(false);
+      recognition.onresult = (event: any) => {
+        const text = event.results?.[0]?.[0]?.transcript;
+        if (text) {
+          setDraftQuery(text);
+          submitInquiry(text);
+        }
+      };
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch {
+      setIsListening(false);
+    }
+  };
 
   // Fetch stock advisory from AI
   const fetchStockAdvisory = async (stockQuery: string) => {
@@ -241,7 +413,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: stockQuery }),
-        signal: AbortSignal.timeout(18_000),
+        signal: AbortSignal.timeout(45_000),
       });
       const data = await res.json();
       if (!res.ok || !data.success || !data.summary) {
@@ -256,7 +428,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
     } catch (err) {
       setStockInsight({
         status: 'error',
-        message: err instanceof Error ? err.message : '获取行情与分析超时，请重试',
+        message: formatAiErrorMessage(err, '获取行情与分析超时，请重试'),
       });
     }
   };
@@ -294,7 +466,18 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
       return;
     }
 
-    // 3. Fallback: Receipt Item Price Recall
+    // 3. Check Conversational / Complex Inquiries
+    const isConversational =
+      /(吃了什么|买过什么|吃什么|最便宜|最贵|省了多少|补贴|对比|哪家|哪间|比较|值得|分析|为什么|怎么样|how much did i|where was|cheapest|more on|compare)/i.test(clean);
+
+    if (isConversational) {
+      setActiveIntent('copilot');
+      setAnalyticsResult(null);
+      void fetchCopilot(clean);
+      return;
+    }
+
+    // 4. Fallback: Receipt Item Price Recall
     setActiveIntent('price');
     setAnalyticsResult(null);
   };
@@ -311,6 +494,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
     setActiveIntent('none');
     setAnalyticsResult(null);
     setStockInsight({ status: 'idle' });
+    setCopilotState({ status: 'idle' });
     setGeneralOnlineResult(null);
   };
 
@@ -330,7 +514,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
           currency: 'MYR',
           country: 'Malaysia',
         }),
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(45_000),
       });
       const payload = await response.json();
       if (!response.ok || !payload?.success || typeof payload.summary !== 'string') {
@@ -347,7 +531,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
     } catch (error) {
       setGeneralOnlineResult({
         status: 'error',
-        message: error instanceof Error ? error.message : 'Online market lookup is unavailable right now.',
+        message: formatAiErrorMessage(error, '全网比价服务暂时不可用，请稍后重试。'),
       });
     } finally {
       setIsGeneralLoading(false);
@@ -372,7 +556,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
           currency: 'MYR',
           country: 'Malaysia',
         }),
-        signal: AbortSignal.timeout(13_000),
+        signal: AbortSignal.timeout(45_000),
       });
       const payload = await response.json();
       if (!response.ok || !payload?.success || typeof payload.summary !== 'string') {
@@ -394,7 +578,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
         ...current,
         [key]: {
           status: 'error',
-          message: error instanceof Error ? error.message : 'Online comparison is unavailable right now.',
+          message: formatAiErrorMessage(error, '全网比价服务暂时不可用，请稍后重试。'),
         },
       }));
     } finally {
@@ -709,28 +893,73 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                   <div className="flex flex-col items-center justify-center py-10 gap-3">
                     <LoaderCircle size={28} className="animate-spin text-indigo-400" />
                     <span className="text-xs text-white/70 font-medium animate-pulse">
-                      正在通过 Google 搜索全球实时市场研报与估值数据...
+                      正在综合实时行情与大模型，为您整理极简通俗建议...
                     </span>
                   </div>
                 )}
 
                 {/* Ready Analysis Content */}
                 {stockInsight.status === 'ready' && stockInsight.summary && (
-                  <div className="flex flex-col gap-3.5">
+                  <div className="flex flex-col gap-3">
                     <div className="text-xs sm:text-sm text-white/90 leading-relaxed space-y-2.5 font-sans">
                       {stockInsight.summary.split('\n\n').map((paragraph, pIdx) => {
                         const trimmed = paragraph.trim();
                         if (!trimmed) return null;
-                        const isHeader = /^(\d+\.|\#\#\#|\#\#|\🎯|\💡|\⚖️|\🛡️|\🚀|\⚠️)/.test(trimmed);
+
+                        const isMainConclusion = trimmed.startsWith('🎯') || trimmed.includes('核心态度') || trimmed.includes('核心结论');
+                        const isActionTip = trimmed.startsWith('🛠️') || trimmed.includes('小白实操') || trimmed.includes('实操建议');
+                        const isDisclaimer = trimmed.startsWith('⚠️') || trimmed.includes('免责声明') || trimmed.includes('投资有风险');
+
+                        if (isMainConclusion) {
+                          return (
+                            <div
+                              key={pIdx}
+                              className="rounded-2xl bg-emerald-500/15 border border-emerald-400/30 p-3.5 text-emerald-100 font-medium text-xs sm:text-sm leading-relaxed shadow-sm"
+                            >
+                              {trimmed.split('\n').map((line, lIdx) => (
+                                <p key={lIdx} className={lIdx > 0 ? 'mt-1' : ''}>
+                                  {renderMarkdownInline(line)}
+                                </p>
+                              ))}
+                            </div>
+                          );
+                        }
+
+                        if (isActionTip) {
+                          return (
+                            <div
+                              key={pIdx}
+                              className="rounded-2xl bg-indigo-500/15 border border-indigo-400/30 p-3.5 text-indigo-100 font-medium text-xs sm:text-sm leading-relaxed shadow-sm"
+                            >
+                              {trimmed.split('\n').map((line, lIdx) => (
+                                <p key={lIdx} className={lIdx > 0 ? 'mt-1' : ''}>
+                                  {renderMarkdownInline(line)}
+                                </p>
+                              ))}
+                            </div>
+                          );
+                        }
+
+                        if (isDisclaimer) {
+                          return (
+                            <p key={pIdx} className="text-[11px] text-white/40 italic pt-1">
+                              {renderMarkdownInline(trimmed)}
+                            </p>
+                          );
+                        }
 
                         return (
-                          <div
-                            key={pIdx}
-                            className={isHeader ? 'pt-1 font-semibold text-white' : 'text-white/85'}
-                          >
+                          <div key={pIdx} className="space-y-1.5 p-3 rounded-2xl bg-white/[0.04] border border-white/10">
                             {trimmed.split('\n').map((line, lIdx) => (
-                              <p key={lIdx} className={line.startsWith('-') || line.startsWith('•') ? 'pl-2 text-white/90 my-0.5' : 'my-0.5'}>
-                                {line}
+                              <p
+                                key={lIdx}
+                                className={
+                                  line.startsWith('•') || line.startsWith('-') || line.startsWith('*')
+                                    ? 'pl-2 text-white/90 text-xs sm:text-sm'
+                                    : 'font-semibold text-white text-xs sm:text-sm'
+                                }
+                              >
+                                {renderMarkdownInline(line)}
                               </p>
                             ))}
                           </div>
@@ -740,7 +969,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
 
                     {/* Sources */}
                     {stockInsight.sources && stockInsight.sources.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 pt-3 border-t border-white/10">
+                      <div className="flex flex-wrap gap-1.5 pt-2 border-t border-white/10">
                         <span className="text-[10px] text-white/50 block w-full mb-0.5">参考公开资讯与权威研报:</span>
                         {stockInsight.sources.map((src) => (
                           <a
@@ -756,21 +985,208 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                         ))}
                       </div>
                     )}
-
-                    {/* Regulatory Disclaimer */}
-                    <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-400/25 flex items-start gap-2 text-[11px] text-amber-200/90 leading-relaxed">
-                      <ShieldAlert size={15} className="text-amber-400 shrink-0 mt-0.5" />
-                      <span>
-                        免责声明：以上内容仅供公开信息整理与参考，不构成任何投资建议。金融投资受市场宏观波动影响，决策需独立审慎。
-                      </span>
-                    </div>
                   </div>
                 )}
 
-                {/* Error State */}
+                {/* Error State with Quick Retry */}
                 {stockInsight.status === 'error' && (
-                  <div className="p-4 rounded-xl bg-rose-500/15 border border-rose-400/25 text-xs text-rose-200">
-                    {stockInsight.message}
+                  <div className="p-4 rounded-2xl bg-rose-500/15 border border-rose-400/25 flex flex-col gap-2.5 text-xs text-rose-200">
+                    <p>{stockInsight.message}</p>
+                    <button
+                      type="button"
+                      onClick={() => void fetchStockAdvisory(query)}
+                      className="self-start px-3 py-1.5 rounded-lg bg-rose-500/25 hover:bg-rose-500/40 text-rose-100 font-medium text-xs transition-colors cursor-pointer"
+                    >
+                      🔄 点击重新查询
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 2.5 Kinova Copilot Conversational Reasoning Card */}
+            {activeIntent === 'copilot' && (
+              <div className="rounded-3xl bg-white/[0.07] border border-white/15 backdrop-blur-2xl p-5 sm:p-6 shadow-2xl flex flex-col gap-5">
+                {/* Copilot Header */}
+                <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-violet-500 border border-indigo-400/30 flex items-center justify-center text-white shadow-md">
+                      <Sparkles size={18} />
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold text-indigo-300">Kinova Copilot 智能财务助手</div>
+                      <div className="text-sm font-bold text-white tracking-tight">
+                        {copilotState.headline || '深度财务与小票推理'}
+                      </div>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full bg-indigo-500/20 text-indigo-200 border border-indigo-400/30 text-[10px] font-bold uppercase tracking-wider">
+                    Gemini 2.5
+                  </span>
+                </div>
+
+                {/* Loading */}
+                {copilotState.status === 'loading' && (
+                  <div className="flex flex-col items-center justify-center py-10 gap-3">
+                    <LoaderCircle size={28} className="animate-spin text-indigo-400" />
+                    <span className="text-xs text-white/70 font-medium animate-pulse">
+                      Kinova Copilot 正在全面核对历史小票与账目数据...
+                    </span>
+                  </div>
+                )}
+
+                {/* Ready Content */}
+                {copilotState.status === 'ready' && (
+                  <div className="flex flex-col gap-4">
+                    {/* Statistical Timeframe & Deterministic Badges */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      {(copilotState.timeframe || copilotState.deterministicFacts?.timeframeLabel) && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-white/[0.06] border border-white/10 text-xs text-white/90 font-medium">
+                          <span>📅</span>
+                          <span>统计期间: {copilotState.timeframe || copilotState.deterministicFacts?.timeframeLabel}</span>
+                        </span>
+                      )}
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-white/[0.06] border border-white/10 text-xs text-white/90 font-medium">
+                        <span>📊</span>
+                        <span>匹配记录: {copilotState.matchedCount ?? copilotState.deterministicFacts?.transactionCount ?? 0} 笔</span>
+                      </span>
+                      {(copilotState.exactTotalSpent != null && copilotState.exactTotalSpent > 0) && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-500/20 border border-emerald-400/30 text-xs text-emerald-200 font-mono font-bold">
+                          <span>💰</span>
+                          <span>账本确切总计: {formatPrice('MYR', copilotState.exactTotalSpent)}</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Personal Ledger Absence Distinction */}
+                    {copilotState.isFoundInPersonalLedger === false && (
+                      <div className="flex items-start gap-3 p-3.5 rounded-2xl bg-amber-500/15 border border-amber-400/30 text-amber-200 text-xs">
+                        <span className="text-lg">⚠️</span>
+                        <div>
+                          <div className="font-bold text-amber-300">个人账本暂无此消费记录</div>
+                          <div className="text-[11px] text-amber-200/90 mt-0.5">
+                            已自动转为检索马来西亚全网公开发售参考价（如 Lotus&apos;s、99 Speedmart、各大超市公允市价），助你快速对比行情。
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Answer text */}
+                    {copilotState.answer && (
+                      <div className="text-xs sm:text-sm text-white/90 leading-relaxed space-y-2 p-4 rounded-2xl bg-white/[0.04] border border-white/10 font-sans">
+                        {copilotState.answer.split('\n').map((line, idx) => (
+                          <p key={idx}>{renderMarkdownInline(line)}</p>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Savings Summary Banner */}
+                    {copilotState.savingsSummary && (
+                      <div className="flex items-start gap-3 p-3.5 rounded-2xl bg-emerald-500/15 border border-emerald-400/30 text-emerald-100 text-xs">
+                        <span className="text-lg">🎉</span>
+                        <div>
+                          <div className="font-bold text-emerald-300">
+                            节省总额: {formatPrice('MYR', copilotState.savingsSummary.totalSaved)}
+                          </div>
+                          <div className="text-[11px] text-emerald-200/90 mt-0.5">
+                            {copilotState.savingsSummary.details}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Copilot Price Ladder */}
+                    {Array.isArray(copilotState.priceLadder) && copilotState.priceLadder.length > 0 && (
+                      <div className="p-4 rounded-2xl bg-white/[0.04] border border-white/10 flex flex-col gap-2.5">
+                        <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <Award size={14} className="text-amber-400" />
+                          <span>商家单价对比排行榜</span>
+                        </div>
+                        {copilotState.priceLadder.map((item, idx) => (
+                          <div key={idx} className="flex items-center justify-between p-2 rounded-xl bg-white/[0.03] text-xs">
+                            <div className="flex items-center gap-2">
+                              <span className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[10px] ${
+                                item.isLowest ? 'bg-amber-400 text-slate-950' : 'bg-white/10 text-white/70'
+                              }`}>
+                                {idx + 1}
+                              </span>
+                              <span className="font-semibold text-white">{item.store}</span>
+                              {item.date && <span className="text-[10px] text-white/40">({item.date})</span>}
+                            </div>
+                            <div className="text-right">
+                              <span className="font-mono font-bold text-emerald-400">
+                                {formatPrice('MYR', item.unitPrice)}{item.unit || ''}
+                              </span>
+                              {item.isLowest && <span className="block text-[10px] text-amber-300 font-bold">🏆 最划算</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Expandable Matching Transactions Section */}
+                    {copilotMatchingTransactions.length > 0 && (
+                      <div className="rounded-2xl bg-white/[0.03] border border-white/10 overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => setShowCopilotMatchingTxs((v) => !v)}
+                          className="w-full flex items-center justify-between p-3.5 text-xs font-semibold text-white/90 hover:bg-white/[0.06] transition-colors cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2">
+                            <ReceiptText size={14} className="text-indigo-400" />
+                            <span>查看相关账目记录 ({copilotMatchingTransactions.length} 笔)</span>
+                          </div>
+                          <ChevronDown size={14} className={`text-white/60 transition-transform ${showCopilotMatchingTxs ? 'rotate-180' : ''}`} />
+                        </button>
+                        {showCopilotMatchingTxs && (
+                          <div className="p-2 space-y-1.5 border-t border-white/5 max-h-64 overflow-y-auto">
+                            {copilotMatchingTransactions.map((tx) => (
+                              <button
+                                key={tx.id}
+                                type="button"
+                                onClick={() => setSelectedTx(tx)}
+                                className="w-full flex items-center justify-between p-2.5 rounded-xl bg-white/[0.02] hover:bg-white/[0.06] text-xs transition-colors text-left cursor-pointer"
+                              >
+                                <div className="flex flex-col pr-2 min-w-0">
+                                  <span className="font-medium text-white/95 truncate">
+                                    {tx.description || tx.category}
+                                  </span>
+                                  <span className="text-[10px] text-white/40">
+                                    {tx.date} · {tx.category}
+                                    {tx.account ? ` · ${tx.account}` : ''}
+                                  </span>
+                                </div>
+                                <span className="font-mono font-bold text-white shrink-0">
+                                  {formatPrice(tx.currency, tx.amount)}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Action Tip */}
+                    {copilotState.actionTip && (
+                      <div className="p-3.5 rounded-2xl bg-indigo-500/15 border border-indigo-400/30 text-indigo-100 text-xs flex items-center gap-2.5">
+                        <span className="text-base">💡</span>
+                        <span>{copilotState.actionTip}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Error */}
+                {copilotState.status === 'error' && (
+                  <div className="p-4 rounded-2xl bg-rose-500/15 border border-rose-400/25 text-xs text-rose-200">
+                    <p>{copilotState.message}</p>
+                    <button
+                      type="button"
+                      onClick={() => void fetchCopilot(query)}
+                      className="mt-2 px-3 py-1.5 rounded-lg bg-rose-500/25 hover:bg-rose-500/40 text-rose-100 font-medium text-xs transition-colors cursor-pointer"
+                    >
+                      🔄 点击重新查询
+                    </button>
                   </div>
                 )}
               </div>
@@ -794,7 +1210,74 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                   )}
                 </div>
 
-                {/* No Matches Found in Ledger -> Prompt 1-Click Online Price Grounding */}
+                {/* Visual Store Price Ladder (when 2+ stores match) */}
+                {storePriceLadder.length >= 2 && (
+                  <div className="rounded-2xl bg-white/[0.06] border border-white/15 p-4 sm:p-5 flex flex-col gap-3 shadow-xl backdrop-blur-xl">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+                      <div className="flex items-center gap-2">
+                        <Award size={16} className="text-amber-400" />
+                        <span className="text-xs font-bold text-white uppercase tracking-wider">
+                          🏪 商家单价排行榜 (Store Price Ladder)
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-white/50">按最低单价排序</span>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      {storePriceLadder.map((ladderItem, ladderIdx) => {
+                        const isLowest = ladderIdx === 0;
+                        const priceDiff = ladderItem.minUnitPrice - storePriceLadder[0].minUnitPrice;
+                        return (
+                          <div
+                            key={ladderItem.store}
+                            className={`flex items-center justify-between p-3 rounded-xl border text-xs transition-all ${
+                              isLowest
+                                ? 'bg-amber-400/10 border-amber-400/30 text-white'
+                                : 'bg-white/[0.04] border-white/5 text-white/90'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span
+                                className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${
+                                  isLowest
+                                    ? 'bg-amber-400 text-slate-950 shadow-md font-mono'
+                                    : 'bg-white/10 text-white/70 font-mono'
+                                }`}
+                              >
+                                {ladderIdx + 1}
+                              </span>
+                              <div className="truncate min-w-0">
+                                <span className="font-bold text-white block truncate text-xs sm:text-sm">
+                                  {ladderItem.store}
+                                </span>
+                                <span className="text-[10px] text-white/50 block mt-0.5">
+                                  共消费 {ladderItem.count} 笔 · 最近购买于 {ladderItem.latestDate}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="text-right shrink-0">
+                              <div className="font-mono font-black text-sm sm:text-base text-emerald-400">
+                                {formatPrice(ladderItem.currency, ladderItem.minUnitPrice)}
+                              </div>
+                              {isLowest ? (
+                                <span className="inline-block text-[10px] font-bold text-amber-300">
+                                  🏆 历史最优单价
+                                </span>
+                              ) : priceDiff > 0 ? (
+                                <span className="inline-block text-[10px] text-rose-300/80 font-mono">
+                                  +{formatPrice(ladderItem.currency, priceDiff)}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* No Matches Found in Ledger -> Prompt 1-Click Online Price Grounding or Copilot */}
                 {matches.length === 0 && (
                   <div className="flex flex-col items-center justify-center py-8 px-4 rounded-3xl bg-white/[0.04] border border-white/10 text-center">
                     <PackageSearch size={32} className="text-white/40 mb-3" />
@@ -802,22 +1285,36 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                       你的个人账本中暂无「{displayItemName}」的记录
                     </div>
                     <p className="text-xs text-white/60 max-w-sm mb-5 leading-relaxed">
-                      历史账单和小票中未查到此商品。想让 Kinova AI 使用 Google 搜索查询「{displayItemName}」当前公开发售参考价吗？
+                      历史账单和小票中未查到此商品。你可以使用 Google 搜索查询当前公开发售参考价，或让 Kinova Copilot 深度推理。
                     </p>
 
-                    <button
-                      type="button"
-                      onClick={() => void searchMarketPriceOnline(displayItemName)}
-                      disabled={isGeneralLoading}
-                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 active:scale-95 text-white font-semibold text-xs flex items-center gap-2 shadow-lg cursor-pointer transition-all disabled:opacity-50"
-                    >
-                      {isGeneralLoading ? (
-                        <LoaderCircle size={15} className="animate-spin" />
-                      ) : (
-                        <Globe2 size={15} />
-                      )}
-                      <span>🌐 立即全网查询「{displayItemName}」参考价格</span>
-                    </button>
+                    <div className="flex flex-wrap items-center justify-center gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => void searchMarketPriceOnline(displayItemName)}
+                        disabled={isGeneralLoading}
+                        className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 active:scale-95 text-white font-semibold text-xs flex items-center gap-2 shadow-lg cursor-pointer transition-all disabled:opacity-50"
+                      >
+                        {isGeneralLoading ? (
+                          <LoaderCircle size={15} className="animate-spin" />
+                        ) : (
+                          <Globe2 size={15} />
+                        )}
+                        <span>🌐 全网参考价格</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveIntent('copilot');
+                          void fetchCopilot(query);
+                        }}
+                        className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 active:scale-95 text-indigo-300 font-semibold text-xs flex items-center gap-2 border border-white/15 cursor-pointer transition-all"
+                      >
+                        <Sparkles size={15} />
+                        <span>✨ Kinova Copilot 深度分析</span>
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -828,9 +1325,11 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                       <Globe2 size={15} />
                       <span>当前市场公开发售参考价格 (Google Search Grounding)</span>
                     </div>
-                    <p className="text-xs sm:text-sm text-white/90 leading-relaxed whitespace-pre-wrap">
-                      {generalOnlineResult.summary}
-                    </p>
+                    <div className="text-xs sm:text-sm text-white/90 leading-relaxed space-y-1">
+                      {generalOnlineResult.summary.split('\n').map((line, lIdx) => (
+                        <p key={lIdx}>{renderMarkdownInline(line)}</p>
+                      ))}
+                    </div>
                     {generalOnlineResult.sources.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 pt-2 border-t border-emerald-400/20">
                         {generalOnlineResult.sources.map((source) => (
@@ -1015,6 +1514,19 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
               className="flex-1 bg-transparent text-white placeholder:text-white/45 text-sm outline-none py-1.5"
               autoComplete="off"
             />
+            <button
+              type="button"
+              onClick={toggleListening}
+              className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer shrink-0 ${
+                isListening
+                  ? 'bg-rose-500 text-white animate-pulse shadow-lg shadow-rose-500/50'
+                  : 'text-white/60 hover:text-white hover:bg-white/10'
+              }`}
+              title={isListening ? '停止语音识别' : '语音提问'}
+              aria-label={isListening ? '停止语音识别' : '语音提问'}
+            >
+              <Mic size={17} />
+            </button>
             <button
               type="submit"
               disabled={!draftQuery.trim()}

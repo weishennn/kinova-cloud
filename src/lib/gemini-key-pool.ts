@@ -30,6 +30,13 @@ const NUMBERED_KEY_NAMES = [
 const QUOTA_COOLDOWN_MS = 60_000; // 60s cooldown on HTTP 429
 const AUTH_COOLDOWN_MS = 10 * 60_000; // 10m cooldown on HTTP 401/403
 
+export const STANDARD_GEMINI_MODEL = 'gemini-flash-latest';
+export const STANDARD_GEMINI_MODELS = [
+  'gemini-flash-latest',
+  'gemini-3.8-flash',
+  'gemini-2.5-flash',
+] as const;
+
 let roundRobinCursor = 0;
 const keyCooldownUntil = new Map<string, number>();
 
@@ -119,6 +126,8 @@ export function reportGeminiKeyFailure(
     keyCooldownUntil.set(apiKey, now + QUOTA_COOLDOWN_MS);
   } else if (status === 401 || status === 403) {
     keyCooldownUntil.set(apiKey, now + AUTH_COOLDOWN_MS);
+  } else if (status >= 500) {
+    keyCooldownUntil.set(apiKey, now + 15_000);
   }
 }
 

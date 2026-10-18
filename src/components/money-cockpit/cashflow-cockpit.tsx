@@ -1,16 +1,18 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import Link from 'next/link';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, CalendarDays, CalendarRange, ChevronDown, CircleHelp, CloudAlert, House, Receipt, Search, ShoppingBag, Sparkles, Train, TrendingUp, Utensils, Wallet } from 'lucide-react';
+import { AlertTriangle, ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, CalendarDays, CalendarRange, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, CloudAlert, House, Receipt, Search, ShoppingBag, Sparkles, Train, TrendingUp, Utensils, Wallet } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useAppStore } from '@/stores/app-store';
 import { Transaction, useTransactions } from '@/hooks/useTransactions';
 import { useMonthList } from '@/hooks/useSheets';
 import { getAmountInBaseCurrency, ACCOUNTING_BASE_CURRENCY } from '@/lib/currency';
 import { getLocalDateString, getTransactionRecordedInfo, parseLocalDate } from '@/lib/date-helper';
+import { generateProactiveAlerts, type ProactiveAlert } from '@/lib/proactive-alerts';
+import { SETTINGS_UPDATED_EVENT } from '@/lib/cloud-settings-sync';
 import { MoneyOrbit } from './money-orbit';
 import { SmartQuickInput } from '@/components/shared/smart-quick-input';
 import { TransactionDetailModal } from '@/components/shared/transaction-detail-modal';
@@ -85,10 +87,59 @@ export function CashflowCockpit() {
   const { selectedMonth, setSelectedMonth } = useAppStore();
   const { data: sheetMonths = [] } = useMonthList();
   const { transactions = [], isLoading, error } = useTransactions(selectedMonth ? { period: selectedMonth } : undefined);
+  const { transactions: allLedgerTransactions = [] } = useTransactions({ period: 'all' });
   const { syncAndRefresh } = useSyncAndRefresh();
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [activeAlertFilter, setActiveAlertFilter] = useState<{
+    label: string;
+    txIds: string[];
+    category?: string;
+  } | null>(null);
   const [activityView, setActivityView] = useState<'recent' | 'calendar'>('recent');
+  const [userBudgetCap, setUserBudgetCap] = useState<number | undefined>(undefined);
+  const [currentAlertIndex, setCurrentAlertIndex] = useState(0);
+
+  useEffect(() => {
+    const loadBudget = () => {
+      try {
+        const saved = localStorage.getItem('cashflow_monthly_budget');
+        if (saved && parseFloat(saved) > 0) {
+          setUserBudgetCap(parseFloat(saved));
+        } else {
+          setUserBudgetCap(undefined);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    loadBudget();
+    window.addEventListener(SETTINGS_UPDATED_EVENT, loadBudget);
+    return () => window.removeEventListener(SETTINGS_UPDATED_EVENT, loadBudget);
+  }, []);
+
+  const proactiveAlerts = useMemo(() => {
+    const txSource = allLedgerTransactions.length > 0 ? allLedgerTransactions : transactions;
+    return generateProactiveAlerts(txSource, userBudgetCap);
+  }, [allLedgerTransactions, transactions, userBudgetCap]);
+
+  const activeAlert = proactiveAlerts.length > 0
+    ? proactiveAlerts[currentAlertIndex % proactiveAlerts.length]
+    : null;
+
+  const handleAlertAction = (alert: ProactiveAlert) => {
+    setActiveCategory(null);
+    setActiveAlertFilter({
+      label: alert.title,
+      txIds: alert.matchingTransactionIds,
+      category: alert.actionCategory,
+    });
+    setActivityView('recent');
+    const streamEl = document.getElementById('stream-title');
+    if (streamEl) {
+      streamEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
 
   const currentMonth = currentMonthValue();
   const currentYearStr = currentMonth.slice(0, 4);
@@ -150,26 +201,58 @@ export function CashflowCockpit() {
       .sort((a, b) => b.amount - a.amount);
   }, [visibleTransactions]);
 
+  const savingsThisPeriod = useMemo(() => {
+    let total = 0;
+    for (const t of visibleTransactions) {
+      if (!t.notes) continue;
+      const match = t.notes.match(/\[优惠抵扣:\s*-[A-Z]{3}\s*([0-9]+(?:\.[0-9]+)?)/i);
+      if (match) {
+        const val = parseFloat(match[1]);
+        if (Number.isFinite(val)) total += val;
+      }
+    }
+    return Number(total.toFixed(2));
+  }, [visibleTransactions]);
+
   const filteredRecent = useMemo(() => {
-    const list = activeCategory
-      ? visibleTransactions.filter((transaction) => transaction.type === 'expense' && transaction.category === activeCategory)
-      : visibleTransactions;
+    let list = visibleTransactions;
+    if (activeAlertFilter) {
+      if (activeAlertFilter.txIds && activeAlertFilter.txIds.length > 0) {
+        const idSet = new Set(activeAlertFilter.txIds);
+        const sourceList = allLedgerTransactions.length > 0 ? allLedgerTransactions : transactions;
+        const matched = sourceList.filter((t) => idSet.has(t.id));
+        if (matched.length > 0) {
+          list = matched;
+        }
+      } else if (activeAlertFilter.category) {
+        list = visibleTransactions.filter(
+          (t) => t.type === 'expense' && t.category.toLowerCase().includes(activeAlertFilter.category!.toLowerCase())
+        );
+      }
+    } else if (activeCategory) {
+      list = visibleTransactions.filter(
+        (transaction) => transaction.type === 'expense' && transaction.category === activeCategory
+      );
+    }
     return [...list]
       .sort((a, b) => {
-        const dateCmp = b.date.localeCompare(a.date);
+        const dateA = a.date || '';
+        const dateB = b.date || '';
+        const dateCmp = dateB.localeCompare(dateA);
         if (dateCmp !== 0) return dateCmp;
         const rowA = typeof a._rowIndex === 'number' ? a._rowIndex : Number.MAX_SAFE_INTEGER;
         const rowB = typeof b._rowIndex === 'number' ? b._rowIndex : Number.MAX_SAFE_INTEGER;
         return rowB - rowA;
       })
-      .slice(0, 7);
-  }, [activeCategory, visibleTransactions]);
+      .slice(0, activeAlertFilter ? 20 : 7);
+  }, [activeAlertFilter, activeCategory, allLedgerTransactions, transactions, visibleTransactions]);
   const recentGroups = useMemo(() => {
     const groups = new Map<string, Transaction[]>();
     filteredRecent.forEach((transaction) => {
-      const group = groups.get(transaction.date) || [];
+      const txDate = transaction.date || getLocalDateString();
+      const group = groups.get(txDate) || [];
       group.push(transaction);
-      groups.set(transaction.date, group);
+      groups.set(txDate, group);
     });
     return [...groups.entries()].map(([date, items]) => ({ date, label: dateGroupLabel(date), items }));
   }, [filteredRecent]);
@@ -185,6 +268,10 @@ export function CashflowCockpit() {
       return;
     }
     const [year, month] = selectedMonth.split('-').map(Number);
+    if (!year || !month || Number.isNaN(year) || Number.isNaN(month)) {
+      setSelectedMonth(currentMonth);
+      return;
+    }
     const next = new Date(year, month - 1 + direction, 1);
     setSelectedMonth(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`);
   };
@@ -195,18 +282,18 @@ export function CashflowCockpit() {
     const monthKeys = periodKind === 'year'
       ? Array.from({ length: 12 }, (_, index) => `${selectedMonth.slice(5)}-${String(index + 1).padStart(2, '0')}`)
       : periodKind === 'all'
-        ? [...new Set(visibleTransactions.map((transaction) => transaction.date.slice(0, 7)).filter((value) => /^\d{4}-\d{2}$/.test(value)))].sort().slice(-12)
+        ? [...new Set(visibleTransactions.map((transaction) => (transaction.date || '').slice(0, 7)).filter((value) => /^\d{4}-\d{2}$/.test(value)))].sort().slice(-12)
         : [];
 
     if (periodKind === 'month') {
       const [year, month] = selectedMonth.split('-').map(Number);
-      const daysInMonth = new Date(year, month, 0).getDate();
+      const daysInMonth = (year && month) ? new Date(year, month, 0).getDate() : 31;
       const lastVisibleDay = selectedMonth === currentMonth ? new Date().getDate() : daysInMonth;
       for (let day = 1; day <= lastVisibleDay; day += 1) {
         byPeriod.set(`${selectedMonth}-${String(day).padStart(2, '0')}`, { income: 0, expense: 0 });
       }
       visibleTransactions.forEach((transaction) => {
-        const key = transaction.date.slice(0, 10);
+        const key = (transaction.date || '').slice(0, 10);
         const bucket = byPeriod.get(key);
         if (!bucket) return;
         const amount = getAmountInBaseCurrency(transaction.amount, transaction.currency, transaction.baseAmount);
@@ -221,7 +308,8 @@ export function CashflowCockpit() {
 
     monthKeys.forEach((key) => byPeriod.set(key, { income: 0, expense: 0 }));
     visibleTransactions.forEach((transaction) => {
-      const bucket = byPeriod.get(transaction.date.slice(0, 7));
+      const key = (transaction.date || '').slice(0, 7);
+      const bucket = byPeriod.get(key);
       if (!bucket) return;
       const amount = getAmountInBaseCurrency(transaction.amount, transaction.currency, transaction.baseAmount);
       if (transaction.type === 'income') bucket.income += amount;
@@ -397,15 +485,114 @@ export function CashflowCockpit() {
         </section>
 
         <section className="cockpit-insight cockpit-area-insight" aria-labelledby="insight-title">
-          <div className="cockpit-insight-orbit"><Sparkles size={16} /></div>
-          <div>
-            <p className="cockpit-eyebrow">A QUICK READ</p>
-            <h2 id="insight-title">{categoryTotals[0] ? `${categoryTotals[0].name} leads this period.` : 'Your money story starts here.'}</h2>
-            <p>{categoryTotals[0]
-              ? `${formatMoney(categoryTotals[0].amount)} recorded${totals.spending > 0 ? ` · ${Math.round((categoryTotals[0].amount / totals.spending) * 100)}% of spending` : ''}. Tap its pulse above to follow those transactions.`
-              : 'Add your first transaction and your personal money map will take shape.'}</p>
+          <div
+            className="cockpit-insight-orbit"
+            style={
+              activeAlert
+                ? {
+                    color:
+                      activeAlert.severity === 'critical'
+                        ? '#ef4444'
+                        : activeAlert.severity === 'warning'
+                        ? '#f59e0b'
+                        : 'var(--cockpit-accent)',
+                  }
+                : undefined
+            }
+          >
+            {activeAlert ? (
+              activeAlert.severity === 'critical' || activeAlert.severity === 'warning' ? (
+                <AlertTriangle size={16} />
+              ) : (
+                <Sparkles size={16} />
+              )
+            ) : (
+              <Sparkles size={16} />
+            )}
           </div>
-          {categoryTotals[0] && <button type="button" onClick={() => setActiveCategory(categoryTotals[0].name)} aria-label={`Show ${categoryTotals[0].name} transactions`}><ArrowRight size={16} /></button>}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <p className="cockpit-eyebrow" style={{ margin: 0 }}>
+                {activeAlert
+                  ? `AI RADAR · ${
+                      activeAlert.severity === 'critical'
+                        ? '🔴 预算超支风险'
+                        : activeAlert.severity === 'warning'
+                        ? '⚠️ 支出异动预警'
+                        : '💡 智能变动洞察'
+                    }`
+                  : savingsThisPeriod > 0
+                  ? 'AI SAVINGS RADAR'
+                  : 'FINANCIAL RADAR'}
+              </p>
+              {proactiveAlerts.length > 1 && (
+                <div className="cockpit-insight-nav">
+                  <button
+                    type="button"
+                    className="cockpit-insight-nav-btn"
+                    onClick={() => setCurrentAlertIndex((prev) => (prev - 1 + proactiveAlerts.length) % proactiveAlerts.length)}
+                    aria-label="Previous alert"
+                  >
+                    <ChevronLeft size={13} />
+                  </button>
+                  <span style={{ fontSize: '11px', color: 'var(--cockpit-muted)' }}>
+                    {((currentAlertIndex % proactiveAlerts.length) + 1)}/{proactiveAlerts.length}
+                  </span>
+                  <button
+                    type="button"
+                    className="cockpit-insight-nav-btn"
+                    onClick={() => setCurrentAlertIndex((prev) => (prev + 1) % proactiveAlerts.length)}
+                    aria-label="Next alert"
+                  >
+                    <ChevronRight size={13} />
+                  </button>
+                </div>
+              )}
+            </div>
+            <h2 id="insight-title">
+              {activeAlert
+                ? activeAlert.title
+                : savingsThisPeriod > 0
+                ? `Saved ${formatMoney(savingsThisPeriod)} in subsidies & deals!`
+                : categoryTotals[0]
+                ? `${categoryTotals[0].name} leads this period.`
+                : 'Your money story starts here.'}
+            </h2>
+            <p>
+              {activeAlert
+                ? activeAlert.message
+                : savingsThisPeriod > 0
+                ? `Driven by BUDI MADANI fuel subsidies and merchant vouchers. ${categoryTotals[0] ? `${categoryTotals[0].name} leads overall spending at ${formatMoney(categoryTotals[0].amount)}.` : ''}`
+                : categoryTotals[0]
+                ? `${formatMoney(categoryTotals[0].amount)} recorded${totals.spending > 0 ? ` · ${Math.round((categoryTotals[0].amount / totals.spending) * 100)}% of spending` : ''}. Tap its pulse above to follow those transactions.`
+                : 'Add your first transaction and your personal money map will take shape.'}
+            </p>
+            {activeAlert && (
+              <div className="cockpit-insight-explanation">
+                <strong>💡 为什么提醒我：</strong>
+                <span>{activeAlert.explanation}</span>
+              </div>
+            )}
+            {activeAlert && (
+              <button
+                type="button"
+                className="cockpit-insight-action-btn"
+                onClick={() => handleAlertAction(activeAlert)}
+              >
+                <span>{activeAlert.actionLabel}</span>
+                <ArrowRight size={12} />
+              </button>
+            )}
+          </div>
+          {!activeAlert && categoryTotals[0] && (
+            <button
+              type="button"
+              onClick={() => setActiveCategory(categoryTotals[0].name)}
+              aria-label={`Show ${categoryTotals[0].name} transactions`}
+            >
+              <ArrowRight size={16} />
+            </button>
+          )}
         </section>
 
         <section className="cockpit-stream cockpit-area-stream" aria-labelledby="stream-title">
@@ -419,7 +606,18 @@ export function CashflowCockpit() {
               <Link href="/transactions" className="cockpit-text-link">All transactions <ArrowRight size={14} /></Link>
             </div>
           </div>
-          {activeCategory && activityView === 'recent' && <button type="button" className="cockpit-filter-pill" onClick={() => setActiveCategory(null)}><span>{activeCategory}</span><span aria-hidden="true">×</span><span className="sr-only">Clear category filter</span></button>}
+          {activeAlertFilter && activityView === 'recent' && (
+            <button
+              type="button"
+              className="cockpit-filter-pill"
+              onClick={() => setActiveAlertFilter(null)}
+            >
+              <span>🚨 预警账目: {activeAlertFilter.label} ({filteredRecent.length}笔)</span>
+              <span aria-hidden="true">×</span>
+              <span className="sr-only">Clear alert filter</span>
+            </button>
+          )}
+          {activeCategory && !activeAlertFilter && activityView === 'recent' && <button type="button" className="cockpit-filter-pill" onClick={() => setActiveCategory(null)}><span>{activeCategory}</span><span aria-hidden="true">×</span><span className="sr-only">Clear category filter</span></button>}
           {activityView === 'calendar' ? (
             <div className="cockpit-calendar"><ClaimsCalendar transactions={transactions} /></div>
           ) : isLoading ? (
@@ -483,7 +681,7 @@ export function CashflowCockpit() {
 
         <section className="cockpit-area-advisor" aria-labelledby="advisor-title">
           <div className="cockpit-section-heading cockpit-secondary-heading"><div><p className="cockpit-eyebrow">PLANNING</p><h2 id="advisor-title">Income allocation</h2></div><Wallet size={15} aria-hidden="true" /></div>
-          <IncomeAdvisor liveIncome={totals.income} liveExpense={totals.spending} transactions={visibleTransactions} monthLabel={monthName(selectedMonth)} />
+          <IncomeAdvisor liveIncome={totals.income} liveExpense={totals.spending} transactions={allLedgerTransactions.length > 0 ? allLedgerTransactions : transactions} monthLabel={monthName(selectedMonth)} />
         </section>
       </main>
       <footer className="cockpit-footer"><span>Kinova overview · {monthName(selectedMonth)}</span><span>Amounts shown in MYR</span></footer>

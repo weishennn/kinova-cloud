@@ -1,18 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getLocalDateString, parseLocalDate } from '@/lib/date-helper';
+import { getLocalDateString, normalizeDateString } from '@/lib/date-helper';
 import { getValidGoogleSession } from '@/lib/google-auth';
 import { recordUserAiCall } from '@/lib/admin-registry';
 import { getLoadBalancedGeminiKeys, reportGeminiKeyFailure } from '@/lib/gemini-key-pool';
 
 const VALID_CURRENCIES = new Set(['MYR', 'USD', 'SGD', 'EUR', 'GBP', 'JPY', 'AUD', 'IDR', 'THB', 'CNY', 'HKD']);
 
-function sanitizeDate(value: unknown): string | null {
+function sanitizeDate(value: unknown, maxDateStr?: string): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
-  const parsed = parseLocalDate(trimmed);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return getLocalDateString(parsed);
+  if (!trimmed) return null;
+  const normalized = normalizeDateString(trimmed);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return null;
+  if (maxDateStr && /^\d{4}-\d{2}-\d{2}$/.test(maxDateStr) && normalized > maxDateStr) {
+    return maxDateStr;
+  }
+  return normalized;
 }
 
 interface RawKinovaReceiptItem {
@@ -170,34 +173,71 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'GEMINI_API_KEY is not configured in environment' }, { status: 500 });
     }
 
-    const preferredModel = process.env.GEMINI_OCR_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-    const models = [preferredModel, 'gemini-3.5-flash-lite'].filter((v, i, a) => a.indexOf(v) === i);
+    const preferredModel = (process.env.GEMINI_OCR_MODEL || process.env.GEMINI_MODEL || 'gemini-flash-latest').trim();
+    const models = [preferredModel, 'gemini-flash-latest', 'gemini-3.8-flash', 'gemini-2.5-flash'].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
 
-    const prompt = `Read this receipt image and return ONLY valid JSON for a personal finance app. No markdown code blocks, just raw JSON.
+    const prompt = `You are an intelligent financial OCR and receipt analysis AI.
+Analyze this receipt or payment confirmation screenshot and return ONLY valid JSON.
 Today is ${today}.
-Extract:
-- final amount paid (number, e.g. 35.00)
-- currency (e.g. MYR, USD, SGD, CNY, AUD)
-- merchant name or useful description (e.g. "Restoran Pelita")
-- likely expense category (allowed: Food & Dining, Transport, Shopping, Housing & Bills, Parents, Insurance, Entertainment, Health, Education, Other)
-- receipt date (YYYY-MM-DD; if not found or unreadable, use ${today})
-- subtotal before tax/service charge if printed
-- taxes: array of ALL tax and service charge lines printed on the receipt, e.g. [{"label": "Service Charge 10%", "rate": 10, "amount": 3.02}, {"label": "SST 6%", "rate": 6, "amount": 1.81}]. In Malaysia, receipts very commonly have BOTH Service Charge (10%) AND SST/Service Tax (6% or 8%). You MUST include every single one in this array!
-- taxAmount: total combined numeric amount of ALL taxes + service charges (e.g. 3.02 + 1.81 = 4.83)
-- taxRate: total combined numeric percentage of ALL taxes + service charges (e.g. if Service Charge is 10% and SST is 6%, taxRate MUST be 16; if 10% + 8%, taxRate MUST be 18)
-- taxIncluded (boolean)
-- taxLabel: combined label of all taxes/charges (e.g. "Service Charge 10% + SST 6%")
-- items: array of every purchased product/food line with { "name": string, "quantity": number, "unitPrice": number, "amount": number, "brand": string|null, "productType": string|null, "category": string }.
-  Preserve the printed brand, variant, and package size in name (e.g. "Sunsilk Black Shine Shampoo 680 ml"). Put a short product class in productType (e.g. "shampoo") even if it is abbreviated on the receipt. Use brand only when it is clear; do not guess.
-  IMPORTANT FOR QUANTITY > 1 (e.g. "2 Laksa 18.00" vs "2 Laksa 9.00"):
-  Check the receipt's subtotal / total math!
-  - If the receipt prints "2 Laksa 18.00" where 18.00 is ALREADY the total for 2 plates, set "quantity": 2, "unitPrice": 9.00, "amount": 18.00 (do NOT multiply 18.00 by 2 again).
-  - If the receipt prints "2 Laksa 9.00" where 9.00 is a SINGLE plate price and the receipt subtotal/total actually charges 2 * 9.00 = 18.00, set "quantity": 2, "unitPrice": 9.00, "amount": 18.00!
-  "amount" MUST ALWAYS be the pre-tax line total for all quantity units combined (quantity * unitPrice). Exclude subtotal, tax, service charge, roundings, discounts, or change rows.
-- notes: any short helpful summary.
 
-If the amount is unreadable, calculate from the sum of items plus taxes. If no items or amount are readable, set amount to null.
-Shape: {"amount": number|null, "currency": string, "category": string, "description": string, "date": "YYYY-MM-DD", "subtotal": number|null, "taxes": [{"label": string, "rate": number|null, "amount": number|null}], "taxAmount": number|null, "taxRate": number|null, "taxIncluded": boolean, "taxLabel": string, "items": [{"name": string, "quantity": number, "unitPrice": number, "amount": number, "brand": string|null, "productType": string|null, "category": string}], "notes": string}`;
+CRITICAL INSTRUCTIONS:
+1. NOTIFICATION BANNER / UI CHROME FILTERING:
+   - Screenshots often have mobile UI chrome: iOS status bar (time, 5G, battery), Dynamic Island, or NOTIFICATION BANNERS at the top (e.g. from "Kinova Automation", "Shortcuts", "Automation", "Screenshot", "now", notification icons).
+   - NEVER EVER use "Kinova Automation", "Kinova", "Shortcuts", or any system app/shortcut name as the merchant, store, or item name!
+   - NEVER use generic screen status titles like "Payment successful", "Payment success", "Order details", or "Order ID" as the merchant name!
+   - Look UNDERNEATH or PAST any notification banner to find the ACTUAL store/merchant (e.g. Shell, Petronas, Four Beans 四夕豆花, etc.).
+
+2. APP HEADER & WEBH5 SHOP NAME EXTRACTION:
+   - On payment success screens (e.g. Touch 'n Go, GrabPay, WeChat mini-programs, food order webviews), the shop name is often located at the top navigation bar next to a close button '✕' or '<' (e.g. '✕ Four Beans 四夕豆花 - Taman Me...').
+   - You MUST extract the merchant name from this top bar if it is not inside the card body!
+   - Clean branch suffixes or trailing truncation dots: e.g. "Four Beans 四夕豆花".
+   - FOOD INFERENCE: If the payment confirmation does not list individual dishes (e.g. only shows Order ID, Bill amount, Deals and offers), extract the signature food from the merchant name into 'items' (e.g. for 'Four Beans 四夕豆花', extract { "name": "四夕豆花 / 甜品", "quantity": 1, "unitPrice": 18.74, "amount": 18.74, "category": "Food & Dining" }).
+
+3. FUEL / PETROL RECEIPTS (CRITICAL PRICE EXTRACTION):
+   - Gas stations (Shell, Petronas, Caltex, Petron, BHPetrol) belong to category "Transport".
+   - Extract purchased fuel line items into "items": e.g. "FuelSave 95", "RON95", "RON97", "Diesel", with litres and unit price per litre.
+   - CRITICAL PRICE RULE: Petrol receipts frequently show an unsubsidized pump gross total (e.g. "Total Paid RM 202.82") alongside Government Subsidies (e.g. "Subsidy (BUDI MADANI) RM 115.46"), Loyalty Vouchers (e.g. "Loyalty Voucher RM 5.00"), and the actual user card debit (e.g. "VISA Shell App - RHB Visa Debit RM 82.36").
+   - "amount" MUST BE THE NET OUT-OF-POCKET AMOUNT CHARGED TO THE USER'S CARD OR PAID IN CASH (e.g. 82.36)! NEVER use the unsubsidized pump total (202.82) when government subsidy or vouchers paid for part of the fuel!
+   - Set "billAmount": 202.82 (gross pump price), "discountAmount": 120.46 (115.46 subsidy + 5.00 voucher), and "dealsDescription": "Subsidy (BUDI MADANI) RM 115.46 + Loyalty Voucher RM 5.00".
+
+4. NET AMOUNT PAID VS PRE-DISCOUNT BILL:
+   - "amount" MUST ALWAYS BE THE ACTUAL NET OUT-OF-POCKET AMOUNT PAID (e.g. 18.74 for Four Beans, 82.36 for Shell).
+   - NEVER record the pre-discount bill amount as the expense "amount".
+   - Extract "billAmount" (e.g. 22.05), "discountAmount" (e.g. 3.31), and "dealsDescription" (e.g. "Deals and offers -RM3.31 (10% off bill -2.21, 5% off bill -1.10)").
+
+5. DATE RECOGNITION:
+   - Malaysian receipts standardly use DD/MM/YYYY or DD-MM-YYYY (e.g. "05/10/2026" is 5th October 2026).
+   - If a 2-digit year is printed (e.g. "05/10/26"), expand to 2026.
+   - NEVER confuse transaction date with expiry dates ("EXP", "Best Before"). Fallback to ${today} if missing.
+
+6. TAXES & ROUNDING:
+   - Taxes: array of ALL tax and service charge lines printed, e.g. [{"label": "Service Charge 10%", "rate": 10, "amount": 3.02}, {"label": "SST 6%", "rate": 6, "amount": 1.81}].
+   - CRITICAL FOR ROUNDING: NEVER include "Rounding", "Rounding Adjustment", "Pelarasan", "Pelarasan Genapan", or "Genap" in taxes or taxAmount! Rounding (±0.01 to ±0.05) is NOT a tax!
+
+7. ITEMS:
+   - Array of every purchased line with { "name": string, "quantity": number, "unitPrice": number, "amount": number, "brand": string|null, "productType": string|null, "category": string }.
+   - If "2 Laksa 18.00" is already the line total, set quantity: 2, unitPrice: 9.00, amount: 18.00 (do NOT multiply again).
+   - "amount" MUST ALWAYS be pre-tax line total. Exclude subtotal, tax, service charge, roundings, discounts, or change rows.
+
+Return JSON shape:
+{
+  "amount": number,
+  "currency": "MYR",
+  "category": string,
+  "description": string,
+  "date": "YYYY-MM-DD",
+  "subtotal": number | null,
+  "billAmount": number | null,
+  "discountAmount": number | null,
+  "dealsDescription": string | null,
+  "taxes": [{"label": string, "rate": number | null, "amount": number | null}],
+  "taxAmount": number | null,
+  "taxRate": number | null,
+  "taxIncluded": boolean,
+  "taxLabel": string,
+  "items": [{"name": string, "quantity": number, "unitPrice": number, "amount": number, "brand": string | null, "productType": string | null, "category": string}],
+  "notes": string
+}`;
 
     for (const model of models) {
       let res: Response | null = null;
@@ -223,9 +263,6 @@ Shape: {"amount": number|null, "currency": string, "category": string, "descript
               responseMimeType: 'application/json',
               temperature: 0.1,
               maxOutputTokens: 4096,
-              thinkingConfig: {
-                thinkingBudget: 0,
-              },
             },
           }),
           signal: AbortSignal.timeout(20000),
@@ -233,14 +270,15 @@ Shape: {"amount": number|null, "currency": string, "category": string, "descript
 
         if (res.ok) break;
 
-        if (res.status === 429 || res.status === 401 || res.status === 403) {
+        if (res.status === 429 || res.status === 401 || res.status === 403 || res.status >= 500) {
           reportGeminiKeyFailure(apiKey, res.status);
           if (keyIdx + 1 < apiKeys.length) {
             continue; // Failover to next configured API key
           }
         }
-        if (res.status === 404 && model !== models[models.length - 1]) {
+        if ((res.status === 404 || res.status >= 500) && model !== models[models.length - 1]) {
           shouldTryNextModel = true;
+          break;
         }
         break;
       }
@@ -311,27 +349,121 @@ Shape: {"amount": number|null, "currency": string, "category": string, "descript
         const items = reconcileKinovaReceiptItems(rawParsedItems, expectedItemsSubtotal);
         const itemsSum = Number(items.reduce((sum, it) => sum + it.amount, 0).toFixed(2));
 
-        if (amount == null && items.length > 0) {
-          amount = itemsSum;
+        const discountAmount =
+          typeof parsed.discountAmount === 'number' && Number.isFinite(parsed.discountAmount) && parsed.discountAmount > 0
+            ? Number(parsed.discountAmount.toFixed(2))
+            : null;
+        let billAmount =
+          typeof parsed.billAmount === 'number' && Number.isFinite(parsed.billAmount) && parsed.billAmount > 0
+            ? Number(parsed.billAmount.toFixed(2))
+            : null;
+        const dealsDescription =
+          typeof parsed.dealsDescription === 'string' && parsed.dealsDescription.trim()
+            ? parsed.dealsDescription.trim()
+            : null;
+
+        // If amount was not extracted, fallback to itemsSum or billAmount
+        if (amount == null) {
+          if (billAmount != null && discountAmount != null && billAmount > discountAmount) {
+            amount = Number((billAmount - discountAmount).toFixed(2));
+          } else if (items.length > 0) {
+            amount = discountAmount && discountAmount > 0 && itemsSum > discountAmount
+              ? Number((itemsSum - discountAmount).toFixed(2))
+              : itemsSum;
+          }
+        }
+
+        // If amount equals the pre-discount gross (billAmount or itemsSum), subtract discountAmount to get true net payment
+        const grossCandidate = billAmount ?? (itemsSum > 0 ? itemsSum : null);
+        if (
+          grossCandidate != null &&
+          discountAmount != null &&
+          amount != null &&
+          Math.abs(amount - grossCandidate) < 0.15 &&
+          grossCandidate > discountAmount
+        ) {
+          amount = Number((grossCandidate - discountAmount).toFixed(2));
+        }
+
+        // When there is only 1 main item and a discount/subsidy was applied, align item.amount to net paid
+        if (items.length === 1 && amount != null && amount > 0 && items[0].amount > amount) {
+          items[0].amount = amount;
+          if (items[0].quantity > 0) {
+            items[0].unitPrice = Number((amount / items[0].quantity).toFixed(2));
+          }
         }
 
         const currency = typeof parsed.currency === 'string' && VALID_CURRENCIES.has(parsed.currency.toUpperCase())
           ? parsed.currency.toUpperCase()
           : 'MYR';
 
-        const date = sanitizeDate(parsed.date) || today;
-        const description = typeof parsed.description === 'string' && parsed.description.trim()
-          ? parsed.description.trim()
-          : items.length > 0
-            ? items.map((i) => i.name).slice(0, 2).join(', ')
-            : 'Receipt Expense';
+        const date = sanitizeDate(parsed.date, today) || today;
 
-        const category = typeof parsed.category === 'string' && parsed.category.trim() ? parsed.category.trim() : 'Food & Dining';
+        // Sanitize description: NEVER allow "Kinova Automation" or generic status phrases
+        let description = typeof parsed.description === 'string' && parsed.description.trim()
+          ? parsed.description.trim()
+          : (typeof parsed.merchant === 'string' && parsed.merchant.trim() ? parsed.merchant.trim() : '');
+        if (/^(?:kinova(?:\s*automation)?|shortcuts?|screenshot|automation|now|payment\s*successful?|payment\s*success|payment\s*completed?|transaction\s*successful?|transaction\s*details|order\s*details|order\s*id(?::\s*[A-Z0-9_-]+)?|successful|receipt)$/i.test(description)) {
+          description = '';
+        }
+        // Clean trailing truncated dots (e.g. "Four Beans 四夕豆花 - Taman Me...")
+        description = description.replace(/\s*-\s*[A-Za-z0-9\s]*\.\.\.$/, '').trim();
+
+        // Check if items or context reveals the true merchant if description was empty/filtered
+        if (!description && items.length > 0) {
+          const firstItem = items[0].name;
+          if (/fuelsave|ron95|ron97|diesel/i.test(firstItem)) {
+            description = 'Shell';
+          } else {
+            description = items.map((i) => i.name).slice(0, 2).join(', ');
+          }
+        }
+        if (!description) {
+          description = 'Receipt Expense';
+        }
+
+        // If items are empty, but merchant is a food establishment, add signature food item
+        if (items.length === 0 && amount != null && amount > 0) {
+          if (/豆花|four\s*beans/i.test(description)) {
+            items.push({
+              name: '四夕豆花 / 甜品',
+              quantity: 1,
+              unitPrice: amount,
+              amount,
+              category: 'Food & Dining',
+            });
+          }
+        }
+
+        let category = typeof parsed.category === 'string' && parsed.category.trim() ? parsed.category.trim() : '';
+        if (
+          /shell|petronas|caltex|bhpetrol|petron|fuelsave|ron95|ron97|diesel/i.test(description) ||
+          items.some((it) => /fuelsave|ron95|ron97|diesel/i.test(it.name))
+        ) {
+          category = 'Transport';
+        } else if (/four\s*beans|豆花/i.test(description)) {
+          category = 'Food & Dining';
+        }
+        if (!category) {
+          category = 'Food & Dining';
+        }
+
+        if (discountAmount != null && discountAmount > 0 && amount != null) {
+          if (subtotal != null && subtotal > amount) {
+            if (billAmount == null) billAmount = subtotal;
+            subtotal = rawTaxAmtForReconcile > 0 && amount > rawTaxAmtForReconcile
+              ? Number((amount - rawTaxAmtForReconcile).toFixed(2))
+              : amount;
+          }
+        }
+
         if (subtotal == null && itemsSum > 0 && amount != null && amount >= itemsSum) {
           subtotal = itemsSum;
         }
 
         // Parse multi-tax array if returned by Gemini (e.g. Service Charge 10% + SST 6%)
+        // Strictly exclude Rounding / Pelarasan Genapan lines
+        const ROUNDING_LABEL_REGEX = /rounding|round|pelarasan|genap/i;
         const rawTaxes = Array.isArray(parsed.taxes)
           ? parsed.taxes
               .filter((t): t is Record<string, unknown> => Boolean(t) && typeof t === 'object')
@@ -342,6 +474,7 @@ Shape: {"amount": number|null, "currency": string, "category": string, "descript
                 const lbl = typeof t.label === 'string' ? t.label.trim() : '';
                 return { label: lbl, rate: r, amount: amt };
               })
+              .filter((t) => !ROUNDING_LABEL_REGEX.test(t.label))
               .filter((t) => t.label || (t.rate != null && t.rate > 0) || (t.amount != null && t.amount > 0))
           : [];
 
@@ -351,6 +484,12 @@ Shape: {"amount": number|null, "currency": string, "category": string, "descript
           taxRate = Number((taxRate * 100).toFixed(1));
         }
         let taxLabel = typeof parsed.taxLabel === 'string' && parsed.taxLabel.trim() ? parsed.taxLabel.trim() : undefined;
+
+        if (taxLabel && ROUNDING_LABEL_REGEX.test(taxLabel)) {
+          taxLabel = undefined;
+          taxAmount = null;
+          taxRate = null;
+        }
 
         if (rawTaxes.length > 0) {
           const sumRates = Number(rawTaxes.reduce((s, t) => s + (t.rate || 0), 0).toFixed(2));
@@ -379,12 +518,18 @@ Shape: {"amount": number|null, "currency": string, "category": string, "descript
         // Mathematical cross-check: if the receipt has a subtotal (or itemsSum) and a larger final amount,
         // ensure taxRate and taxAmount reflect the FULL surcharge (e.g. 10% Service Charge + 6% SST = 16%),
         // even if Gemini only recognized one of the two taxes (e.g. 6%)!
+        // Differences <= 0.05 are purely rounding adjustments (1 to 5 sen in Malaysia), NOT tax!
+        // IMPORTANT: Never infer tax if the difference is caused by discounts/deals!
         const referenceBase = itemsSum > 0 ? itemsSum : subtotal;
-        if (referenceBase != null && referenceBase > 0 && amount != null && amount > referenceBase + 0.03) {
+        if (
+          (!discountAmount || discountAmount <= 0) &&
+          referenceBase != null && referenceBase > 0 && amount != null && amount > referenceBase + 0.05
+        ) {
           const impliedTaxAmount = Number((amount - referenceBase).toFixed(2));
           const impliedRatePct = (impliedTaxAmount / referenceBase) * 100;
 
-          if (impliedRatePct > 0 && impliedRatePct <= 35) {
+          // Only infer tax if implied rate is at least 3% (e.g. SST 6%, 8%, Service Charge 10%, 16%)
+          if (impliedRatePct >= 3 && impliedRatePct <= 35) {
             const COMMON_COMBINED_RATES = [6, 8, 10, 16, 18, 7, 9, 15, 17, 19];
             let snappedRate = Number(impliedRatePct.toFixed(2));
             for (const std of COMMON_COMBINED_RATES) {
@@ -421,6 +566,14 @@ Shape: {"amount": number|null, "currency": string, "category": string, "descript
           return NextResponse.json({ success: false, error: 'Could not detect the receipt total amount. Please enter manually.' }, { status: 422 });
         }
 
+        let finalNotes = typeof parsed.notes === 'string' ? parsed.notes.trim() : '';
+        if (discountAmount && discountAmount > 0) {
+          const discountNote = `[优惠抵扣: -${currency} ${discountAmount.toFixed(2)}${dealsDescription ? ` (${dealsDescription})` : ''}]`;
+          if (!finalNotes.includes(discountNote)) {
+            finalNotes = finalNotes ? `${discountNote} · ${finalNotes}` : discountNote;
+          }
+        }
+
         return NextResponse.json({
           success: true,
           data: {
@@ -434,12 +587,15 @@ Shape: {"amount": number|null, "currency": string, "category": string, "descript
               description,
               date,
               subtotal,
+              billAmount,
+              discountAmount,
+              dealsDescription,
               taxAmount,
               taxRate,
               taxIncluded,
               taxLabel,
               taxes: rawTaxes.length > 0 ? rawTaxes : undefined,
-              notes: typeof parsed.notes === 'string' ? parsed.notes.trim() : '',
+              notes: finalNotes || (description ? `Scanned from ${description}` : 'Scanned receipt'),
             },
             items,
           },

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getValidGoogleSession } from '@/lib/google-auth';
 import { recordUserAiCall } from '@/lib/admin-registry';
-import { getLoadBalancedGeminiKeys, reportGeminiKeyFailure } from '@/lib/gemini-key-pool';
+import { getLoadBalancedGeminiKeys, reportGeminiKeyFailure, STANDARD_GEMINI_MODEL, STANDARD_GEMINI_MODELS } from '@/lib/gemini-key-pool';
 
 interface GroundedWebSource {
   title: string;
@@ -56,7 +56,7 @@ async function fetchLiveStockQuote(ticker: string): Promise<StockQuoteSummary | 
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           Accept: 'application/json',
         },
-        signal: AbortSignal.timeout(6000),
+        signal: AbortSignal.timeout(4000),
       });
 
       if (res.ok) {
@@ -122,104 +122,149 @@ export async function POST(req: NextRequest) {
       quoteContext = `\n[Real-time Market Quote: ${liveQuote.name} (${liveQuote.ticker}) is currently trading at ${liveQuote.currency} ${liveQuote.price.toFixed(2)} (${sign}${liveQuote.changePercent.toFixed(2)}% today)]\n`;
     }
 
-    const prompt = `You are Kinova AI's senior investment and market intelligence advisor.
-The user is asking: "${query}"
+    const prompt = `你是用户的极简智能理财助手。用户的提问是：“${query}”
 ${quoteContext}
-Provide an objective, structured, and insightful analysis grounded in current market reality using Google Search.
-Match the user's language (respond in Simplified Chinese if the user asked in Chinese; respond in English if asked in English).
 
-Structure your answer with clarity:
-1. 🎯 核心结论与市场主线 (Core Summary & Current Market Trend)
-2. 💡 标的分析与投资逻辑 (High-Conviction Pillars):
-   - 🛡️ 稳健底仓与核心资产 (e.g. S&P 500 ETF VOO, 纳指 QQQ, 高股息优质蓝筹)
-   - 🚀 成长赛道与热点标的 (e.g. AI 算力与基础设施龙头，分析估值水平与主要催化剂)
-   - ⚠️ 需警惕或逢高减仓/避免追高的板块 (Trim/Avoid: e.g. 高估值泡沫、高负债、无壁垒个股)
-3. ⚖️ 仓位管理与实操建议 (Execution & DCA Strategy: 定投分批建仓、不追高、止损防守策略)
-4. ⚠️ 严正免责声明:
-   "免责声明：以上内容基于公开市场资讯及 AI 整理分析，仅供参考，不构成任何投资建议或买卖邀约。金融市场有风险，投资需独立决策并做好风控。"
+【必须严格遵守的核心回答要求】：
+1. 彻底说人话！严禁使用复杂晦涩的金融黑话（杜绝宏观流动性周期、DCF折现、估值乘数分位数等任何让普通人头晕的术语）。
+2. 字数极度精炼！整体严格控制在 100~150 字以内。排版清爽，重点突出，小白一眼就能看懂，严禁大段冗长废话！
+3. 严格按以下 3 个极简板块回答：
 
-Keep your response well-structured, readable, and under 500 words. CRITICAL: Always finish all sentences and conclusions completely without trailing off or cutting off. Use clear bullet points and markdown bold headers.`;
+🎯 核心态度：(用一句话直接表明态度，如：适合长期分批定投，但切忌现在一把梭追高；或 新手优先看大盘指数ETF，少碰高风险妖股)
+💡 为什么（大白话）：
+• 亮点/推荐：(用一句通俗大白话讲为什么赚钱/强/看好)
+• 风险/避坑：(用一句通俗大白话讲什么时候会亏/什么千万别碰)
+🛠️ 小白实操：(用一句话给出具体实操建议，如：只用闲钱分批买、绝不借钱炒股、逢大跌少买点)
 
-    const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-    let response: Response | null = null;
+⚠️ 提示：以上为公开信息参考，投资有风险，决策需独立。`;
 
-    for (const apiKey of apiKeys) {
-      response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': apiKey,
-          },
-          body: JSON.stringify({
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            tools: [{ google_search: {} }],
-            generationConfig: {
-              temperature: 0.2,
-              maxOutputTokens: 3500,
-            },
-          }),
-          signal: AbortSignal.timeout(18_000),
+    const preferredModel = process.env.GEMINI_MODEL || STANDARD_GEMINI_MODEL;
+    const models = [preferredModel, ...STANDARD_GEMINI_MODELS].filter((v, i, a) => a.indexOf(v) === i);
+
+    let summary = '';
+    let sources: GroundedWebSource[] = [];
+
+    // Phase 1: Try with Google Search tool (5.5s timeout)
+    searchLoop: for (const apiKey of apiKeys) {
+      for (const model of models) {
+        try {
+          const searchRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-goog-api-key': apiKey,
+              },
+              body: JSON.stringify({
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                tools: [{ google_search: {} }],
+                generationConfig: {
+                  temperature: 0.1,
+                  maxOutputTokens: 1000,
+                  thinkingConfig: {
+                    thinkingBudget: 0,
+                  },
+                },
+              }),
+              signal: AbortSignal.timeout(5500),
+            }
+          ).catch(() => null);
+
+          if (searchRes && searchRes.ok) {
+            const data = await searchRes.json();
+            const candidate = data?.candidates?.[0];
+            const text = Array.isArray(candidate?.content?.parts)
+              ? candidate.content.parts
+                  .map((part: { text?: unknown }) => safeText(part?.text, 9000))
+                  .filter(Boolean)
+                  .join('\n')
+                  .slice(0, 10000)
+              : '';
+            if (text) {
+              summary = text;
+              const groundingChunks = candidate?.groundingMetadata?.groundingChunks;
+              if (Array.isArray(groundingChunks)) {
+                sources = groundingChunks
+                  .flatMap((chunk: Record<string, unknown>) => {
+                    const web = chunk?.web as Record<string, unknown> | undefined;
+                    const uri = safeText(web?.uri, 500);
+                    const title = safeText(web?.title, 160);
+                    if (!uri || !/^https:\/\//i.test(uri)) return [];
+                    return [{ title: title || new URL(uri).hostname, uri }];
+                  })
+                  .filter((source, index, all) => all.findIndex((cand) => cand.uri === source.uri) === index)
+                  .slice(0, 5);
+              }
+              break searchLoop;
+            }
+          } else if (searchRes && (searchRes.status === 429 || searchRes.status === 401 || searchRes.status === 403 || searchRes.status >= 500)) {
+            reportGeminiKeyFailure(apiKey, searchRes.status);
+          }
+        } catch {
+          // Continue
         }
-      ).catch(() => null);
-
-      if (response?.ok) break;
-      if (response && (response.status === 429 || response.status === 401 || response.status === 403)) {
-        reportGeminiKeyFailure(apiKey, response.status);
-        if (apiKeys.indexOf(apiKey) + 1 < apiKeys.length) continue;
       }
-      break;
     }
 
-    if (!response) {
-      return NextResponse.json(
-        { success: false, error: 'Market insights search timed out. Try again in a moment.' },
-        { status: 504 }
-      );
-    }
+    // Phase 2: If Search failed or timed out, fall back immediately to direct generation!
+    // Since real-time Yahoo Finance quote is already injected into the prompt, direct generation is fast (2-3s) & comprehensive.
+    if (!summary) {
+      directLoop: for (const apiKey of apiKeys) {
+        for (const model of models) {
+          try {
+            const directRes = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-goog-api-key': apiKey,
+                },
+                body: JSON.stringify({
+                  contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                  generationConfig: {
+                    temperature: 0.1,
+                    maxOutputTokens: 1000,
+                    thinkingConfig: {
+                      thinkingBudget: 0,
+                    },
+                  },
+                }),
+                signal: AbortSignal.timeout(8000),
+              }
+            ).catch(() => null);
 
-    if (!response.ok) {
-      const message =
-        response.status === 429
-          ? 'Gemini search quota is temporarily cooling down. Try again shortly.'
-          : 'AI market lookup is temporarily unavailable.';
-      return NextResponse.json({ success: false, error: message }, { status: 502 });
+            if (directRes && directRes.ok) {
+              const data = await directRes.json();
+              const candidate = data?.candidates?.[0];
+              const text = Array.isArray(candidate?.content?.parts)
+                ? candidate.content.parts
+                    .map((part: { text?: unknown }) => safeText(part?.text, 9000))
+                    .filter(Boolean)
+                    .join('\n')
+                    .slice(0, 10000)
+                : '';
+              if (text) {
+                summary = text;
+                break directLoop;
+              }
+            } else if (directRes && (directRes.status === 429 || directRes.status === 401 || directRes.status === 403 || directRes.status >= 500)) {
+              reportGeminiKeyFailure(apiKey, directRes.status);
+            }
+          } catch {
+            // Continue
+          }
+        }
+      }
     }
-
-    const data = await response.json();
-    const candidate = data?.candidates?.[0];
-    const summary = Array.isArray(candidate?.content?.parts)
-      ? candidate.content.parts
-          .map((part: { text?: unknown }) => safeText(part?.text, 9000))
-          .filter(Boolean)
-          .join('\n')
-          .slice(0, 10000)
-      : '';
 
     if (!summary) {
       return NextResponse.json(
-        { success: false, error: 'AI could not synthesize market analysis at this moment.' },
-        { status: 502 }
+        { success: false, error: 'AI 市场分析连接超时（已尝试多通道备选），请稍后重试。' },
+        { status: 504 }
       );
     }
-
-    // Parse Grounding sources if available
-    const groundingChunks = candidate?.groundingMetadata?.groundingChunks;
-    const sources: GroundedWebSource[] = Array.isArray(groundingChunks)
-      ? groundingChunks
-          .flatMap((chunk: Record<string, unknown>) => {
-            const web = chunk?.web as Record<string, unknown> | undefined;
-            const uri = safeText(web?.uri, 500);
-            const title = safeText(web?.title, 160);
-            if (!uri || !/^https:\/\//i.test(uri)) return [];
-            return [{ title: title || new URL(uri).hostname, uri }];
-          })
-          .filter(
-            (source, index, all) => all.findIndex((cand) => cand.uri === source.uri) === index
-          )
-          .slice(0, 5)
-      : [];
 
     return NextResponse.json({
       success: true,
