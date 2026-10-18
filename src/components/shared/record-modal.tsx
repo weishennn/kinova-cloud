@@ -1530,7 +1530,10 @@ export function RecordPaymentModal() {
                       💱 币种符号存在歧义或未明确提供，请点击确认实际币种：
                     </div>
                     <div className="flex flex-wrap gap-1.5">
-                      {Array.from(new Set([...(shortcutDraft.candidateCurrencies || []), 'MYR', 'SGD', 'USD', 'JPY', 'CNY'])).map((code) => (
+                      {Array.from(new Set([
+                        ...(Array.isArray(shortcutDraft.candidateCurrencies) ? shortcutDraft.candidateCurrencies : []),
+                        'MYR', 'SGD', 'USD', 'JPY', 'CNY',
+                      ])).map((code) => (
                         <button
                           key={code}
                           type="button"

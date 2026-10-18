@@ -157,11 +157,12 @@ export function matchMerchantCategoryRule(
   const text = String(merchantOrDesc || '').trim();
   if (!text || text.length < 2) return null;
 
-  const rules = rulesOverride || getMerchantCategoryRules();
-  if (!rules || rules.length === 0) return null;
+  const rawRules = rulesOverride || getMerchantCategoryRules();
+  const rules = Array.isArray(rawRules) ? rawRules : [];
+  if (rules.length === 0) return null;
 
   // Sort longest pattern first so specific matches take precedence over broad ones
-  const sorted = [...rules].sort(
+  const sorted = rules.slice().sort(
     (a, b) => b.merchantPattern.length - a.merchantPattern.length
   );
 

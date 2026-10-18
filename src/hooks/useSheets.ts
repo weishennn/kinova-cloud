@@ -31,8 +31,13 @@ export async function getUnifiedMonthList(): Promise<string[]> {
 export function useMonthList() {
   const initial = getSwrCachedEntry<{ success: boolean; data: string[] }>('getMonthList', {});
   const localMonths = collectLocallyKnownMonths();
-  const initialMonths = initial?.data?.data || localMonths.length > 0
-    ? Array.from(new Set([...(initial?.data?.data || []), ...localMonths])).sort((a, b) => b.localeCompare(a))
+  const rawMonths: string[] = Array.isArray(initial?.data)
+    ? initial.data
+    : Array.isArray(initial?.data?.data)
+      ? initial.data.data
+      : [];
+  const initialMonths = rawMonths.length > 0 || localMonths.length > 0
+    ? Array.from(new Set([...rawMonths, ...localMonths])).sort((a, b) => b.localeCompare(a))
     : undefined;
   return useQuery({
     queryKey: ['months'],
@@ -346,27 +351,27 @@ export function applyOptimisticAddToQueryCache(
     });
   }
 
-  const prependRow = (old: { headers?: string[]; rows?: Record<string, unknown>[] } | undefined) => {
-    if (!old || !Array.isArray(old.rows)) {
-      return { headers: [], rows: [normalizedRow] };
+  const prependRow = (old: unknown) => {
+    if (!old || typeof old !== 'object') return old;
+    const sheetData = old as { headers?: string[]; rows?: Record<string, unknown>[] };
+    if (!Array.isArray(sheetData.rows)) {
+      if (Array.isArray(sheetData.headers)) {
+        return { ...sheetData, rows: [normalizedRow] };
+      }
+      return old;
     }
-    const filtered = old.rows.filter((r) => String(r.Id || r.id || '') !== rowId);
-    return { ...old, rows: [normalizedRow, ...filtered] };
+    const filtered = sheetData.rows.filter((r) => String(r?.Id || r?.id || '') !== rowId);
+    return { ...sheetData, rows: [normalizedRow, ...filtered] };
   };
 
   if (isTxSheet) {
-    queryClient.setQueriesData({ queryKey: ['sheet', 'Transactions'] }, (old: unknown) =>
-      prependRow(old as { headers?: string[]; rows?: Record<string, unknown>[] } | undefined)
-    );
+    queryClient.setQueriesData({ queryKey: ['sheet', 'Transactions'] }, prependRow);
     if (targetMonth) {
-      queryClient.setQueriesData({ queryKey: ['sheet', targetMonth] }, (old: unknown) =>
-        prependRow(old as { headers?: string[]; rows?: Record<string, unknown>[] } | undefined)
-      );
+      queryClient.setQueriesData({ queryKey: ['sheet', targetMonth] }, prependRow);
     }
+    void queryClient.invalidateQueries({ queryKey: ['receipt-price-history'] });
   } else {
-    queryClient.setQueriesData({ queryKey: ['sheet', sheetName] }, (old: unknown) =>
-      prependRow(old as { headers?: string[]; rows?: Record<string, unknown>[] } | undefined)
-    );
+    queryClient.setQueriesData({ queryKey: ['sheet', sheetName] }, prependRow);
   }
 }
 

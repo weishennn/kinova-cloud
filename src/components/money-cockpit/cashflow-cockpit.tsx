@@ -146,11 +146,14 @@ export function CashflowCockpit() {
   const { months, orderedYears } = useMemo(() => {
     const currentYear = Number(currentYearStr);
     const years = new Set<number>([currentYear, currentYear - 1, currentYear + 1]);
-    sheetMonths.forEach((m) => {
-      if (/^\d{4}-\d{2}$/.test(m)) years.add(Number(m.slice(0, 4)));
+    const safeSheetMonths = Array.isArray(sheetMonths) ? sheetMonths : [];
+    const safeTransactions = Array.isArray(transactions) ? transactions : [];
+
+    safeSheetMonths.forEach((m) => {
+      if (typeof m === 'string' && /^\d{4}-\d{2}$/.test(m)) years.add(Number(m.slice(0, 4)));
     });
-    transactions.forEach((transaction) => {
-      if (/^\d{4}-\d{2}/.test(transaction.date)) years.add(Number(transaction.date.slice(0, 4)));
+    safeTransactions.forEach((transaction) => {
+      if (transaction?.date && /^\d{4}-\d{2}/.test(transaction.date)) years.add(Number(transaction.date.slice(0, 4)));
     });
     if (selectedMonth.startsWith('year-')) {
       const selY = Number(selectedMonth.slice(5));
@@ -159,14 +162,14 @@ export function CashflowCockpit() {
       const selY = Number(selectedMonth.slice(0, 4));
       if (Number.isFinite(selY) && selY >= 2000 && selY <= 2100) years.add(selY);
     }
-    const values = new Set<string>([currentMonth, ...sheetMonths]);
+    const values = new Set<string>([currentMonth, ...safeSheetMonths]);
     years.forEach((yr) => {
       for (let month = 1; month <= 12; month += 1) {
         values.add(`${yr}-${String(month).padStart(2, '0')}`);
       }
     });
-    const sortedMonths = [...values].filter((value) => /^\d{4}-\d{2}$/.test(value)).sort((a, b) => b.localeCompare(a));
-    const uniqueYears = [...new Set(sortedMonths.map((m) => m.slice(0, 4)))].sort((a, b) => {
+    const sortedMonths = Array.from(values).filter((value) => /^\d{4}-\d{2}$/.test(value)).sort((a, b) => b.localeCompare(a));
+    const uniqueYears = Array.from(new Set(sortedMonths.map((m) => m.slice(0, 4)))).sort((a, b) => {
       if (a === currentYearStr) return -1;
       if (b === currentYearStr) return 1;
       return b.localeCompare(a);
@@ -197,7 +200,7 @@ export function CashflowCockpit() {
     visibleTransactions.filter((transaction) => transaction.type === 'expense').forEach((transaction) => {
       byCategory.set(transaction.category, (byCategory.get(transaction.category) || 0) + getAmountInBaseCurrency(transaction.amount, transaction.currency, transaction.baseAmount));
     });
-    return [...byCategory.entries()].map(([name, amount]) => ({ name, amount }))
+    return Array.from(byCategory.entries()).map(([name, amount]) => ({ name, amount }))
       .sort((a, b) => b.amount - a.amount);
   }, [visibleTransactions]);
 
@@ -234,7 +237,7 @@ export function CashflowCockpit() {
         (transaction) => transaction.type === 'expense' && transaction.category === activeCategory
       );
     }
-    return [...list]
+    return (Array.isArray(list) ? list.slice() : [])
       .sort((a, b) => {
         const dateA = a.date || '';
         const dateB = b.date || '';
@@ -254,7 +257,7 @@ export function CashflowCockpit() {
       group.push(transaction);
       groups.set(txDate, group);
     });
-    return [...groups.entries()].map(([date, items]) => ({ date, label: dateGroupLabel(date), items }));
+    return Array.from(groups.entries()).map(([date, items]) => ({ date, label: dateGroupLabel(date), items }));
   }, [filteredRecent]);
 
   const changePeriod = (direction: -1 | 1) => {
@@ -282,7 +285,7 @@ export function CashflowCockpit() {
     const monthKeys = periodKind === 'year'
       ? Array.from({ length: 12 }, (_, index) => `${selectedMonth.slice(5)}-${String(index + 1).padStart(2, '0')}`)
       : periodKind === 'all'
-        ? [...new Set(visibleTransactions.map((transaction) => (transaction.date || '').slice(0, 7)).filter((value) => /^\d{4}-\d{2}$/.test(value)))].sort().slice(-12)
+        ? Array.from(new Set((Array.isArray(visibleTransactions) ? visibleTransactions : []).map((transaction) => (transaction.date || '').slice(0, 7)).filter((value) => /^\d{4}-\d{2}$/.test(value)))).sort().slice(-12)
         : [];
 
     if (periodKind === 'month') {
@@ -300,7 +303,7 @@ export function CashflowCockpit() {
         if (transaction.type === 'income') bucket.income += amount;
         if (transaction.type === 'expense') bucket.expense += amount;
       });
-      return [...byPeriod.entries()].map(([date, values]) => ({
+      return Array.from(byPeriod.entries()).map(([date, values]) => ({
         label: String(Number(date.slice(8, 10))),
         ...values,
       }));
@@ -315,7 +318,7 @@ export function CashflowCockpit() {
       if (transaction.type === 'income') bucket.income += amount;
       if (transaction.type === 'expense') bucket.expense += amount;
     });
-    return [...byPeriod.entries()].map(([key, values]) => ({
+    return Array.from(byPeriod.entries()).map(([key, values]) => ({
       label: new Date(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, 1).toLocaleString('en-MY', { month: 'short' }),
       ...values,
     }));

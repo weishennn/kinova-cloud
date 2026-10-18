@@ -200,10 +200,9 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
   const { transactions = [], refetch: refetchTransactions } = useTransactions();
   const cacheScope = getActiveUserCacheScope();
 
-  // Scoped under ['sheet', 'Transactions'] so any ledger write that invalidates 'sheet'
-  // will immediately refresh receipt search history without waiting for stale cache.
+  // Scoped under dedicated queryKey so general sheet cache invalidation does not clobber array shape
   const historyQuery = useQuery({
-    queryKey: ['sheet', 'Transactions', 'receipt-price-history', cacheScope],
+    queryKey: ['receipt-price-history', cacheScope],
     queryFn: async () => {
       const result = await getUnifiedSheetData('Transactions', 'all');
       return (result.rows || []).map((row) => normalizeTransaction(row));
@@ -221,16 +220,34 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
     }
   }, [isOpen, historyQuery, refetchTransactions, queryClient]);
 
+  const historyList = useMemo<Transaction[]>(() => {
+    if (Array.isArray(historyQuery.data)) {
+      return historyQuery.data;
+    }
+    if (
+      historyQuery.data &&
+      typeof historyQuery.data === 'object' &&
+      Array.isArray((historyQuery.data as any).rows)
+    ) {
+      return (historyQuery.data as any).rows.map((row: any) => normalizeTransaction(row));
+    }
+    return [];
+  }, [historyQuery.data]);
+
+  const activeTransactions = useMemo<Transaction[]>(() => {
+    return Array.isArray(transactions) ? transactions : [];
+  }, [transactions]);
+
   const allTransactions = useMemo(() => {
     // Put current active transactions first so optimistic mutations win over older cached history
-    const combined = [...transactions, ...(historyQuery.data || [])];
+    const combined = [...activeTransactions, ...historyList];
     const seen = new Set<string>();
     return combined.filter((t) => {
-      if (!t.id || seen.has(t.id)) return false;
+      if (!t || !t.id || seen.has(t.id)) return false;
       seen.add(t.id);
       return true;
     });
-  }, [historyQuery.data, transactions]);
+  }, [activeTransactions, historyList]);
 
   // Index expense transactions for item price checks:
   // CRITICAL FIX: If a transaction has receipt items, index ONLY the receipt items!

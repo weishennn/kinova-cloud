@@ -95,7 +95,8 @@ export function IncomeAdvisor({ liveIncome, liveExpense, transactions, monthLabe
     const monthExpenses = new Map<string, number>();
     const monthIncomes = new Map<string, number>();
 
-    for (const t of transactions) {
+    const safeTxs = Array.isArray(transactions) ? transactions : [];
+    for (const t of safeTxs) {
       if (!t.date || t.date.length < 7) continue;
       const m = t.date.slice(0, 7);
       if (m === currentMonthPrefix) continue; // Skip current incomplete month
@@ -137,7 +138,7 @@ export function IncomeAdvisor({ liveIncome, liveExpense, transactions, monthLabe
 
   // Actual monthly figures from transactions
   const actualInvested = useMemo(() => {
-    return transactions
+    return (Array.isArray(transactions) ? transactions : [])
       .filter((t) => t.type === 'investment')
       .reduce((sum, t) => sum + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount), 0);
   }, [transactions]);
@@ -151,7 +152,7 @@ export function IncomeAdvisor({ liveIncome, liveExpense, transactions, monthLabe
 
   // Transactions explicitly logged under 'Emergency Savings' or 'Fixed Deposit'
   const emergencyDeposits = useMemo(() => {
-    return transactions
+    return (Array.isArray(transactions) ? transactions : [])
       .filter((t) => t.category === 'Emergency Savings' || t.category === 'Fixed Deposit')
       .reduce((sum, t) => sum + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount), 0);
   }, [transactions]);
