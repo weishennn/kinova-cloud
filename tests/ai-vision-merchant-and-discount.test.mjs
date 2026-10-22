@@ -18,6 +18,10 @@ test('1. System and notification noise terms are rejected as merchants', () => {
   assert.ok(SYSTEM_NOTIFICATION_NOISE_REGEX.test('Payment success'));
   assert.ok(SYSTEM_NOTIFICATION_NOISE_REGEX.test('Order ID: GD-3MCF5JLS'));
   assert.ok(SYSTEM_NOTIFICATION_NOISE_REGEX.test('Transaction details'));
+  assert.ok(SYSTEM_NOTIFICATION_NOISE_REGEX.test('Food Stall (Ampang)'));
+  assert.ok(SYSTEM_NOTIFICATION_NOISE_REGEX.test('Food Stall'));
+  assert.ok(SYSTEM_NOTIFICATION_NOISE_REGEX.test('ShopeePay Balance'));
+  assert.ok(SYSTEM_NOTIFICATION_NOISE_REGEX.test('eWallet Balance'));
 
   // sanitizeMerchantCandidate without context returns empty string for noise
   assert.equal(sanitizeMerchantCandidate('Kinova Automation'), '');
@@ -25,6 +29,8 @@ test('1. System and notification noise terms are rejected as merchants', () => {
   assert.equal(sanitizeMerchantCandidate('Automation'), '');
   assert.equal(sanitizeMerchantCandidate('Payment successful'), '');
   assert.equal(sanitizeMerchantCandidate('Order ID: GD-3MCF5JLS'), '');
+  assert.equal(sanitizeMerchantCandidate('Food Stall (Ampang)'), '');
+  assert.equal(sanitizeMerchantCandidate('ShopeePay Balance'), '');
 });
 
 test('2. sanitizeMerchantCandidate extracts true merchant from in-app navigation headers', () => {
@@ -53,6 +59,13 @@ test('2. sanitizeMerchantCandidate extracts true merchant from in-app navigation
   const resolvedPetrol = sanitizeMerchantCandidate('Kinova Automation', petrolContext);
   assert.ok(resolvedPetrol.toLowerCase().includes('shell'));
   assert.equal(resolvedPetrol.toLowerCase().includes('automation'), false);
+
+  // Scenario C: ShopeePay payment confirmation with generic "Food Stall (Ampang)" candidate and "Memo Chicken rice"
+  const shopeePayContext = `
+    RM14.00 22 Oct 2026, 12:43PM 10 Coins (RM0.10) From Coins Bonanza Order Details Transaction SN ATIAZnTXWzpXgL Order SN 247159008812421049 Payment Method ShopeePay Balance Merchant Location AMPANG Memo Chicken rice
+  `;
+  const resolvedShopeeMemo = sanitizeMerchantCandidate('Food Stall (Ampang)', shopeePayContext);
+  assert.equal(resolvedShopeeMemo, 'Chicken rice');
 });
 
 test('3. Merchant and item category inference handles fuel and dessert categories', () => {

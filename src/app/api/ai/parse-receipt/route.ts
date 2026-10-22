@@ -193,6 +193,11 @@ CRITICAL INSTRUCTIONS:
    - Clean branch suffixes or trailing truncation dots: e.g. "Four Beans 四夕豆花".
    - FOOD INFERENCE: If the payment confirmation does not list individual dishes (e.g. only shows Order ID, Bill amount, Deals and offers), extract the signature food from the merchant name into 'items' (e.g. for 'Four Beans 四夕豆花', extract { "name": "四夕豆花 / 甜品", "quantity": 1, "unitPrice": 18.74, "amount": 18.74, "category": "Food & Dining" }).
 
+2.5. E-WALLET & BANK TRANSFER CONFIRMATIONS (ShopeePay, Touch 'n Go, GrabPay, MAE, DuitNow QR):
+   - PAYMENT METHOD IS NOT THE MERCHANT: "ShopeePay", "ShopeePay Balance", "Touch 'n Go eWallet", "eWallet Balance", "DuitNow QR", "MAE" are payment channels/methods, NEVER the merchant/store name!
+   - MERCHANT LOCATION IS NOT THE STORE NAME: "Merchant Location: AMPANG", "Location: ...", or city names are locations, NOT the merchant name! NEVER invent generic names like "Food Stall (Ampang)" or "Shop (Location)"!
+   - EXTRACT "MEMO" / "REMARK" / "RECIPIENT REFERENCE": Look specifically for "Memo", "Remark", "Recipient Reference", "Payment Details", or "Note" (e.g. "Memo: Chicken rice"). When no separate shop brand is shown, the Memo/Remark text IS the primary dish/food or stall name! Extract it as "description" and include it in "items": [{ "name": "Chicken rice", "quantity": 1, "unitPrice": 14.00, "amount": 14.00, "category": "Food & Dining" }].
+
 3. FUEL / PETROL RECEIPTS (CRITICAL PRICE EXTRACTION):
    - Gas stations (Shell, Petronas, Caltex, Petron, BHPetrol) belong to category "Transport".
    - Extract purchased fuel line items into "items": e.g. "FuelSave 95", "RON95", "RON97", "Diesel", with litres and unit price per litre.
@@ -268,6 +273,37 @@ Return JSON shape:
           signal: AbortSignal.timeout(20000),
         });
 
+        // Transient 503 / 500 handling: 1 quick retry with backoff if server is temporarily overloaded
+        if (res && (res.status === 503 || res.status === 500)) {
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          try {
+            res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-goog-api-key': apiKey,
+              },
+              body: JSON.stringify({
+                contents: [{
+                  role: 'user',
+                  parts: [
+                    { text: prompt },
+                    { inline_data: { mime_type: mimeType, data: imageBase64 } },
+                  ],
+                }],
+                generationConfig: {
+                  responseMimeType: 'application/json',
+                  temperature: 0.1,
+                  maxOutputTokens: 4096,
+                },
+              }),
+              signal: AbortSignal.timeout(20000),
+            });
+          } catch {
+            // Keep original res
+          }
+        }
+
         if (res.ok) break;
 
         if (res.status === 429 || res.status === 401 || res.status === 403 || res.status >= 500) {
@@ -289,9 +325,11 @@ Return JSON shape:
         const status = res?.status ?? 502;
         const userMessage = status === 429
           ? 'Gemini quota is temporarily exhausted across all configured keys. Try again in a moment.'
-          : status === 401 || status === 403
-            ? 'Gemini rejected the API key. Check GEMINI_API_KEY in environment.'
-            : `Gemini OCR failed (${status}). Please try a clearer receipt image.`;
+          : status === 503
+            ? 'Gemini 服务暂时繁忙 (HTTP 503 Overloaded)，已自动重试及切换备用模型，请稍等 2-3 秒后再试。'
+            : status === 401 || status === 403
+              ? 'Gemini rejected the API key. Check GEMINI_API_KEY in environment.'
+              : `Gemini OCR failed (${status}). Please try a clearer receipt image.`;
         return NextResponse.json({ success: false, error: userMessage }, { status: 502 });
       }
 
@@ -403,9 +441,21 @@ Return JSON shape:
         let description = typeof parsed.description === 'string' && parsed.description.trim()
           ? parsed.description.trim()
           : (typeof parsed.merchant === 'string' && parsed.merchant.trim() ? parsed.merchant.trim() : '');
-        if (/^(?:kinova(?:\s*automation)?|shortcuts?|screenshot|automation|now|payment\s*successful?|payment\s*success|payment\s*completed?|transaction\s*successful?|transaction\s*details|order\s*details|order\s*id(?::\s*[A-Z0-9_-]+)?|successful|receipt)$/i.test(description)) {
+        if (/^(?:kinova(?:\s*automation)?|shortcuts?|screenshot|automation|now|payment\s*successful?|payment\s*success|payment\s*completed?|transaction\s*successful?|transaction\s*details|order\s*details|order\s*id(?::\s*[A-Z0-9_-]+)?|successful|receipt|food\s*stall(?:\s*\([^)]*\))?|food\s*court|hawker\s*stall|shopeepay(?:\s*balance)?|ewallet(?:\s*balance)?)$/i.test(description)) {
           description = '';
         }
+
+        // If description is empty or generic, check parsed memo or notes
+        if (!description && typeof parsed.memo === 'string' && parsed.memo.trim()) {
+          description = parsed.memo.trim();
+        }
+        if (!description && typeof parsed.notes === 'string') {
+          const memoM = parsed.notes.match(/\b(?:memo|remark|recipient\s*reference)\s*[:：]?\s*([A-Za-z0-9\u4e00-\u9fa5\s&'/+-]+?)(?=\s*(?:Order\s*SN|Transaction\s*SN|Payment\s*Method|Merchant\s*Location|RM|\d{1,2}:\d{2}|$|\n))/i);
+          if (memoM && memoM[1]) {
+            description = memoM[1].trim();
+          }
+        }
+
         // Clean trailing truncated dots (e.g. "Four Beans 四夕豆花 - Taman Me...")
         description = description.replace(/\s*-\s*[A-Za-z0-9\s]*\.\.\.$/, '').trim();
 
@@ -422,11 +472,19 @@ Return JSON shape:
           description = 'Receipt Expense';
         }
 
-        // If items are empty, but merchant is a food establishment, add signature food item
+        // If items are empty, but merchant is a food establishment or specific dish/stall, add signature food item
         if (items.length === 0 && amount != null && amount > 0) {
           if (/豆花|four\s*beans/i.test(description)) {
             items.push({
               name: '四夕豆花 / 甜品',
+              quantity: 1,
+              unitPrice: amount,
+              amount,
+              category: 'Food & Dining',
+            });
+          } else if (description && description !== 'Receipt Expense' && !/^(?:shell|petronas|caltex|bhpetrol)/i.test(description)) {
+            items.push({
+              name: description,
               quantity: 1,
               unitPrice: amount,
               amount,

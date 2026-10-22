@@ -309,6 +309,12 @@ CRITICAL INSTRUCTIONS:
    - Clean branch suffixes or trailing truncation dots: e.g. "Four Beans 四夕豆花".
    - FOOD INFERENCE: If the payment confirmation does not list individual dishes (e.g. only shows Order ID, Bill amount, Deals and offers), extract the signature food from the merchant name into 'items' (e.g. for 'Four Beans 四夕豆花', extract { "name": "四夕豆花 / 甜品", "quantity": 1, "unitPrice": 18.74, "amount": 18.74 }).
 
+2.5. E-WALLET & BANK TRANSFER CONFIRMATIONS (ShopeePay, Touch 'n Go, GrabPay, MAE, DuitNow QR):
+   - PAYMENT METHOD IS NOT THE MERCHANT: "ShopeePay", "ShopeePay Balance", "Touch 'n Go eWallet", "eWallet Balance", "DuitNow QR", "MAE" are payment channels/methods, NEVER the merchant/store name!
+   - MERCHANT LOCATION IS NOT THE STORE NAME: "Merchant Location: AMPANG", "Location: ...", or city names are locations, NOT the merchant/store name! NEVER invent generic names like "Food Stall (Ampang)" or "Shop (Location)"!
+   - EXTRACT "MEMO" / "REMARK" / "RECIPIENT REFERENCE": In e-wallet receipts, look carefully for "Memo", "Remark", "Recipient Reference", "Payment Details", or "Note" (e.g. "Memo: Chicken rice").
+   - When no specific restaurant or shop brand is printed, the "Memo" or "Remark" text IS the primary purchased item, dish, or stall name! You MUST set "merchant" to this value (e.g. "Chicken rice"), include it in "items": [{ "name": "Chicken rice", "quantity": 1, "unitPrice": 14.00, "amount": 14.00 }], and classify it under "Food & Dining" (or appropriate category)!
+
 3. FUEL / PETROL RECEIPTS (CRITICAL PRICE EXTRACTION):
    - Gas stations (Shell, Petronas, Caltex, Petron, BHPetrol) belong to category "Transport".
    - Extract purchased fuel line items into "items": e.g. "FuelSave 95", "RON95", "RON97", "Diesel", with litres and unit price per litre.

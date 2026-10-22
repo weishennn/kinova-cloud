@@ -370,7 +370,7 @@ export async function POST(req: NextRequest) {
 
       for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx += 1) {
         const apiKey = apiKeys[keyIdx];
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        let res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -392,6 +392,34 @@ export async function POST(req: NextRequest) {
           }),
           signal: AbortSignal.timeout(12000),
         }).catch(() => null);
+
+        // Transient 503 / 500 handling: 1 quick retry with backoff if server is temporarily overloaded
+        if (res && (res.status === 503 || res.status === 500)) {
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          const retryRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-goog-api-key': apiKey,
+            },
+            body: JSON.stringify({
+              contents: [{
+                role: 'user',
+                parts: [{ text: `${SYSTEM_PROMPT.replace('{{TODAY}}', today)}\n\nUser command: ${text}` }],
+              }],
+              generationConfig: {
+                responseMimeType: 'application/json',
+                temperature: 0.1,
+                maxOutputTokens: 2048,
+                thinkingConfig: {
+                  thinkingBudget: 0,
+                },
+              },
+            }),
+            signal: AbortSignal.timeout(12000),
+          }).catch(() => null);
+          if (retryRes) res = retryRes;
+        }
 
         if (!res || !res.ok) {
           lastError = res ? `Gemini ${res.status}` : 'Request timeout';

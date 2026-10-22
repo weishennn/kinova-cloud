@@ -116,11 +116,11 @@ const MERCHANT_CATEGORY_RULES: Array<{ regex: RegExp; category: string }> = [
  * System and notification noise terms that must NEVER be accepted as merchant names.
  */
 export const SYSTEM_NOTIFICATION_NOISE_REGEX =
-  /^(?:kinova(?:\s*automation)?|automation|shortcuts?|screenshot|dynamic\s*island|notification|back\s*tap|now|payment\s*successful?|payment\s*success|payment\s*completed?|transaction\s*successful?|transaction\s*details|order\s*details|order\s*id(?::\s*[A-Z0-9_-]+)?|successful|receipt)$/i;
+  /^(?:kinova(?:\s*automation)?|automation|shortcuts?|screenshot|dynamic\s*island|notification|back\s*tap|now|payment\s*successful?|payment\s*success|payment\s*completed?|transaction\s*successful?|transaction\s*details|order\s*details|order\s*id(?::\s*[A-Z0-9_-]+)?|successful|receipt|food\s*stall(?:\s*\([^)]*\))?|food\s*court|hawker\s*stall|shopeepay(?:\s*balance)?|ewallet(?:\s*balance)?|balance)$/i;
 
 /**
  * Sanitizes candidate merchant names, stripping notification titles or extracting
- * the true merchant from contextual OCR text or in-app navigation headers.
+ * the true merchant from contextual OCR text, in-app navigation headers, or e-wallet Memos.
  */
 export function sanitizeMerchantCandidate(rawName: string, contextText?: string): string {
   let cleaned = String(rawName || '').trim();
@@ -132,7 +132,7 @@ export function sanitizeMerchantCandidate(rawName: string, contextText?: string)
   if (!cleaned && contextText) {
     const text = contextText.trim();
     // 1. Try extracting merchant from in-app navigation title bars (e.g. "✕ Four Beans 四夕豆花 - Taman Me...")
-    const headerMatch = text.match(/(?:✕|X|<)\s*([A-Za-z0-9\u4e00-\u9fa5\s&'-]+?)(?:\s*-\s*[A-Za-z0-9\s]*\.\.\.|\s*-\s*[A-Za-z0-9\s]+|\n|$)/i);
+    const headerMatch = text.match(/(?:^|\n|\s)(?:[✕\u2715\u274c\u00d7<〈‹]|X\s+)\s*([A-Za-z0-9\u4e00-\u9fa5\s&'-]+?)(?:\s*-\s*[A-Za-z0-9\s]*\.\.\.|\s*-\s*[A-Za-z0-9\s]+|\n|$)/i);
     if (headerMatch && headerMatch[1] && !SYSTEM_NOTIFICATION_NOISE_REGEX.test(headerMatch[1].trim())) {
       cleaned = headerMatch[1].trim();
     }
@@ -159,6 +159,17 @@ export function sanitizeMerchantCandidate(rawName: string, contextText?: string)
         if (m && m[1] && !SYSTEM_NOTIFICATION_NOISE_REGEX.test(m[1].trim())) {
           cleaned = m[1].trim();
           break;
+        }
+      }
+    }
+
+    // 3. Check e-wallet Memo / Remark / Recipient Reference (e.g. ShopeePay "Memo: Chicken rice", "Memo Chicken rice", TNG "Remark: Laksa")
+    if (!cleaned) {
+      const memoMatch = text.match(/\b(?:memo|remark|recipient\s*reference|payment\s*details)\s*[:：]?\s*([A-Za-z0-9\u4e00-\u9fa5\s&'/+-]+?)(?=\s*(?:Order\s*SN|Transaction\s*SN|Payment\s*Method|Merchant\s*Location|RM|\d{1,2}:\d{2}|$|\n))/i);
+      if (memoMatch && memoMatch[1]) {
+        const candMemo = memoMatch[1].trim();
+        if (candMemo && !SYSTEM_NOTIFICATION_NOISE_REGEX.test(candMemo) && !/^(?:RM|MYR|\d+)/i.test(candMemo)) {
+          cleaned = candMemo;
         }
       }
     }
@@ -859,7 +870,7 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
       const activeKey = effectiveKeys[keyIdx];
       attempts += 1;
       try {
-        const geminiRes = await fetchFn(
+        let geminiRes = await fetchFn(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
           {
             method: 'POST',
@@ -886,6 +897,42 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
             signal: AbortSignal.timeout(timeoutMs),
           }
         );
+
+        // Transient 503 / 500 handling: 1 quick retry with backoff if server is temporarily overloaded
+        if ((geminiRes.status === 503 || geminiRes.status === 500) && !options.fetchImpl && timeoutMs > 5000) {
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          try {
+            geminiRes = await fetchFn(
+              `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-goog-api-key': activeKey,
+                },
+                body: JSON.stringify({
+                  contents: [
+                    {
+                      role: 'user',
+                      parts: [
+                        { text: options.prompt },
+                        { inline_data: { mime_type: options.mimeType, data: options.cleanBase64 } },
+                      ],
+                    },
+                  ],
+                  generationConfig: {
+                    responseMimeType: 'application/json',
+                    temperature: 0.1,
+                    maxOutputTokens: 2048,
+                  },
+                }),
+                signal: AbortSignal.timeout(timeoutMs),
+              }
+            );
+          } catch {
+            // Keep original response if retry throws
+          }
+        }
 
         if (geminiRes.ok) {
           const geminiData = await geminiRes.json();
@@ -951,6 +998,11 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
           }
         }
         if (geminiRes.status === 503 || geminiRes.status >= 500) {
+          options.onKeyFailure?.(activeKey, geminiRes.status);
+          // Failover to next key in pool if available
+          if (keyIdx + 1 < effectiveKeys.length) {
+            continue;
+          }
           ocrFallbackNotice = `云端 AI 服务暂时繁忙 (HTTP ${geminiRes.status})，已为您生成可补充草稿，请直接手动填写`;
           break;
         }
