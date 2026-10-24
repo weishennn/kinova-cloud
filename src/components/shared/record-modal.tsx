@@ -75,6 +75,8 @@ const CATEGORIES = {
     { name: 'Entertainment', icon: '🎬' },
     { name: 'Health', icon: '🏥' },
     { name: 'Education', icon: '📚' },
+    { name: 'Sport', icon: '🏸' },
+    { name: 'Gift', icon: '🎁' },
     { name: 'Other', icon: '📦' },
   ],
   TripExpense: [
@@ -87,6 +89,8 @@ const CATEGORIES = {
     { name: 'Health', icon: '🏥' },
     { name: 'Insurance', icon: '🛡️' },
     { name: 'Education', icon: '📚' },
+    { name: 'Sport', icon: '🏸' },
+    { name: 'Gift', icon: '🎁' },
     { name: 'Other', icon: '📦' },
   ],
   Income: [

@@ -15,6 +15,8 @@ export const DEFAULT_CATEGORY_CAPS: Record<string, number> = {
   'Entertainment': 250,
   'Health': 200,
   'Education': 150,
+  'Sport': 200,
+  'Gift': 150,
   'Other': 200,
 };
 

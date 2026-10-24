@@ -45,6 +45,8 @@ const CATEGORY_EMOJIS: Record<string, string> = {
   'Entertainment': '🎬',
   'Health': '🏥',
   'Education': '📚',
+  'Sport': '🏸',
+  'Gift': '🎁',
   'Salary': '💰',
   'Claim Allowance': '🧾',
   'Freelance': '💻',
@@ -63,6 +65,8 @@ const EXPENSE_CATEGORIES = [
   'Entertainment',
   'Health',
   'Education',
+  'Sport',
+  'Gift',
   'Other',
 ];
 

@@ -36,6 +36,8 @@ const EXPENSE_CATEGORIES = [
   'Entertainment',
   'Health',
   'Education',
+  'Sport',
+  'Gift',
   'Other',
 ];
 

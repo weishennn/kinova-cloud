@@ -84,21 +84,25 @@ export interface FinancialHealthReport {
 
 export function calculateFinancialHealthScore(params: {
   transactions: MinimalTransactionRecord[];
+  allLedgerTransactions?: MinimalTransactionRecord[];
   monthlyBudgetCap?: number;
   baselineIncome?: number;
   emergencyFundBalance?: number;
   referenceDateStr?: string;
+  targetMonthStr?: string;
 }): FinancialHealthReport {
   const {
     transactions,
+    allLedgerTransactions,
     monthlyBudgetCap,
     baselineIncome,
     emergencyFundBalance = 0,
     referenceDateStr,
+    targetMonthStr,
   } = params;
 
   const todayStr = referenceDateStr || getLocalDateString();
-  const currentMonthStr = todayStr.slice(0, 7);
+  const currentMonthStr = targetMonthStr || todayStr.slice(0, 7);
 
   // Month-to-date income and expenses
   const currentExpenses = transactions.filter(
@@ -121,10 +125,10 @@ export function calculateFinancialHealthScore(params: {
 
   // Dimension 1: Savings Rate (储蓄率: 30分)
   // Benchmark: >= 30% -> 30pts, 20-30% -> 24-29pts, 10-20% -> 15-23pts, 0-10% -> 5-14pts, Negative -> 0pts
-  let savingsRateScore = 20; // default baseline
+  let savingsRateScore = 15;
   let savingsRatePct = 0;
-  let savingsStatus: HealthDimension['status'] = 'good';
-  let savingsDetails = '本月尚未录入收入，参考基础收入评估';
+  let savingsStatus: HealthDimension['status'] = 'warning';
+  let savingsDetails = '尚未记录本月收入或基准月薪（建议记录收入以精准评估）';
 
   if (effectiveIncome > 0) {
     const netSavings = effectiveIncome - totalExpense;
@@ -217,11 +221,11 @@ export function calculateFinancialHealthScore(params: {
   }
 
   // Dimension 4: Cash & Emergency Buffer (应急安全垫: 20分)
-  let bufferScore = 15;
-  let bufferStatus: HealthDimension['status'] = 'good';
-  let bufferDetails = '储备金充足或处于健康积累期';
+  let bufferScore = 6;
+  let bufferStatus: HealthDimension['status'] = 'warning';
+  let bufferDetails = '尚未记录应急储备金（建议设定或积累 3-6 个月生活备用金）';
 
-  const monthlyBurnBaseline = Math.max(totalExpense, fixedMonthlyBurn, 1000);
+  const monthlyBurnBaseline = Math.max(totalExpense, fixedMonthlyBurn, 500);
   if (emergencyFundBalance > 0) {
     const monthsCovered = emergencyFundBalance / monthlyBurnBaseline;
     if (monthsCovered >= 6) {
@@ -233,9 +237,9 @@ export function calculateFinancialHealthScore(params: {
       bufferStatus = 'good';
       bufferDetails = `应急备用金可覆盖 ${monthsCovered.toFixed(1)} 个月（达到推荐的 3-6 个月标准）`;
     } else {
-      bufferScore = 8;
+      bufferScore = 10;
       bufferStatus = 'warning';
-      bufferDetails = `应急备用金仅覆盖 ${monthsCovered.toFixed(1)} 个月（建议优先补充至 3 个月）`;
+      bufferDetails = `应急备用金可覆盖 ${monthsCovered.toFixed(1)} 个月（建议补充至 3 个月以上）`;
     }
   }
 
@@ -361,14 +365,16 @@ export function predictCashflowTrajectory(params: {
   commitmentsOverride?: RecurringCommitmentItem[];
   installmentsOverride?: SavedInstallmentItem[];
   referenceDateStr?: string;
+  isStartingCashConfigured?: boolean;
 }): CashflowForecastResult {
   const {
     transactions,
-    startingCash = 5000,
-    baselineMonthlyIncome = 4500,
+    startingCash = 0,
+    baselineMonthlyIncome = 0,
     commitmentsOverride,
     installmentsOverride,
     referenceDateStr,
+    isStartingCashConfigured = false,
   } = params;
 
   const todayStr = referenceDateStr || getLocalDateString();
@@ -379,7 +385,7 @@ export function predictCashflowTrajectory(params: {
   sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
   const sixtyDaysAgoStr = getLocalDateString(sixtyDaysAgo);
 
-  const recentExpenses = transactions.filter(
+  const recentExpenses = (transactions || []).filter(
     (t) => t.type === 'expense' && t.date >= sixtyDaysAgoStr && t.amount > 0
   );
 
@@ -395,10 +401,9 @@ export function predictCashflowTrajectory(params: {
     0
   );
 
-  const dailyDiscretionaryBurn = Math.max(
-    15,
-    Number((normalizedTotal > 0 ? normalizedTotal / 60 : 35).toFixed(2))
-  );
+  const dailyDiscretionaryBurn = normalizedTotal > 0
+    ? Number((normalizedTotal / 60).toFixed(2))
+    : (totalRecentExpense > 0 ? Number((totalRecentExpense / 60).toFixed(2)) : 0);
 
   // 2. Load fixed commitments
   const commitments: RecurringCommitmentItem[] = commitmentsOverride || getStoredCommitments();
@@ -478,10 +483,16 @@ export function predictCashflowTrajectory(params: {
   let status: CashflowForecastResult['status'] = 'safe';
   let insightMessage = '未来 90 天现金流充裕，收支结构稳固，无流动性风险。';
 
-  if (lowestPoint.balance < 0) {
+  if (startingCash <= 0 && baselineMonthlyIncome <= 0 && totalMonthlyFixed === 0 && dailyDiscretionaryBurn === 0) {
+    status = 'tight';
+    insightMessage = '账本流水尚少，请先记录日常开支或设定流动资金以生成预测。';
+  } else if (!isStartingCashConfigured && startingCash <= 0) {
+    status = 'tight';
+    insightMessage = `当前以账本累计净结余（RM ${startingCash.toFixed(0)}）起算，建议在备用金或设置中补充初始资金，获得更准确走势。`;
+  } else if (lowestPoint.balance < 0) {
     status = 'deficit_warning';
-    insightMessage = `⚠️ 预警：预计在第 ${lowestPoint.dayOffset} 天（${lowestPoint.dateStr}）可能出现资金缺口（约 RM ${lowestPoint.balance.toFixed(0)}），请提前预留资金。`;
-  } else if (lowestPoint.balance < 1200) {
+    insightMessage = `⚠️ 预警：预计在第 ${lowestPoint.dayOffset} 天（${lowestPoint.dateStr}）可能出现资金缺口（约 RM ${Math.abs(lowestPoint.balance).toFixed(0)}），请提前预留资金。`;
+  } else if (lowestPoint.balance < (startingCash > 0 ? startingCash * 0.2 : 500)) {
     status = 'tight';
     insightMessage = `💡 提示：第 ${lowestPoint.dayOffset} 天（${lowestPoint.dateStr}）余额将降至低位（RM ${lowestPoint.balance.toFixed(0)}），需注意缓冲。`;
   }

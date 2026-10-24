@@ -373,7 +373,9 @@ function setupCategoriesSheet(ss) {
       ['cat_11', 'Stocks & Crypto', 'Investment', 'line-chart', '#6366f1', ''],
       ['cat_12', 'Gift & Bonus', 'Income', 'gift', '#a855f7', ''],
       ['cat_13', 'Parents', 'Expense', 'heart', '#ec4899', ''],
-      ['cat_14', 'Other', 'Expense', 'more-horizontal', '#6b7280', '']
+      ['cat_14', 'Other', 'Expense', 'more-horizontal', '#6b7280', ''],
+      ['cat_15', 'Sport', 'Expense', 'activity', '#0ea5e9', ''],
+      ['cat_16', 'Gift', 'Expense', 'gift', '#ec4899', '']
     ];
     sheet.getRange(2, 1, defaultCategories.length, defaultCategories[0].length).setValues(defaultCategories);
   }

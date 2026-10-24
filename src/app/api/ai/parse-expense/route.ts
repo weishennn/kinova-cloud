@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLocalDateString, parseLocalDate } from '@/lib/date-helper';
+import { normalizeToCanonicalCategory } from '@/lib/canonical-categories';
 import { getValidGoogleSession } from '@/lib/google-auth';
 import { recordUserAiCall } from '@/lib/admin-registry';
 import { getLoadBalancedGeminiKeys, reportGeminiKeyFailure } from '@/lib/gemini-key-pool';
@@ -188,7 +189,7 @@ function normalizeCommand(raw: unknown, today: string, sourceText: string = ''):
       amount: amountVal,
       currency: textValue(data.currency).toUpperCase() || 'MYR',
       type: textValue(data.type) as AiTransactionData['type'],
-      category: textValue(data.category),
+      category: normalizeToCanonicalCategory(textValue(data.category), textValue(data.type), rawDesc),
       description: rawDesc,
       date: sanitizeDate(data.date) || today,
       subtotal: subtotalVal,
@@ -216,11 +217,12 @@ function normalizeCommand(raw: unknown, today: string, sourceText: string = ''):
       sourceText,
       hasInterestInSource
     ) ?? 0;
+    const instName = fixMangledPercentText(textValue(data.name || data.description), sourceText);
     const installment: AiInstallmentData = {
-      name: fixMangledPercentText(textValue(data.name || data.description), sourceText),
+      name: instName,
       totalPrincipal: Number(data.totalPrincipal ?? data.amount),
       currency: textValue(data.currency).toUpperCase() || 'MYR',
-      category: textValue(data.category) || 'Shopping',
+      category: normalizeToCanonicalCategory(textValue(data.category), 'Expense', instName),
       tenureMonths: Number(data.tenureMonths ?? data.installmentMonths),
       annualInterestRate: normalizedInterest,
       startDate: sanitizeDate(data.startDate || data.date) || today,
@@ -313,6 +315,13 @@ CRITICAL RULE FOR PERCENTAGES:
 - Example: "2.12% interest" -> annualInterestRate MUST be 2.12 (NEVER 0.0212 or 0.00212).
 - Example: "6% SST" -> taxRate MUST be 6 (NEVER 0.06).
 - In notes or description, keep the exact percentage written by the user (e.g. "2.12%"), never convert it to "0.00212%".
+
+CRITICAL RULE FOR CATEGORIES:
+You MUST set 'category' ONLY to one of the following exact canonical category names:
+- For Expense/Installment: "Food & Dining", "Transport", "Shopping", "Housing & Bills", "Parents", "Insurance", "Entertainment", "Health", "Education", "Sport", "Gift", "Other"
+- For Income: "Salary", "Claim Allowance", "Freelance", "Investment Return", "Gift & Bonus", "Other"
+- For Investment: "Fixed Deposit", "ASNB / Unit Trust", "EPF / KWSP", "Emergency Savings", "Other Savings"
+NEVER invent categories like "Groceries", "Utilities", "Dining", "Bills", "Technology", "Coffee". Map them to the valid list above!
 
 Use these exact shapes:
 {

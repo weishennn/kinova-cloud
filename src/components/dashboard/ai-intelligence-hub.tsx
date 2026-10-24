@@ -28,7 +28,8 @@ import {
   type DiscoveredRecurringCandidate,
   type FinancialBriefingResult,
 } from '@/lib/financial-intelligence';
-import { useTransactions } from '@/hooks/useTransactions';
+import { useTransactions, type Transaction } from '@/hooks/useTransactions';
+import { getAmountInBaseCurrency } from '@/lib/currency';
 import {
   getSavedCommitments,
   saveCommitmentsToStorage,
@@ -39,57 +40,151 @@ import { toast } from 'sonner';
 
 interface AiIntelligenceHubProps {
   userBudgetCap?: number;
+  allTransactions?: Transaction[];
+  selectedMonthTransactions?: Transaction[];
+  selectedMonth?: string;
+  liveIncome?: number;
+  liveExpense?: number;
+  liveInvested?: number;
 }
 
-export function AiIntelligenceHub({ userBudgetCap }: AiIntelligenceHubProps) {
-  const { transactions = [] } = useTransactions({ period: 'all' });
+export function AiIntelligenceHub({
+  userBudgetCap,
+  allTransactions: passedAllTxs,
+  selectedMonthTransactions: passedMonthTxs,
+  selectedMonth,
+  liveIncome = 0,
+  liveExpense = 0,
+  liveInvested = 0,
+}: AiIntelligenceHubProps) {
+  const { transactions: hookAllTxs = [] } = useTransactions({ period: 'all' });
+  const allTransactions = passedAllTxs && passedAllTxs.length > 0 ? passedAllTxs : hookAllTxs;
+  const monthTransactions = passedMonthTxs && passedMonthTxs.length > 0 ? passedMonthTxs : allTransactions;
+
   const [activeTab, setActiveTab] = useState<'health' | 'forecast' | 'recurring' | 'briefing'>('health');
   const [commitments, setCommitments] = useState<RecurringCommitment[]>([]);
   const [isAddingRecurring, setIsAddingRecurring] = useState<string | null>(null);
+  const [configuredIncome, setConfiguredIncome] = useState<number>(0);
+  const [configuredReserve, setConfiguredReserve] = useState<number>(0);
 
-  const loadCommitments = () => {
+  const loadCommitmentsAndSettings = () => {
     setCommitments(getSavedCommitments());
+    try {
+      const inc = localStorage.getItem('cashflow_baseline_income');
+      if (inc && parseFloat(inc) > 0) setConfiguredIncome(parseFloat(inc));
+      else setConfiguredIncome(0);
+
+      const res = localStorage.getItem('cashflow_emergency_reserve');
+      if (res && parseFloat(res) > 0) setConfiguredReserve(parseFloat(res));
+      else setConfiguredReserve(0);
+    } catch {}
   };
 
   useEffect(() => {
-    loadCommitments();
-    window.addEventListener(SETTINGS_UPDATED_EVENT, loadCommitments);
-    return () => window.removeEventListener(SETTINGS_UPDATED_EVENT, loadCommitments);
+    loadCommitmentsAndSettings();
+    window.addEventListener(SETTINGS_UPDATED_EVENT, loadCommitmentsAndSettings);
+    return () => window.removeEventListener(SETTINGS_UPDATED_EVENT, loadCommitmentsAndSettings);
   }, []);
 
-  // 1. Health Score Report
+  // 1. Calculate Real Income Stats from Transactions & Settings
+  const realIncomeStats = useMemo(() => {
+    const incomeTxs = allTransactions.filter((t) => t.type === 'income' && t.amount > 0);
+    const monthMap = new Map<string, number>();
+    for (const t of incomeTxs) {
+      if (!t.date || t.date.length < 7) continue;
+      const m = t.date.slice(0, 7);
+      monthMap.set(m, (monthMap.get(m) || 0) + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount));
+    }
+    const monthValues = Array.from(monthMap.values());
+    const avgHistorical = monthValues.length > 0
+      ? monthValues.reduce((a, b) => a + b, 0) / monthValues.length
+      : 0;
+
+    const effectiveIncome = configuredIncome > 0
+      ? configuredIncome
+      : (liveIncome > 0 ? liveIncome : avgHistorical);
+
+    return {
+      effectiveIncome,
+      configuredIncome,
+      avgHistorical,
+      hasRecordedIncome: incomeTxs.length > 0 || liveIncome > 0 || configuredIncome > 0,
+    };
+  }, [allTransactions, configuredIncome, liveIncome]);
+
+  // 2. Calculate Real Cash Reserve & Net Ledger Cash Balance
+  const realCashStats = useMemo(() => {
+    const emergencyDeposits = allTransactions
+      .filter((t) => (t.category === 'Emergency Savings' || t.category === 'Fixed Deposit') && t.amount > 0)
+      .reduce((sum, t) => sum + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount), 0);
+
+    const totalEmergencyFund = configuredReserve + emergencyDeposits;
+
+    let totalInc = 0;
+    let totalExp = 0;
+    let totalInv = 0;
+    for (const t of allTransactions) {
+      const amt = getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount);
+      if (t.type === 'income') totalInc += amt;
+      else if (t.type === 'expense') totalExp += amt;
+      else if (t.type === 'investment') totalInv += amt;
+    }
+
+    const cumulativeNetCash = totalInc - totalExp - totalInv;
+    const startingLiquidCash = configuredReserve > 0
+      ? Math.max(0, configuredReserve + cumulativeNetCash)
+      : Math.max(0, cumulativeNetCash);
+
+    return {
+      configuredReserve,
+      emergencyDeposits,
+      totalEmergencyFund,
+      cumulativeNetCash,
+      startingLiquidCash,
+      isConfigured: configuredReserve > 0,
+    };
+  }, [allTransactions, configuredReserve]);
+
+  // 3. Real Health Score Report
   const healthReport: FinancialHealthReport = useMemo(() => {
     return calculateFinancialHealthScore({
-      transactions,
+      transactions: monthTransactions,
+      allLedgerTransactions: allTransactions,
       monthlyBudgetCap: userBudgetCap,
-      baselineIncome: 4500,
-      emergencyFundBalance: 12000,
+      baselineIncome: realIncomeStats.effectiveIncome,
+      emergencyFundBalance: realCashStats.totalEmergencyFund,
+      targetMonthStr: selectedMonth && /^\d{4}-\d{2}$/.test(selectedMonth) ? selectedMonth : undefined,
     });
-  }, [transactions, userBudgetCap]);
+  }, [monthTransactions, allTransactions, userBudgetCap, realIncomeStats.effectiveIncome, realCashStats.totalEmergencyFund, selectedMonth]);
 
-  // 2. Cashflow Forecast
+  // 4. Real Cashflow Forecast
   const forecastResult: CashflowForecastResult = useMemo(() => {
     return predictCashflowTrajectory({
-      transactions,
-      startingCash: 5000,
-      baselineMonthlyIncome: 4500,
+      transactions: allTransactions,
+      startingCash: realCashStats.startingLiquidCash,
+      baselineMonthlyIncome: realIncomeStats.effectiveIncome,
       commitmentsOverride: commitments,
+      isStartingCashConfigured: realCashStats.isConfigured,
     });
-  }, [transactions, commitments]);
+  }, [allTransactions, realCashStats.startingLiquidCash, realIncomeStats.effectiveIncome, commitments, realCashStats.isConfigured]);
 
-  // 3. Discovered Subscriptions
+  // 5. Discovered Subscriptions from Real Transactions
   const discoveredSubscriptions: DiscoveredRecurringCandidate[] = useMemo(() => {
-    return discoverUnmarkedRecurringExpenses(transactions, commitments);
-  }, [transactions, commitments]);
+    return discoverUnmarkedRecurringExpenses(allTransactions, commitments);
+  }, [allTransactions, commitments]);
 
   const untrackedCandidates = useMemo(() => {
     return discoveredSubscriptions.filter((d) => !d.isAlreadyTracked);
   }, [discoveredSubscriptions]);
 
-  // 4. Financial Briefing
+  // 6. Real Financial Briefing
   const briefing: FinancialBriefingResult = useMemo(() => {
-    return generateAiFinancialBriefing(transactions, undefined, userBudgetCap);
-  }, [transactions, userBudgetCap]);
+    return generateAiFinancialBriefing(
+      monthTransactions,
+      selectedMonth && /^\d{4}-\d{2}$/.test(selectedMonth) ? selectedMonth : undefined,
+      userBudgetCap
+    );
+  }, [monthTransactions, selectedMonth, userBudgetCap]);
 
   // Handle 1-click add discovered recurring expense
   const handleAddDiscoveredToCommitments = (item: DiscoveredRecurringCandidate) => {
@@ -199,6 +294,25 @@ export function AiIntelligenceHub({ userBudgetCap }: AiIntelligenceHubProps) {
           animate={{ opacity: 1, y: 0 }}
           className="space-y-4"
         >
+          {!realIncomeStats.hasRecordedIncome && (
+            <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-900 dark:text-amber-300 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Info className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                <span>尚未录入月收入或设定基准月薪（AI 当前完全基于你的真实日常支出进行体检）</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const el = document.getElementById('income-advisor');
+                  if (el) el.scrollIntoView({ behavior: 'smooth' });
+                }}
+                className="font-bold underline text-amber-800 dark:text-amber-400 hover:opacity-80 shrink-0 cursor-pointer"
+              >
+                前往设定月薪 ➔
+              </button>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             {/* Score Card */}
             <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-500/10 via-purple-500/10 to-transparent border border-indigo-500/20 flex flex-col justify-between">
@@ -285,13 +399,25 @@ export function AiIntelligenceHub({ userBudgetCap }: AiIntelligenceHubProps) {
           className="space-y-4"
         >
           {/* Key Metrics */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-zinc-900/50 border border-slate-100 dark:border-white/[0.06]">
+              <span className="text-[11px] text-slate-500 dark:text-zinc-400 block font-medium">起算流动资金</span>
+              <span className="text-lg font-bold font-mono text-slate-900 dark:text-white mt-1 block">
+                RM {forecastResult.currentCashEstimate.toLocaleString('en-MY', { minimumFractionDigits: 2 })}
+              </span>
+              <span className="text-[10px] text-slate-400 dark:text-zinc-500 truncate block">
+                {realCashStats.isConfigured ? '备用金 + 账本净结余' : (realCashStats.cumulativeNetCash > 0 ? '历史账本累计净结余' : '账本以 RM 0 起算')}
+              </span>
+            </div>
+
             <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-zinc-900/50 border border-slate-100 dark:border-white/[0.06]">
               <span className="text-[11px] text-slate-500 dark:text-zinc-400 block font-medium">日常可支配日均支出</span>
               <span className="text-lg font-bold font-mono text-slate-900 dark:text-white mt-1 block">
                 RM {forecastResult.dailyBurnRate.toFixed(2)} / 天
               </span>
-              <span className="text-[10px] text-slate-400 dark:text-zinc-500">基于过去60天平稳消费推算</span>
+              <span className="text-[10px] text-slate-400 dark:text-zinc-500 truncate block">
+                {forecastResult.dailyBurnRate > 0 ? '基于历史平稳消费推算' : '尚无日常支出流水'}
+              </span>
             </div>
 
             <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-zinc-900/50 border border-slate-100 dark:border-white/[0.06]">
@@ -301,7 +427,7 @@ export function AiIntelligenceHub({ userBudgetCap }: AiIntelligenceHubProps) {
               }`}>
                 RM {forecastResult.forecast60DaysBalance.toLocaleString('en-MY', { minimumFractionDigits: 2 })}
               </span>
-              <span className="text-[10px] text-slate-400 dark:text-zinc-500">已扣减预计固定扣款与分期</span>
+              <span className="text-[10px] text-slate-400 dark:text-zinc-500 truncate block">已扣减预计固定扣款与分期</span>
             </div>
 
             <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-zinc-900/50 border border-slate-100 dark:border-white/[0.06]">
@@ -311,7 +437,7 @@ export function AiIntelligenceHub({ userBudgetCap }: AiIntelligenceHubProps) {
               }`}>
                 RM {forecastResult.forecast90DaysBalance.toLocaleString('en-MY', { minimumFractionDigits: 2 })}
               </span>
-              <span className="text-[10px] text-slate-400 dark:text-zinc-500">全周期资金链处于安全区间</span>
+              <span className="text-[10px] text-slate-400 dark:text-zinc-500 truncate block">全周期真实收支走势</span>
             </div>
           </div>
 

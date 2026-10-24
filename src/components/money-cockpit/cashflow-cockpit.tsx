@@ -701,7 +701,15 @@ export function CashflowCockpit() {
         </section>
 
         <section className="cockpit-area-ai-hub" aria-label="Gemini AI Intelligence Hub">
-          <AiIntelligenceHub userBudgetCap={userBudgetCap} />
+          <AiIntelligenceHub
+            userBudgetCap={userBudgetCap}
+            allTransactions={allLedgerTransactions.length > 0 ? allLedgerTransactions : transactions}
+            selectedMonthTransactions={visibleTransactions}
+            selectedMonth={selectedMonth}
+            liveIncome={totals.income}
+            liveExpense={totals.spending}
+            liveInvested={totals.invested}
+          />
         </section>
 
         <section className="cockpit-area-commitments">

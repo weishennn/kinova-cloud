@@ -76,7 +76,7 @@ export const LHDN_TAX_CATEGORIES: LhdnTaxCategory[] = [
     excludes:
       'Does NOT cover casual fashion/streetwear clothing or motorized bicycles/e-scooters.',
     examples: ['Badminton Racket / Shuttlecock', 'Court Booking (Badminton / Futsal / Pickleball)', 'Gym Membership', 'Decathlon / Running Shoes'],
-    relatedAppCategories: ['Shopping', 'Health', 'Entertainment'],
+    relatedAppCategories: ['Sport', 'Shopping', 'Health', 'Entertainment'],
     keywords: [
       'badminton', 'racket', 'racquet', 'yonex', 'victor', 'li-ning', 'shuttlecock', 'stringing',
       'pickleball', 'paddle', 'futsal', 'tennis', 'squash', 'basketball', 'football', 'ping pong', 'table tennis',

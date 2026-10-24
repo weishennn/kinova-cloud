@@ -29,8 +29,8 @@ import { MoneyCalculator } from '@/components/shared/money-calculator';
 import { confirmAction } from '@/stores/confirm-dialog-store';
 
 const COMMON_CATEGORIES = [
-  'Shopping', 'Electronics', 'Housing & Bills', 'Transport', 
-  'Health', 'Education', 'Entertainment', 'Other'
+  'Shopping', 'Housing & Bills', 'Transport', 
+  'Health', 'Education', 'Entertainment', 'Sport', 'Gift', 'Other'
 ];
 
 export function EditInstallmentModal() {

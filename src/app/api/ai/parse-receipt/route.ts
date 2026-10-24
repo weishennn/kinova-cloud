@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLocalDateString, normalizeDateString } from '@/lib/date-helper';
+import { normalizeToCanonicalCategory } from '@/lib/canonical-categories';
 import { getValidGoogleSession } from '@/lib/google-auth';
 import { recordUserAiCall } from '@/lib/admin-registry';
 import { getLoadBalancedGeminiKeys, reportGeminiKeyFailure } from '@/lib/gemini-key-pool';
@@ -224,6 +225,11 @@ CRITICAL INSTRUCTIONS:
    - If "2 Laksa 18.00" is already the line total, set quantity: 2, unitPrice: 9.00, amount: 18.00 (do NOT multiply again).
    - "amount" MUST ALWAYS be pre-tax line total. Exclude subtotal, tax, service charge, roundings, discounts, or change rows.
 
+8. CATEGORIES (STRICT PREDEFINED LIST):
+   - "category" and item "category" MUST be chosen ONLY from:
+     [Food & Dining, Transport, Shopping, Housing & Bills, Parents, Insurance, Entertainment, Health, Education, Sport, Gift, Other].
+   - NEVER invent custom category names (e.g. do NOT use "Groceries", "Beverages", "Dining Out", "Electronics", "Utilities", "Coffee"). Map them to the list above!
+
 Return JSON shape:
 {
   "amount": number,
@@ -377,7 +383,9 @@ Return JSON shape:
                 amount: amt,
                 brand: typeof item.brand === 'string' ? item.brand.trim() : undefined,
                 productType: typeof item.productType === 'string' ? item.productType.trim() : undefined,
-                category: typeof item.category === 'string' ? item.category.trim() : undefined,
+                category: typeof item.category === 'string'
+                  ? normalizeToCanonicalCategory(item.category, 'Expense', typeof item.name === 'string' ? item.name : undefined)
+                  : undefined,
               };
             })
             .filter((item) => item.name && item.amount > 0)
@@ -493,7 +501,9 @@ Return JSON shape:
           }
         }
 
-        let category = typeof parsed.category === 'string' && parsed.category.trim() ? parsed.category.trim() : '';
+        let category = typeof parsed.category === 'string' && parsed.category.trim()
+          ? normalizeToCanonicalCategory(parsed.category, 'Expense', description)
+          : '';
         if (
           /shell|petronas|caltex|bhpetrol|petron|fuelsave|ron95|ron97|diesel/i.test(description) ||
           items.some((it) => /fuelsave|ron95|ron97|diesel/i.test(it.name))
@@ -503,7 +513,7 @@ Return JSON shape:
           category = 'Food & Dining';
         }
         if (!category) {
-          category = 'Food & Dining';
+          category = normalizeToCanonicalCategory('', 'Expense', description);
         }
 
         if (discountAmount != null && discountAmount > 0 && amount != null) {

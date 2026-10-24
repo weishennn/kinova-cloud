@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { matchMerchantCategoryRule } from './merchant-rules.ts';
+import { normalizeToCanonicalCategory } from './canonical-categories.ts';
 
 export type ShortcutTriggerSource = 'back_tap_screenshot' | 'apple_pay_wallet';
 
@@ -365,7 +366,8 @@ export function inferCategoryFromMerchant(merchantOrDesc: string, explicitCatego
   isUncertain: boolean;
 } {
   if (explicitCategory && explicitCategory.trim()) {
-    return { category: explicitCategory.trim(), isUncertain: false };
+    const normalized = normalizeToCanonicalCategory(explicitCategory, 'Expense', merchantOrDesc);
+    return { category: normalized, isUncertain: false };
   }
   const text = String(merchantOrDesc || '').trim();
   if (!text) {

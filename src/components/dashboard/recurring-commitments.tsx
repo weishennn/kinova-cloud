@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Shield, CheckCircle2, Clock, Calendar, Plus, Edit2, Check,
   Trash2, AlertCircle, Heart, Home, Wifi, Car, Film, Coffee,
-  ShoppingBag, HelpCircle, Sparkles, TrendingUp
+  ShoppingBag, HelpCircle, Sparkles, TrendingUp, Activity, Gift
 } from 'lucide-react';
 import { useTransactions } from '@/hooks/useTransactions';
 import { addUnifiedRow, applyOptimisticAddToQueryCache } from '@/hooks/useSheets';
@@ -37,6 +37,8 @@ const CATEGORY_ICONS: Record<string, { icon: any; color: string }> = {
   'Entertainment': { icon: Film, color: 'text-violet-800 dark:text-purple-400 bg-purple-500/10 border-purple-500/20' },
   'Food & Dining': { icon: Coffee, color: 'text-orange-800 dark:text-orange-400 bg-orange-500/10 border-orange-500/20' },
   'Shopping': { icon: ShoppingBag, color: 'text-emerald-800 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20' },
+  'Sport': { icon: Activity, color: 'text-sky-800 dark:text-sky-400 bg-sky-500/10 border-sky-500/20' },
+  'Gift': { icon: Gift, color: 'text-pink-800 dark:text-pink-400 bg-pink-500/10 border-pink-500/20' },
 };
 
 const AVAILABLE_CATEGORIES = [
@@ -47,6 +49,8 @@ const AVAILABLE_CATEGORIES = [
   'Entertainment',
   'Food & Dining',
   'Shopping',
+  'Sport',
+  'Gift',
   'Other'
 ];
 

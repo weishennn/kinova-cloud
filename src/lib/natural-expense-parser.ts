@@ -63,6 +63,15 @@ const CATEGORY_KEYWORDS: Record<string, string[]> = {
   'Education': [
     'course', 'tuition', 'class', 'book', 'exam', 'udemy', 'coursera', 'school', 'university'
   ],
+  'Sport': [
+    'badminton', 'gym', 'fitness', 'workout', 'running', 'sport', 'sports', 'court',
+    'shuttlecock', 'racket', 'yonex', 'decathlon', 'anytime fitness', 'celebrity fitness',
+    'swimming', 'swim', 'yoga', 'pilates', 'football', 'futsal', 'tennis', '羽毛球', '健身', '运动', '跑步'
+  ],
+  'Gift': [
+    'gift', 'present', 'presents', 'birthday gift', 'anniversary gift', 'souvenir',
+    'angpow', 'angpao', 'red packet', 'duit raya', '礼物', '送礼', '红包', '礼金', '手信', '生日礼物'
+  ],
   'Salary': [
     'salary', 'gaji', 'paycheck', 'payroll'
   ],

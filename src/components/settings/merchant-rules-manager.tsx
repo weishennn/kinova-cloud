@@ -32,6 +32,8 @@ const AVAILABLE_CATEGORIES = [
   'Health',
   'Entertainment',
   'Education',
+  'Sport',
+  'Gift',
   'Other',
 ];
 

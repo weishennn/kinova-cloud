@@ -329,7 +329,8 @@ CRITICAL INSTRUCTIONS:
    - Extract "billAmount" (e.g. 22.05), "discountAmount" (e.g. 3.31), and "dealsDescription" (e.g. "Deals and offers -RM3.31 (10% off bill -2.21, 5% off bill -1.10)").
 
 5. CATEGORIES:
-   - [Food & Dining, Transport, Shopping, Housing & Bills, Parents, Insurance, Entertainment, Health, Education, Other].
+   - [Food & Dining, Transport, Shopping, Housing & Bills, Parents, Insurance, Entertainment, Health, Education, Sport, Gift, Other].
+   - CRITICAL: category MUST be selected ONLY from this list. NEVER invent custom category names.
 
 Return JSON shape:
 {
