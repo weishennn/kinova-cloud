@@ -17,10 +17,13 @@ import { MoneyOrbit } from './money-orbit';
 import { SmartQuickInput } from '@/components/shared/smart-quick-input';
 import { TransactionDetailModal } from '@/components/shared/transaction-detail-modal';
 import { RecurringCommitments } from '@/components/dashboard/recurring-commitments';
+import { AiIntelligenceHub } from '@/components/dashboard/ai-intelligence-hub';
+import { getContextualSmartTag } from '@/lib/financial-intelligence';
 import { InstallmentDashboard } from '@/components/dashboard/installment-dashboard';
 import { IncomeAdvisor } from '@/components/dashboard/income-advisor';
 import { ClaimsCalendar } from '@/components/invoices/claims-calendar';
 import { useSyncAndRefresh } from '@/hooks/useSyncAndRefresh';
+import { toast } from 'sonner';
 
 const moneyFormat = new Intl.NumberFormat('en-MY', {
   style: 'currency',
@@ -84,7 +87,7 @@ function signedAmount(transaction: Transaction, formatMoney: (amount: number) =>
 }
 
 export function CashflowCockpit() {
-  const { selectedMonth, setSelectedMonth } = useAppStore();
+  const { selectedMonth, setSelectedMonth, setQuickAddOpen, setAiPrefill } = useAppStore();
   const { data: sheetMonths = [] } = useMonthList();
   const { transactions = [], isLoading, error } = useTransactions(selectedMonth ? { period: selectedMonth } : undefined);
   const { transactions: allLedgerTransactions = [] } = useTransactions({ period: 'all' });
@@ -128,6 +131,30 @@ export function CashflowCockpit() {
     : null;
 
   const handleAlertAction = (alert: ProactiveAlert) => {
+    if (alert.type === 'habit_anticipation') {
+      const now = new Date();
+      const isDinner = now.getHours() >= 17;
+      setAiPrefill({
+        kind: 'transaction',
+        data: {
+          description: '',
+          amount: 0,
+          category: 'Food & Dining',
+          currency: 'MYR',
+          date: getLocalDateString(),
+          type: 'Expense',
+        },
+      });
+      setQuickAddOpen(true);
+      toast.info(isDinner ? '记录今晚的晚餐 🍲' : '记录今天的午餐 🍱');
+      return;
+    }
+
+    if (alert.type === 'habit_discovery') {
+      window.location.href = '/settings';
+      return;
+    }
+
     setActiveCategory(null);
     setActiveAlertFilter({
       label: alert.title,
@@ -652,6 +679,7 @@ export function CashflowCockpit() {
                           <strong>{transaction.description || transaction.category}</strong>
                           <small>
                             {transaction.category}
+                            <span style={{ opacity: 0.85 }}> · {getContextualSmartTag(transaction.date, transaction.category, transaction.description).timeSlotTag}</span>
                             {transaction.account ? ` · ${transaction.account}` : ''}
                             {(() => {
                               const rec = getTransactionRecordedInfo(transaction);
@@ -670,6 +698,10 @@ export function CashflowCockpit() {
           ) : (
             <div className="cockpit-inline-empty"><Search size={18} /><span>{activeCategory ? `No ${activeCategory} entries in this period.` : 'No transactions in this period. Use the + button at the bottom to add one.'}</span></div>
           )}
+        </section>
+
+        <section className="cockpit-area-ai-hub" aria-label="Gemini AI Intelligence Hub">
+          <AiIntelligenceHub userBudgetCap={userBudgetCap} />
         </section>
 
         <section className="cockpit-area-commitments">

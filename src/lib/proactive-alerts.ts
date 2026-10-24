@@ -4,7 +4,7 @@ import { type MinimalTransaction } from './habit-suggestions.ts';
 
 export interface ProactiveAlert {
   id: string;
-  type: 'budget_pace' | 'price_increase' | 'category_spike';
+  type: 'budget_pace' | 'price_increase' | 'category_spike' | 'habit_anticipation' | 'habit_discovery';
   severity: 'warning' | 'info' | 'critical';
   title: string;
   message: string;
@@ -190,6 +190,45 @@ export function generateProactiveAlerts<T extends MinimalTransaction>(
         matchingTransactionIds: curr.txs.map((t) => t.id),
       });
     }
+  }
+
+  // 4. Proactive Habit Anticipation (e.g. Lunch/Dinner contextual habits)
+  if (typeof window !== 'undefined') {
+    try {
+      const now = new Date();
+      const currentHour = now.getHours();
+      const isLunchTime = currentHour >= 11 && currentHour < 15;
+      const isDinnerTime = currentHour >= 17 && currentHour < 21;
+      if (isLunchTime || isDinnerTime) {
+        const slotLabel = isLunchTime ? '午餐' : '晚餐';
+        const todayTxs = currentMonthExpenses.filter((t) => t.date === todayStr);
+        const hasFoodToday = todayTxs.some(
+          (t) => (t.category || '').toLowerCase().includes('food') || (t.category || '').toLowerCase().includes('dining')
+        );
+
+        if (!hasFoodToday) {
+          const rawHabits = localStorage.getItem('cashflow_habit_memory');
+          if (rawHabits) {
+            const habits = JSON.parse(rawHabits);
+            if (Array.isArray(habits)) {
+              if (hasFoodToday === false) {
+                alerts.push({
+                  id: `alert_habit_meal_${todayStr}`,
+                  type: 'habit_anticipation',
+                  severity: 'info',
+                  title: `🍱 ${slotLabel}时间到了`,
+                  message: `今天${slotLabel}吃了什么？点击即可快速记一笔。`,
+                  explanation: `时段感知：当前是 ${slotLabel} 时段（${isLunchTime ? '11:30~14:30' : '17:30~21:00'}），您今天尚未记录任何餐饮开销。`,
+                  actionLabel: `记一笔${slotLabel}`,
+                  actionSearchTerm: ``,
+                  matchingTransactionIds: [],
+                });
+              }
+            }
+          }
+        }
+      }
+    } catch {}
   }
 
   return alerts;

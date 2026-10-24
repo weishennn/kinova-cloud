@@ -62,6 +62,7 @@ import { findSuspectedDuplicates } from '@/lib/duplicate-detector';
 import { confirmAction } from '@/stores/confirm-dialog-store';
 import { parseLegacyPaidItemsFromNotes, parseReceiptItemsFromNotes, stripReceiptItemsFromNotes, withReceiptItemsInNotes, type StoredReceiptItem } from '@/lib/receipt-items';
 import { saveMerchantCategoryRule, normalizePattern } from '@/lib/merchant-rules';
+import { matchHabitMemory, learnOrStrengthenHabit } from '@/lib/habit-memory-engine';
 
 const CATEGORIES = {
   Expense: [
@@ -271,6 +272,11 @@ export function RecordPaymentModal() {
 
   const candidateMerchant = useMemo(() => {
     return normalizePattern(description);
+  }, [description]);
+
+  const proactiveHabit = useMemo(() => {
+    if (!description || description.trim().length < 2) return null;
+    return matchHabitMemory(description);
   }, [description]);
 
   const showRememberCategoryPrompt = useMemo(() => {
@@ -1211,8 +1217,17 @@ export function RecordPaymentModal() {
 
       // Close modal and notify user immediately
       closeModal();
-      if (showRememberCategoryPrompt && rememberMerchantRule && candidateMerchant) {
-        saveMerchantCategoryRule(candidateMerchant, category);
+      if (candidateMerchant && candidateMerchant.length >= 2) {
+        if (showRememberCategoryPrompt && rememberMerchantRule) {
+          saveMerchantCategoryRule(candidateMerchant, category);
+        }
+        learnOrStrengthenHabit({
+          rawInputOrMerchant: candidateMerchant,
+          aliasOrDescription: description || candidateMerchant,
+          category,
+          amount: targetAmount,
+          source: showRememberCategoryPrompt && rememberMerchantRule ? 'user_confirmed' : 'auto_learned',
+        });
       }
       toast.success(receiptQueued ? 'Transaction updated. Receipt upload is queued! ⚡' : 'Transaction updated! ⚡');
 
@@ -1393,8 +1408,17 @@ export function RecordPaymentModal() {
       );
     }
 
-    if (showRememberCategoryPrompt && rememberMerchantRule && candidateMerchant) {
-      saveMerchantCategoryRule(candidateMerchant, category);
+    if (candidateMerchant && candidateMerchant.length >= 2) {
+      if (showRememberCategoryPrompt && rememberMerchantRule) {
+        saveMerchantCategoryRule(candidateMerchant, category);
+      }
+      learnOrStrengthenHabit({
+        rawInputOrMerchant: candidateMerchant,
+        aliasOrDescription: description || candidateMerchant,
+        category,
+        amount: targetAmount,
+        source: showRememberCategoryPrompt && rememberMerchantRule ? 'user_confirmed' : 'auto_learned',
+      });
     }
 
     void queryClient.invalidateQueries({ queryKey: ['sheet'] });
@@ -1732,6 +1756,24 @@ export function RecordPaymentModal() {
                     className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 py-2.5 px-3 text-sm text-slate-950 dark:text-white placeholder-zinc-500 outline-none focus:border-indigo-500"
                   />
                 </div>
+                {proactiveHabit && proactiveHabit.isAlias && description.trim().toLowerCase() === proactiveHabit.matchedPattern.toLowerCase() && (
+                  <div className="mt-1 flex items-center justify-between gap-1.5 p-1.5 rounded-lg bg-purple-500/15 border border-purple-500/30 text-[11px] text-purple-900 dark:text-purple-200">
+                    <span className="truncate">
+                      ✨ 习惯：转给 <strong>{proactiveHabit.matchedPattern}</strong> 通常是「<strong>{proactiveHabit.resolvedDescription}</strong>」
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDescription(proactiveHabit.resolvedDescription);
+                        setCategory(proactiveHabit.resolvedCategory);
+                        toast.success(`已一键匹配习惯「${proactiveHabit.resolvedDescription}」`);
+                      }}
+                      className="shrink-0 px-2 py-0.5 rounded bg-purple-600 hover:bg-purple-700 text-white font-medium text-[10px] transition-colors shadow-sm"
+                    >
+                      一键应用
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-1.5">

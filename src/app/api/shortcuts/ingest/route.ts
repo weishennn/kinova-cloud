@@ -4,6 +4,7 @@ import { getLocalDateString, parseLocalDate } from '@/lib/date-helper';
 import { getValidGoogleSession } from '@/lib/google-auth';
 import { getActiveShortcutOwnerEmail, setActiveShortcutOwner } from '@/lib/admin-registry';
 import { getLoadBalancedGeminiKeys, reportGeminiKeyFailure } from '@/lib/gemini-key-pool';
+import { matchHabitMemory } from '@/lib/habit-memory-engine';
 import {
   acknowledgeShortcutDraft,
   claimShortcutDraft,
@@ -460,6 +461,7 @@ Return JSON shape:
     }
 
     const currencyAmbiguous = Boolean(parsedOcr.currencyAmbiguous) || moneyRes.currencyAmbiguous;
+    const habitMatch = matchHabitMemory(rawMerchant || (items.length > 0 ? items[0].name : ''));
     const catRes = inferCategoryFromMerchant(
       rawMerchant || (items.length > 0 ? items[0].name : ''),
       typeof parsedOcr.category === 'string' ? parsedOcr.category : undefined
@@ -467,7 +469,20 @@ Return JSON shape:
     const catConfidence = typeof parsedOcr.categoryConfidence === 'number' ? parsedOcr.categoryConfidence : 0.5;
     const dateStr = sanitizeDate(parsedOcr.date) || today;
 
-    const effectiveDescription = rawMerchant || (catRes.category && catRes.category !== 'Other' ? catRes.category : '');
+    let effectiveDescription = rawMerchant || (catRes.category && catRes.category !== 'Other' ? catRes.category : '');
+    let effectiveCategory = catRes.category;
+    let habitNotice = '';
+
+    if (habitMatch) {
+      effectiveCategory = habitMatch.resolvedCategory;
+      if (habitMatch.isAlias) {
+        effectiveDescription = habitMatch.resolvedDescription;
+        habitNotice = `[习惯识别: 转给 ${habitMatch.matchedPattern} ➔ ${habitMatch.resolvedDescription}]`;
+      }
+      if (items.length === 0 && habitMatch.matchedItem.defaultItemName && moneyRes.amount != null && moneyRes.amount > 0) {
+        items.push({ name: habitMatch.matchedItem.defaultItemName, amount: moneyRes.amount });
+      }
+    }
 
     const missingFields: Array<'amount' | 'description' | 'currency' | 'category'> = [];
     const uncertainFields: Array<'amount' | 'description' | 'currency' | 'category'> = [];
@@ -481,7 +496,7 @@ Return JSON shape:
     if (currencyAmbiguous) {
       uncertainFields.push('currency');
     }
-    if (catRes.isUncertain || catConfidence < 0.65) {
+    if ((catRes.isUncertain && !habitMatch) || catConfidence < 0.65) {
       uncertainFields.push('category');
     }
 
@@ -500,9 +515,9 @@ Return JSON shape:
       currencyAmbiguous,
       candidateCurrencies: moneyRes.candidateCurrencies,
       type: 'Expense',
-      category: catRes.category,
+      category: effectiveCategory,
       description: effectiveDescription,
-      merchant: rawMerchant,
+      merchant: effectiveDescription || rawMerchant,
       date: dateStr,
       discountAmount,
       dealsDescription,
@@ -511,6 +526,7 @@ Return JSON shape:
       ocrSummary,
       notes: [
         '快捷指令截图草稿（待核对确认）',
+        habitNotice,
         discountAmount && discountAmount > 0
           ? `[优惠抵扣: -${moneyRes.currency} ${discountAmount.toFixed(2)}${dealsDescription ? ` (${dealsDescription})` : ''}]`
           : '',

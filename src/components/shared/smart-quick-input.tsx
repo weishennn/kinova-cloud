@@ -33,6 +33,7 @@ import { withReceiptItemsInNotes } from '@/lib/receipt-items';
 import { confirmAction } from '@/stores/confirm-dialog-store';
 import { findSuspectedDuplicates } from '@/lib/duplicate-detector';
 import { mineUserHabitSuggestions } from '@/lib/habit-suggestions';
+import { learnOrStrengthenHabit } from '@/lib/habit-memory-engine';
 
 const CATEGORY_EMOJIS: Record<string, string> = {
   'Food & Dining': '🍔',
@@ -669,6 +670,12 @@ export function SmartQuickInput() {
       }
 
       let finalNotes = activeParsed.notes || '';
+      if (localParsed?.habitMatch?.isAlias) {
+        const habitTag = `[习惯匹配: 转给 ${localParsed.habitMatch.rawPattern}]`;
+        if (!finalNotes.includes(habitTag)) {
+          finalNotes = finalNotes ? `${finalNotes} ${habitTag}` : habitTag;
+        }
+      }
       if (activeParsed.taxAmount != null && activeParsed.taxAmount > 0) {
         const taxRateStr = activeParsed.taxRate != null ? ` (${activeParsed.taxRate}%)` : '';
         const taxNote = `[Tax: ${activeParsed.currency || 'MYR'} ${activeParsed.taxAmount.toFixed(2)}${taxRateStr}]`;
@@ -783,6 +790,15 @@ export function SmartQuickInput() {
 
       const recordedText = `${activeParsed.currency || 'MYR'} ${activeParsed.amount.toFixed(2)} for ${activeParsed.description}`;
       const savedTaxCat = taxPreviewInfo?.isEligible ? taxPreviewInfo.category : null;
+      if (activeParsed.description) {
+        learnOrStrengthenHabit({
+          rawInputOrMerchant: localParsed?.habitMatch ? localParsed.habitMatch.rawPattern : activeParsed.description,
+          aliasOrDescription: activeParsed.description,
+          category: activeParsed.category,
+          amount: activeParsed.amount,
+          source: 'auto_learned',
+        });
+      }
       setInput('');
       setAiParsed(null);
       setIsAiEnhanced(false);
@@ -1427,7 +1443,7 @@ export function SmartQuickInput() {
                           </span>
                         )}
                         <span className="text-slate-800 dark:text-zinc-200 font-semibold truncate max-w-[160px]">
-                          &ldquo;{activeCommand.data.description}&rdquo;
+                          &ldquo;{activeCommand.data.description}&rdquo;{localParsed?.habitMatch && <span className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-semibold text-purple-800 dark:text-purple-300">✨ (习惯: 转给 {localParsed.habitMatch.rawPattern})</span>}
                         </span>
                         <button
                           type="button"

@@ -1,6 +1,7 @@
-import { getLocalDateString, getRelativeDateString, getDaysInMonth } from '@/lib/date-helper';
-import { evaluateMoneyExpression } from '@/components/shared/money-calculator';
-import { matchMerchantCategoryRule } from '@/lib/merchant-rules';
+import { getLocalDateString, getRelativeDateString, getDaysInMonth } from './date-helper.ts';
+import { evaluateMoneyExpression } from './money-calculator-helper.ts';
+import { matchMerchantCategoryRule } from './merchant-rules.ts';
+import { matchHabitMemory, type HabitMemoryMatch } from './habit-memory-engine.ts';
 
 export interface ParsedExpense {
   amount: number;
@@ -13,6 +14,12 @@ export interface ParsedExpense {
   installmentMonths?: number;
   interestRate?: number;
   formula?: string;
+  habitMatch?: {
+    rawPattern: string;
+    alias: string;
+    confidence: number;
+    isAlias: boolean;
+  };
 }
 
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
@@ -280,23 +287,38 @@ export function parseNaturalExpense(input: string): ParsedExpense | null {
   let detectedCategory = 'Food & Dining'; // sensible default
   let detectedType: 'Expense' | 'Income' = 'Expense';
   let highestScore = 0;
+  let habitMatchMeta: { rawPattern: string; alias: string; confidence: number; isAlias: boolean } | undefined;
 
-  // 1. User-remembered merchant rules take highest precedence
-  const userRule = matchMerchantCategoryRule(text);
-  if (userRule) {
-    detectedCategory = userRule.category;
-    detectedType = INCOME_CATEGORIES.includes(userRule.category) ? 'Income' : 'Expense';
-    highestScore = 999;
+  // 1. Proactive Habit Memory takes top precedence (learns aliases like abc -> zapfan)
+  const habitMatch = matchHabitMemory(text);
+  if (habitMatch) {
+    detectedCategory = habitMatch.resolvedCategory;
+    detectedType = INCOME_CATEGORIES.includes(habitMatch.resolvedCategory) ? 'Income' : 'Expense';
+    highestScore = 1000;
+    habitMatchMeta = {
+      rawPattern: habitMatch.matchedPattern,
+      alias: habitMatch.resolvedDescription,
+      confidence: habitMatch.matchedItem.confidence,
+      isAlias: habitMatch.isAlias,
+    };
   } else {
-    for (const [catName, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
-      for (const kw of keywords) {
-        if (lower.includes(kw)) {
-          // Longer keyword matches get higher priority (e.g. "grabfood" > "food")
-          const score = kw.length;
-          if (score > highestScore) {
-            highestScore = score;
-            detectedCategory = catName;
-            detectedType = INCOME_CATEGORIES.includes(catName) ? 'Income' : 'Expense';
+    // 2. User-remembered merchant rules take next precedence
+    const userRule = matchMerchantCategoryRule(text);
+    if (userRule) {
+      detectedCategory = userRule.category;
+      detectedType = INCOME_CATEGORIES.includes(userRule.category) ? 'Income' : 'Expense';
+      highestScore = 999;
+    } else {
+      for (const [catName, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
+        for (const kw of keywords) {
+          if (lower.includes(kw)) {
+            // Longer keyword matches get higher priority (e.g. "grabfood" > "food")
+            const score = kw.length;
+            if (score > highestScore) {
+              highestScore = score;
+              detectedCategory = catName;
+              detectedType = INCOME_CATEGORIES.includes(catName) ? 'Income' : 'Expense';
+            }
           }
         }
       }
@@ -329,8 +351,10 @@ export function parseNaturalExpense(input: string): ParsedExpense | null {
     .replace(/\s+/g, ' ')
     .trim();
 
-  // If description is empty or too short, use a friendly title
-  if (!cleanedDesc || cleanedDesc.length < 2) {
+  // If matched habit has a preferred alias (e.g. abc -> zapfan), use the alias
+  if (habitMatchMeta && habitMatchMeta.isAlias) {
+    cleanedDesc = habitMatchMeta.alias;
+  } else if (!cleanedDesc || cleanedDesc.length < 2) {
     cleanedDesc = detectedCategory;
   } else {
     // Capitalize first letter
@@ -348,5 +372,6 @@ export function parseNaturalExpense(input: string): ParsedExpense | null {
     installmentMonths,
     interestRate: detectedInterestRate,
     formula: detectedFormula,
+    habitMatch: habitMatchMeta,
   };
 }
