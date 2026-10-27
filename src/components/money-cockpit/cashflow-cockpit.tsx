@@ -679,7 +679,7 @@ export function CashflowCockpit() {
                           <strong>{transaction.description || transaction.category}</strong>
                           <small>
                             {transaction.category}
-                            <span style={{ opacity: 0.85 }}> · {getContextualSmartTag(transaction.date, transaction.category, transaction.description).timeSlotTag}</span>
+                            <span style={{ opacity: 0.85 }}> · {getContextualSmartTag(transaction.date, transaction.category, transaction.description, undefined, transaction.id || transaction.notes).timeSlotTag}</span>
                             {transaction.account ? ` · ${transaction.account}` : ''}
                             {(() => {
                               const rec = getTransactionRecordedInfo(transaction);

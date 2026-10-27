@@ -129,6 +129,18 @@ test('4. getContextualSmartTag identifies time slots, weekday vs weekend, and ho
   // New Year (01-01)
   const tag3 = getContextualSmartTag('2026-01-01', 'Shopping', 'Gifts', 15);
   assert.ok(tag3.holidayTag?.includes('元旦'));
+
+  // Sport (羽毛球) -> Must NEVER be labeled as lunch!
+  const tagBadminton = getContextualSmartTag('2026-10-20', 'Sport', '羽毛球馆预订');
+  assert.equal(tagBadminton.timeSlotTag, '🏸 羽毛球');
+
+  // Evening dinner with time marker in description or notes -> Must be dinner, not lunch!
+  const tagEveningDinner = getContextualSmartTag('2026-10-20', 'Food & Dining', '晚餐 20:15');
+  assert.equal(tagEveningDinner.timeSlotTag, '🍲 晚餐聚餐');
+
+  // Neutral Food & Dining with no hour -> Neutral 日常餐饮, never forced to 工作日午餐!
+  const tagNeutralFood = getContextualSmartTag('2026-10-20', 'Food & Dining', 'Super Kitchen');
+  assert.equal(tagNeutralFood.timeSlotTag, '🍽️ 日常餐饮');
 });
 
 test('5. generateAiFinancialBriefing summarizes monthly highlights, largest expense, and outlook', () => {

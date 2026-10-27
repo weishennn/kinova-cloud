@@ -327,7 +327,7 @@ export function learnOrStrengthenHabit(params: {
       rawPattern: rawClean,
       preferredAlias: aliasClean,
       category: categoryClean,
-      subCategory: params.subCategory?.trim() || (timeSlot === 'lunch' ? 'Lunch' : undefined),
+      subCategory: params.subCategory?.trim() || (categoryClean === 'Food & Dining' ? (timeSlot === 'lunch' ? 'Lunch' : timeSlot === 'dinner' ? 'Dinner' : timeSlot === 'breakfast' ? 'Breakfast' : undefined) : undefined),
       typicalAmount: typeof params.amount === 'number' && params.amount > 0 ? params.amount : undefined,
       timeSlot,
       frequency: params.source === 'manual' ? 3 : 1,
