@@ -161,7 +161,8 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const imageBase64 = typeof body?.imageBase64 === 'string' ? body.imageBase64 : '';
+    const rawImage = typeof body?.imageBase64 === 'string' ? body.imageBase64 : '';
+    const imageBase64 = rawImage.replace(/^data:image\/\w+;base64,/, '').trim();
     const mimeType = typeof body?.mimeType === 'string' ? body.mimeType : 'image/jpeg';
     const today = sanitizeDate(body?.today) || getLocalDateString();
 
@@ -174,8 +175,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'GEMINI_API_KEY is not configured in environment' }, { status: 500 });
     }
 
-    const preferredModel = (process.env.GEMINI_OCR_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash').trim();
-    const models = [preferredModel, 'gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-flash-latest'].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
+    const preferredModel = (process.env.GEMINI_OCR_MODEL || process.env.GEMINI_MODEL || '').trim();
+    const models = [
+      'gemini-2.5-flash',
+      preferredModel,
+      'gemini-flash-latest',
+      'gemini-3.5-flash',
+    ].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
 
     const prompt = `You are an intelligent financial OCR and receipt analysis AI.
 Analyze this receipt or payment confirmation screenshot and return ONLY valid JSON.
@@ -260,71 +266,46 @@ Return JSON shape:
 
       for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx += 1) {
         const apiKey = apiKeys[keyIdx];
-        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': apiKey,
-          },
-          body: JSON.stringify({
-            contents: [{
-              role: 'user',
-              parts: [
-                { text: prompt },
-                { inline_data: { mime_type: mimeType, data: imageBase64 } },
-              ],
-            }],
-            generationConfig: {
-              responseMimeType: 'application/json',
-              temperature: 0.1,
-              maxOutputTokens: 4096,
+        try {
+          res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
             },
-          }),
-          signal: AbortSignal.timeout(15000),
-        });
-
-        // Transient 503 / 500 handling: 1 quick retry with backoff if server is temporarily overloaded
-        if (res && (res.status === 503 || res.status === 500)) {
-          await new Promise((resolve) => setTimeout(resolve, 800));
-          try {
-            res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-goog-api-key': apiKey,
+            body: JSON.stringify({
+              contents: [{
+                role: 'user',
+                parts: [
+                  { text: prompt },
+                  { inline_data: { mime_type: mimeType, data: imageBase64 } },
+                ],
+              }],
+              generationConfig: {
+                responseMimeType: 'application/json',
+                temperature: 0.1,
+                maxOutputTokens: 4096,
               },
-              body: JSON.stringify({
-                contents: [{
-                  role: 'user',
-                  parts: [
-                    { text: prompt },
-                    { inline_data: { mime_type: mimeType, data: imageBase64 } },
-                  ],
-                }],
-                generationConfig: {
-                  responseMimeType: 'application/json',
-                  temperature: 0.1,
-                  maxOutputTokens: 4096,
-                },
-              }),
-              signal: AbortSignal.timeout(15000),
-            });
-          } catch {
-            // Keep original res
-          }
+            }),
+            signal: AbortSignal.timeout(25000),
+          });
+        } catch {
+          // Timeout or connection error on this key/model, failover to next key
+          continue;
         }
 
-        if (res.ok) break;
+        if (res && res.ok) break;
 
-        if (res.status === 429 || res.status === 401 || res.status === 403 || res.status >= 500) {
+        // Model-level overload (503) or missing (404): failover to next candidate model immediately!
+        if (res && (res.status === 503 || res.status === 404)) {
+          shouldTryNextModel = true;
+          break;
+        }
+
+        if (res && (res.status === 429 || res.status === 401 || res.status === 403 || res.status >= 500)) {
           reportGeminiKeyFailure(apiKey, res.status);
           if (keyIdx + 1 < apiKeys.length) {
             continue; // Failover to next configured API key
           }
-        }
-        if ((res.status === 404 || res.status >= 500) && model !== models[models.length - 1]) {
-          shouldTryNextModel = true;
-          break;
         }
         break;
       }
@@ -699,7 +680,9 @@ Return JSON shape:
     }
 
     return NextResponse.json({ success: false, error: 'No OCR model was available' }, { status: 502 });
-  } catch {
-    return NextResponse.json({ success: false, error: 'Receipt OCR failed' }, { status: 500 });
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : 'Receipt OCR failed';
+    console.error('[ReceiptOCR] Uncaught error in route:', err);
+    return NextResponse.json({ success: false, error: `Receipt OCR failed (${errorMsg})` }, { status: 500 });
   }
 }
