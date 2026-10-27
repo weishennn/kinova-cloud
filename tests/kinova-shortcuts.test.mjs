@@ -265,7 +265,7 @@ test('6. Gemini Vision OCR fast-fail retry logic: normal 200, timeout, 404 fallb
     },
   });
   assert.equal(fallback404Res.attempts, 2);
-  assert.equal(fallback404Res.modelUsed, 'gemini-flash-latest');
+  assert.equal(fallback404Res.modelUsed, 'gemini-2.5-flash');
   assert.equal(fallback404Res.parsedOcr.amount, 32.0);
 
   // 6d. 429 Quota / 503 Busy -> stops IMMEDIATELY after 1 attempt (no cascade)

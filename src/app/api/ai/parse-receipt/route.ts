@@ -174,8 +174,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'GEMINI_API_KEY is not configured in environment' }, { status: 500 });
     }
 
-    const preferredModel = (process.env.GEMINI_OCR_MODEL || process.env.GEMINI_MODEL || 'gemini-flash-latest').trim();
-    const models = [preferredModel, 'gemini-flash-latest', 'gemini-3.8-flash', 'gemini-2.5-flash'].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
+    const preferredModel = (process.env.GEMINI_OCR_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash').trim();
+    const models = [preferredModel, 'gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-flash-latest'].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
 
     const prompt = `You are an intelligent financial OCR and receipt analysis AI.
 Analyze this receipt or payment confirmation screenshot and return ONLY valid JSON.
@@ -216,14 +216,20 @@ CRITICAL INSTRUCTIONS:
    - If a 2-digit year is printed (e.g. "05/10/26"), expand to 2026.
    - NEVER confuse transaction date with expiry dates ("EXP", "Best Before"). Fallback to ${today} if missing.
 
-6. TAXES & ROUNDING:
+6. TAXES & ROUNDING (INCLUSIVE VS EXCLUSIVE INTELLIGENCE):
+   - Determine whether tax (SST, GST, VAT) is ALREADY INCLUDED in the printed line items (taxIncluded: true) or ADDED ON TOP (taxIncluded: false):
+     * If receipt states 'Inclu.', 'Inc.', 'Inclusive', 'Base Amt.', 'SST 6% (Inc.)', or if sum(items.amount) equals subtotal/amount (e.g. items sum to 127.30 and total is 127.30 with SST 7.21 on base 120.09), then TAX IS INCLUDED in the line item prices! Set "taxIncluded": true.
+     * When taxIncluded is true: item prices MUST remain the printed prices that include tax. "amount" is the total net amount paid (e.g. 127.30). Do NOT strip tax from individual items!
+     * When tax is added on top (exclusive): sum(items) + tax = amount, set "taxIncluded": false.
    - Taxes: array of ALL tax and service charge lines printed, e.g. [{"label": "Service Charge 10%", "rate": 10, "amount": 3.02}, {"label": "SST 6%", "rate": 6, "amount": 1.81}].
    - CRITICAL FOR ROUNDING: NEVER include "Rounding", "Rounding Adjustment", "Pelarasan", "Pelarasan Genapan", or "Genap" in taxes or taxAmount! Rounding (±0.01 to ±0.05) is NOT a tax!
 
-7. ITEMS:
+7. ITEMS (PRESERVE REPEATED LINES & QUANTITY AUDIT):
    - Array of every purchased line with { "name": string, "quantity": number, "unitPrice": number, "amount": number, "brand": string|null, "productType": string|null, "category": string }.
+   - REPEATED DISHES: Receipts frequently list the exact same dish multiple times on separate lines (e.g. Line A: 1x Chilli Pan Mee, Line B: 2x Chilli Pan Mee, Line C: 1x Chilli Pan Mee). NEVER merge, consolidate, or drop repeated lines! Every printed line MUST be its own item in "items".
+   - QUANTITY FOOTER: Check the receipt's printed quantity check if present (e.g. '11 Qty'). Verify that sum(item.quantity) matches the printed total quantity.
    - If "2 Laksa 18.00" is already the line total, set quantity: 2, unitPrice: 9.00, amount: 18.00 (do NOT multiply again).
-   - "amount" MUST ALWAYS be pre-tax line total. Exclude subtotal, tax, service charge, roundings, discounts, or change rows.
+   - "amount" is the full line total for that item row.
 
 8. CATEGORIES (STRICT PREDEFINED LIST):
    - "category" and item "category" MUST be chosen ONLY from:
@@ -276,7 +282,7 @@ Return JSON shape:
               maxOutputTokens: 4096,
             },
           }),
-          signal: AbortSignal.timeout(20000),
+          signal: AbortSignal.timeout(15000),
         });
 
         // Transient 503 / 500 handling: 1 quick retry with backoff if server is temporarily overloaded
@@ -303,7 +309,7 @@ Return JSON shape:
                   maxOutputTokens: 4096,
                 },
               }),
-              signal: AbortSignal.timeout(20000),
+              signal: AbortSignal.timeout(15000),
             });
           } catch {
             // Keep original res
@@ -343,15 +349,30 @@ Return JSON shape:
       const rawJson = responseData.candidates?.[0]?.content?.parts?.[0]?.text;
       if (!rawJson) return NextResponse.json({ success: false, error: 'Gemini OCR returned no text result' }, { status: 502 });
 
+      let cleanJson = rawJson.trim();
+      const blockMatch = cleanJson.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+      if (blockMatch) {
+        cleanJson = blockMatch[1].trim();
+      }
+
+      let parsed: Record<string, unknown>;
       try {
-        let cleanJson = rawJson.trim();
-        const blockMatch = cleanJson.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-        if (blockMatch) {
-          cleanJson = blockMatch[1].trim();
+        parsed = JSON.parse(cleanJson) as Record<string, unknown>;
+      } catch {
+        const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+          } catch {
+            return NextResponse.json({ success: false, error: 'Gemini OCR returned invalid JSON' }, { status: 502 });
+          }
+        } else {
+          return NextResponse.json({ success: false, error: 'Gemini OCR returned invalid JSON' }, { status: 502 });
         }
+      }
 
-        const parsed = JSON.parse(cleanJson) as Record<string, unknown>;
-
+      try {
+        const isTaxIncluded = Boolean(parsed.taxIncluded ?? parsed.tax_included);
         let amount = typeof parsed.amount === 'number' && Number.isFinite(parsed.amount) && parsed.amount > 0
           ? Number(parsed.amount.toFixed(2))
           : null;
@@ -361,7 +382,9 @@ Return JSON shape:
         const rawTaxAmtForReconcile = typeof parsed.taxAmount === 'number' && Number.isFinite(parsed.taxAmount) && parsed.taxAmount > 0
           ? Number(parsed.taxAmount.toFixed(2))
           : 0;
-        const expectedItemsSubtotal = subtotal ?? (amount != null && amount > rawTaxAmtForReconcile ? Number((amount - rawTaxAmtForReconcile).toFixed(2)) : null);
+        const expectedItemsSubtotal = isTaxIncluded
+          ? (amount ?? subtotal)
+          : (subtotal ?? (amount != null && amount > rawTaxAmtForReconcile ? Number((amount - rawTaxAmtForReconcile).toFixed(2)) : null));
 
         const rawParsedItems: RawKinovaReceiptItem[] = Array.isArray(parsed.items)
           ? parsed.items

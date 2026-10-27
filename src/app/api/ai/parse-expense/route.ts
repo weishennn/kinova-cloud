@@ -370,8 +370,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'GEMINI_API_KEY is not configured in environment' }, { status: 500 });
     }
 
-    const preferredModel = (process.env.GEMINI_MODEL || 'gemini-flash-latest').trim();
-    const models = [preferredModel, 'gemini-flash-latest', 'gemini-3.8-flash', 'gemini-2.5-flash'].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
+    const preferredModel = (process.env.GEMINI_MODEL || 'gemini-2.5-flash').trim();
+    const models = [preferredModel, 'gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-flash-latest'].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
     let lastError = 'No response from model';
 
     for (const model of models) {
