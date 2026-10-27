@@ -18,7 +18,6 @@ import { SmartQuickInput } from '@/components/shared/smart-quick-input';
 import { TransactionDetailModal } from '@/components/shared/transaction-detail-modal';
 import { RecurringCommitments } from '@/components/dashboard/recurring-commitments';
 import { AiIntelligenceHub } from '@/components/dashboard/ai-intelligence-hub';
-import { getContextualSmartTag } from '@/lib/financial-intelligence';
 import { InstallmentDashboard } from '@/components/dashboard/installment-dashboard';
 import { IncomeAdvisor } from '@/components/dashboard/income-advisor';
 import { ClaimsCalendar } from '@/components/invoices/claims-calendar';
@@ -679,7 +678,7 @@ export function CashflowCockpit() {
                           <strong>{transaction.description || transaction.category}</strong>
                           <small>
                             {transaction.category}
-                            <span style={{ opacity: 0.85 }}> · {getContextualSmartTag(transaction.date, transaction.category, transaction.description, undefined, transaction.id || transaction.notes).timeSlotTag}</span>
+                            {transaction.subCategory && transaction.subCategory !== transaction.category ? ` · ${transaction.subCategory}` : ''}
                             {transaction.account ? ` · ${transaction.account}` : ''}
                             {(() => {
                               const rec = getTransactionRecordedInfo(transaction);

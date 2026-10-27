@@ -183,43 +183,41 @@ Today is ${today}.
 
 CRITICAL INSTRUCTIONS:
 1. NOTIFICATION BANNER / UI CHROME FILTERING:
-   - Screenshots often have mobile UI chrome: iOS status bar (time, 5G, battery), Dynamic Island, or NOTIFICATION BANNERS at the top (e.g. from "Kinova Automation", "Shortcuts", "Automation", "Screenshot", "now", notification icons).
-   - NEVER EVER use "Kinova Automation", "Kinova", "Shortcuts", or any system app/shortcut name as the merchant, store, or item name!
-   - NEVER use generic screen status titles like "Payment successful", "Payment success", "Order details", or "Order ID" as the merchant name!
-   - Look UNDERNEATH or PAST any notification banner to find the ACTUAL store/merchant (e.g. Shell, Petronas, Four Beans 四夕豆花, etc.).
+   - Screenshots often have mobile UI chrome: status bar (time, battery, network), Dynamic Island, or NOTIFICATION BANNERS at the top.
+   - NEVER use system app names, shortcut titles, or notification text as the merchant, store, or item name!
+   - NEVER use generic screen status titles like "Payment successful", "Payment completed", "Order details", or "Order ID" as the merchant name!
+   - Look UNDERNEATH or PAST any notification banner to find the ACTUAL store or merchant name.
 
-2. APP HEADER & WEBH5 SHOP NAME EXTRACTION:
-   - On payment success screens (e.g. Touch 'n Go, GrabPay, WeChat mini-programs, food order webviews), the shop name is often located at the top navigation bar next to a close button '✕' or '<' (e.g. '✕ Four Beans 四夕豆花 - Taman Me...').
-   - You MUST extract the merchant name from this top bar if it is not inside the card body!
-   - Clean branch suffixes or trailing truncation dots: e.g. "Four Beans 四夕豆花".
-   - FOOD INFERENCE: If the payment confirmation does not list individual dishes (e.g. only shows Order ID, Bill amount, Deals and offers), extract the signature food from the merchant name into 'items' (e.g. for 'Four Beans 四夕豆花', extract { "name": "四夕豆花 / 甜品", "quantity": 1, "unitPrice": 18.74, "amount": 18.74, "category": "Food & Dining" }).
+2. APP HEADER & PAYMENT SUMMARY EXTRACTION:
+   - On payment screens (e.g. e-wallets, mini-programs, webviews), the store name is often located at the top navigation bar next to a close button '✕' or '<' (e.g. '✕ Store Name - Branch...').
+   - You MUST extract the merchant name from this top bar if it is not inside the card body.
+   - Clean branch suffixes or trailing truncation dots.
+   - If the payment confirmation does not list individual dishes/items (e.g. only shows Order ID, Bill amount, Deals and offers), generate a single line item using the merchant name or payment note as the item description, with quantity 1 and amount equal to the net payment.
 
-2.5. E-WALLET & BANK TRANSFER CONFIRMATIONS (ShopeePay, Touch 'n Go, GrabPay, MAE, DuitNow QR):
-   - PAYMENT METHOD IS NOT THE MERCHANT: "ShopeePay", "ShopeePay Balance", "Touch 'n Go eWallet", "eWallet Balance", "DuitNow QR", "MAE" are payment channels/methods, NEVER the merchant/store name!
-   - MERCHANT LOCATION IS NOT THE STORE NAME: "Merchant Location: AMPANG", "Location: ...", or city names are locations, NOT the merchant name! NEVER invent generic names like "Food Stall (Ampang)" or "Shop (Location)"!
-   - EXTRACT "MEMO" / "REMARK" / "RECIPIENT REFERENCE": Look specifically for "Memo", "Remark", "Recipient Reference", "Payment Details", or "Note" (e.g. "Memo: Chicken rice"). When no separate shop brand is shown, the Memo/Remark text IS the primary dish/food or stall name! Extract it as "description" and include it in "items": [{ "name": "Chicken rice", "quantity": 1, "unitPrice": 14.00, "amount": 14.00, "category": "Food & Dining" }].
+2.5. E-WALLET & BANK TRANSFER CONFIRMATIONS (DuitNow QR, e-Wallets, Mobile Banking):
+   - PAYMENT METHOD IS NOT THE MERCHANT: Payment channels/methods (e.g. "Touch 'n Go eWallet", "ShopeePay", "DuitNow QR", "MAE", "Card") are NEVER the merchant/store name!
+   - MERCHANT LOCATION IS NOT THE STORE NAME: Location fields or city names are locations, NOT the merchant name. NEVER invent generic names like "Food Stall (Location)"!
+   - EXTRACT "MEMO" / "REMARK" / "RECIPIENT REFERENCE": Look specifically for "Memo", "Remark", "Recipient Reference", "Payment Details", or "Note". When no separate shop brand is shown, the Memo/Remark text IS the primary description or stall name! Extract it as "description" and include it in "items".
 
-3. FUEL / PETROL RECEIPTS (CRITICAL PRICE EXTRACTION):
-   - Gas stations (Shell, Petronas, Caltex, Petron, BHPetrol) belong to category "Transport".
-   - Extract purchased fuel line items into "items": e.g. "FuelSave 95", "RON95", "RON97", "Diesel", with litres and unit price per litre.
-   - CRITICAL PRICE RULE: Petrol receipts frequently show an unsubsidized pump gross total (e.g. "Total Paid RM 202.82") alongside Government Subsidies (e.g. "Subsidy (BUDI MADANI) RM 115.46"), Loyalty Vouchers (e.g. "Loyalty Voucher RM 5.00"), and the actual user card debit (e.g. "VISA Shell App - RHB Visa Debit RM 82.36").
-   - "amount" MUST BE THE NET OUT-OF-POCKET AMOUNT CHARGED TO THE USER'S CARD OR PAID IN CASH (e.g. 82.36)! NEVER use the unsubsidized pump total (202.82) when government subsidy or vouchers paid for part of the fuel!
-   - Set "billAmount": 202.82 (gross pump price), "discountAmount": 120.46 (115.46 subsidy + 5.00 voucher), and "dealsDescription": "Subsidy (BUDI MADANI) RM 115.46 + Loyalty Voucher RM 5.00".
+3. FUEL / PETROL & SUBSIDY DEDUCTIONS:
+   - Gas and petrol stations belong to category "Transport".
+   - Extract purchased fuel line items into "items" with litres and unit price when printed.
+   - DEDUCTION & NET CHARGE AUDIT: Receipts and fuel pumps often display an unsubsidized gross amount, government subsidies, loyalty vouchers, or member discounts alongside the actual customer payment. "amount" MUST ALWAYS BE THE ACTUAL NET OUT-OF-POCKET AMOUNT CHARGED TO THE CARD OR PAID IN CASH. Extract "billAmount" (gross pre-discount), "discountAmount" (subsidies + vouchers + discounts), and "dealsDescription" summarizing the deductions.
 
 4. NET AMOUNT PAID VS PRE-DISCOUNT BILL:
-   - "amount" MUST ALWAYS BE THE ACTUAL NET OUT-OF-POCKET AMOUNT PAID (e.g. 18.74 for Four Beans, 82.36 for Shell).
+   - "amount" MUST ALWAYS BE THE ACTUAL NET OUT-OF-POCKET AMOUNT PAID.
    - NEVER record the pre-discount bill amount as the expense "amount".
-   - Extract "billAmount" (e.g. 22.05), "discountAmount" (e.g. 3.31), and "dealsDescription" (e.g. "Deals and offers -RM3.31 (10% off bill -2.21, 5% off bill -1.10)").
+   - Extract "billAmount", "discountAmount", and "dealsDescription" when applicable.
 
 5. DATE RECOGNITION:
-   - Malaysian receipts standardly use DD/MM/YYYY or DD-MM-YYYY (e.g. "05/10/2026" is 5th October 2026).
-   - If a 2-digit year is printed (e.g. "05/10/26"), expand to 2026.
+   - Receipts standardly use DD/MM/YYYY or YYYY-MM-DD.
+   - If a 2-digit year is printed (e.g. "25/10/26"), expand to 2026.
    - NEVER confuse transaction date with expiry dates ("EXP", "Best Before"). Fallback to ${today} if missing.
 
 6. TAXES & ROUNDING (INCLUSIVE VS EXCLUSIVE INTELLIGENCE):
    - Determine whether tax (SST, GST, VAT) is ALREADY INCLUDED in the printed line items (taxIncluded: true) or ADDED ON TOP (taxIncluded: false):
-     * If receipt states 'Inclu.', 'Inc.', 'Inclusive', 'Base Amt.', 'SST 6% (Inc.)', or if sum(items.amount) equals subtotal/amount (e.g. items sum to 127.30 and total is 127.30 with SST 7.21 on base 120.09), then TAX IS INCLUDED in the line item prices! Set "taxIncluded": true.
-     * When taxIncluded is true: item prices MUST remain the printed prices that include tax. "amount" is the total net amount paid (e.g. 127.30). Do NOT strip tax from individual items!
+     * If receipt states 'Inclu.', 'Inc.', 'Inclusive', 'Base Amt.', or if sum(items.amount) equals subtotal or total (e.g. items sum to 127.30 and total is 127.30 with SST 7.21 on base 120.09), then TAX IS ALREADY INCLUDED in the printed line items. Set "taxIncluded": true.
+     * When taxIncluded is true: item prices MUST remain the printed inclusive prices. "amount" is the total net amount paid (e.g. 127.30). Do NOT strip tax from individual items!
      * When tax is added on top (exclusive): sum(items) + tax = amount, set "taxIncluded": false.
    - Taxes: array of ALL tax and service charge lines printed, e.g. [{"label": "Service Charge 10%", "rate": 10, "amount": 3.02}, {"label": "SST 6%", "rate": 6, "amount": 1.81}].
    - CRITICAL FOR ROUNDING: NEVER include "Rounding", "Rounding Adjustment", "Pelarasan", "Pelarasan Genapan", or "Genap" in taxes or taxAmount! Rounding (±0.01 to ±0.05) is NOT a tax!
@@ -372,20 +370,6 @@ Return JSON shape:
       }
 
       try {
-        const isTaxIncluded = Boolean(parsed.taxIncluded ?? parsed.tax_included);
-        let amount = typeof parsed.amount === 'number' && Number.isFinite(parsed.amount) && parsed.amount > 0
-          ? Number(parsed.amount.toFixed(2))
-          : null;
-        let subtotal = typeof parsed.subtotal === 'number' && Number.isFinite(parsed.subtotal) && parsed.subtotal > 0
-          ? Number(parsed.subtotal.toFixed(2))
-          : null;
-        const rawTaxAmtForReconcile = typeof parsed.taxAmount === 'number' && Number.isFinite(parsed.taxAmount) && parsed.taxAmount > 0
-          ? Number(parsed.taxAmount.toFixed(2))
-          : 0;
-        const expectedItemsSubtotal = isTaxIncluded
-          ? (amount ?? subtotal)
-          : (subtotal ?? (amount != null && amount > rawTaxAmtForReconcile ? Number((amount - rawTaxAmtForReconcile).toFixed(2)) : null));
-
         const rawParsedItems: RawKinovaReceiptItem[] = Array.isArray(parsed.items)
           ? parsed.items
             .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
@@ -414,6 +398,38 @@ Return JSON shape:
             .filter((item) => item.name && item.amount > 0)
             .slice(0, 40)
           : [];
+
+        let isTaxIncluded = Boolean(parsed.taxIncluded ?? parsed.tax_included);
+        let amount = typeof parsed.amount === 'number' && Number.isFinite(parsed.amount) && parsed.amount > 0
+          ? Number(parsed.amount.toFixed(2))
+          : null;
+        let subtotal = typeof parsed.subtotal === 'number' && Number.isFinite(parsed.subtotal) && parsed.subtotal > 0
+          ? Number(parsed.subtotal.toFixed(2))
+          : null;
+        const rawTaxAmtForReconcile = typeof parsed.taxAmount === 'number' && Number.isFinite(parsed.taxAmount) && parsed.taxAmount > 0
+          ? Number(parsed.taxAmount.toFixed(2))
+          : 0;
+
+        // Mathematical Tax Regime Invariant:
+        // Test whether raw items sum matches the total paid (Inclusive) or needs tax added on top (Exclusive)
+        const rawItemsSum = Number(rawParsedItems.reduce((sum, it) => sum + it.amount, 0).toFixed(2));
+        const targetGross = amount ?? subtotal ?? rawItemsSum;
+        if (targetGross > 0 && rawItemsSum > 0) {
+          const diffInclusive = Math.abs(rawItemsSum - targetGross);
+          const diffExclusive = Math.abs((rawItemsSum + rawTaxAmtForReconcile) - targetGross);
+
+          if (diffInclusive <= 0.15) {
+            // Proven tax-inclusive: items already sum to final total
+            isTaxIncluded = true;
+          } else if (diffExclusive <= 0.15 && diffInclusive > 0.15) {
+            // Proven tax-exclusive: items sum to base and tax is added on top
+            isTaxIncluded = false;
+          }
+        }
+
+        const expectedItemsSubtotal = isTaxIncluded
+          ? (amount ?? subtotal ?? rawItemsSum)
+          : (subtotal ?? (amount != null && amount > rawTaxAmtForReconcile ? Number((amount - rawTaxAmtForReconcile).toFixed(2)) : null));
 
         const items = reconcileKinovaReceiptItems(rawParsedItems, expectedItemsSubtotal);
         const itemsSum = Number(items.reduce((sum, it) => sum + it.amount, 0).toFixed(2));
@@ -503,17 +519,9 @@ Return JSON shape:
           description = 'Receipt Expense';
         }
 
-        // If items are empty, but merchant is a food establishment or specific dish/stall, add signature food item
+        // If items are empty, but description is available, add a single item
         if (items.length === 0 && amount != null && amount > 0) {
-          if (/豆花|four\s*beans/i.test(description)) {
-            items.push({
-              name: '四夕豆花 / 甜品',
-              quantity: 1,
-              unitPrice: amount,
-              amount,
-              category: 'Food & Dining',
-            });
-          } else if (description && description !== 'Receipt Expense' && !/^(?:shell|petronas|caltex|bhpetrol)/i.test(description)) {
+          if (description && description !== 'Receipt Expense') {
             items.push({
               name: description,
               quantity: 1,
@@ -527,14 +535,6 @@ Return JSON shape:
         let category = typeof parsed.category === 'string' && parsed.category.trim()
           ? normalizeToCanonicalCategory(parsed.category, 'Expense', description)
           : '';
-        if (
-          /shell|petronas|caltex|bhpetrol|petron|fuelsave|ron95|ron97|diesel/i.test(description) ||
-          items.some((it) => /fuelsave|ron95|ron97|diesel/i.test(it.name))
-        ) {
-          category = 'Transport';
-        } else if (/four\s*beans|豆花/i.test(description)) {
-          category = 'Food & Dining';
-        }
         if (!category) {
           category = normalizeToCanonicalCategory('', 'Expense', description);
         }
@@ -606,13 +606,14 @@ Return JSON shape:
           }
         }
 
-        // Mathematical cross-check: if the receipt has a subtotal (or itemsSum) and a larger final amount,
+        // Mathematical cross-check: if tax is NOT inclusive, and receipt has a subtotal (or itemsSum) and a larger final amount,
         // ensure taxRate and taxAmount reflect the FULL surcharge (e.g. 10% Service Charge + 6% SST = 16%),
         // even if Gemini only recognized one of the two taxes (e.g. 6%)!
         // Differences <= 0.05 are purely rounding adjustments (1 to 5 sen in Malaysia), NOT tax!
-        // IMPORTANT: Never infer tax if the difference is caused by discounts/deals!
+        // IMPORTANT: Never infer tax if the difference is caused by discounts/deals or if tax is already included!
         const referenceBase = itemsSum > 0 ? itemsSum : subtotal;
         if (
+          !isTaxIncluded &&
           (!discountAmount || discountAmount <= 0) &&
           referenceBase != null && referenceBase > 0 && amount != null && amount > referenceBase + 0.05
         ) {
@@ -651,7 +652,7 @@ Return JSON shape:
           }
         }
 
-        const taxIncluded = typeof parsed.taxIncluded === 'boolean' ? parsed.taxIncluded : undefined;
+        const taxIncluded = isTaxIncluded;
 
         if (!amount) {
           return NextResponse.json({ success: false, error: 'Could not detect the receipt total amount. Please enter manually.' }, { status: 422 });

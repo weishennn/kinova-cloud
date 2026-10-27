@@ -649,19 +649,27 @@ export function getContextualSmartTag(
   category?: string,
   description?: string,
   currentHour?: number,
-  txIdOrNotes?: string
+  txIdOrNotes?: string,
+  subCategory?: string
 ): ContextualTagInfo {
   const dateObj = parseLocalDate(txDate);
   const dayOfWeek = Number.isNaN(dateObj.getTime()) ? 1 : dateObj.getDay(); // 0 = Sun, 6 = Sat
   const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-  const descLower = (description || '').toLowerCase();
   const catLower = (category || '').toLowerCase();
+  const descLower = (description || '').toLowerCase();
+  const subLower = (subCategory || '').toLowerCase();
 
-  // Try to extract hour from parameters, description/notes, or txId timestamp
+  // 1. Determine verified hour (from explicit parameter, txId timestamp, or explicit time notation)
   let detectedHour = typeof currentHour === 'number' ? currentHour : null;
 
+  if (detectedHour === null && txIdOrNotes) {
+    const recorded = getTransactionRecordedInfo({ id: txIdOrNotes, date: txDate });
+    if (recorded?.timestampMs) {
+      detectedHour = new Date(recorded.timestampMs).getHours();
+    }
+  }
+
   if (detectedHour === null) {
-    // 1. Check time string in description or notes (e.g. "13:38", "20:15", "8:00pm", "19:30")
     const combinedStr = `${description || ''} ${txIdOrNotes || ''}`;
     const timeMatch = combinedStr.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
     if (timeMatch) {
@@ -669,64 +677,15 @@ export function getContextualSmartTag(
     }
   }
 
-  if (detectedHour === null && txIdOrNotes) {
-    // 2. Check if txId has timestamp embedded
-    const recorded = getTransactionRecordedInfo({ id: txIdOrNotes, date: txDate });
-    if (recorded?.timestamp) {
-      detectedHour = new Date(recorded.timestamp).getHours();
-    }
-  }
-
-  // Handle Non-Food Categories: NEVER show food/meal tags on Sport, Transport, Shopping, etc.!
-  let timeSlotTag = '✨ 日常支出';
-
+  // 2. Resolve category context
   const isFoodCategory = catLower.includes('food') || catLower.includes('dining') ||
-    catLower.includes('餐饮') || catLower.includes('吃') || catLower === 'food & dining';
+    catLower.includes('餐饮') || catLower.includes('吃');
 
-  if (!isFoodCategory) {
-    if (catLower.includes('sport') || descLower.includes('羽毛球') || descLower.includes('badminton') ||
-        descLower.includes('gym') || descLower.includes('健身') || descLower.includes('跑步') || descLower.includes('游泳')) {
-      timeSlotTag = descLower.includes('羽毛球') || descLower.includes('badminton')
-        ? '🏸 羽毛球'
-        : (isWeekend ? '🏸 周末运动' : '🏸 运动健身');
-    } else if (catLower.includes('transport') || descLower.includes('petrol') || descLower.includes('shell') ||
-               descLower.includes('petronas') || descLower.includes('grab') || descLower.includes('touch')) {
-      timeSlotTag = descLower.includes('petrol') || descLower.includes('shell') || descLower.includes('petronas') || descLower.includes('油')
-        ? '⛽ 加油出行'
-        : '🚗 交通出行';
-    } else if (catLower.includes('shopping') || descLower.includes('超市') || descLower.includes('grocery') || descLower.includes('groceries')) {
-      timeSlotTag = descLower.includes('超市') || descLower.includes('grocery') || descLower.includes('groceries')
-        ? '🛒 超市杂货'
-        : '🛍️ 日常消费';
-    } else if (catLower.includes('entertain') || descLower.includes('电影') || descLower.includes('movie') || descLower.includes('game')) {
-      timeSlotTag = '🎮 休闲娱乐';
-    } else if (catLower.includes('health') || descLower.includes('clinic') || descLower.includes('药') || descLower.includes('doctor')) {
-      timeSlotTag = '💊 医疗健康';
-    } else if (catLower.includes('housing') || catLower.includes('bill') || descLower.includes('unifi') || descLower.includes('水') || descLower.includes('电')) {
-      timeSlotTag = '🏠 居家日常';
-    } else if (catLower.includes('educat') || descLower.includes('书') || descLower.includes('学费') || descLower.includes('course')) {
-      timeSlotTag = '📚 学习进修';
-    } else if (catLower.includes('parent')) {
-      timeSlotTag = '❤️ 孝亲关怀';
-    } else if (catLower.includes('gift')) {
-      timeSlotTag = '🎁 人情往来';
-    } else {
-      timeSlotTag = isWeekend ? '✨ 周末支出' : '✨ 工作日支出';
-    }
-  } else {
-    // It IS Food & Dining!
-    // Check keywords first
-    if (descLower.includes('breakfast') || descLower.includes('kopi') || descLower.includes('toast') || descLower.includes('早餐') || descLower.includes('早点')) {
-      timeSlotTag = '☕ 早餐时段';
-    } else if (descLower.includes('dinner') || descLower.includes('晚餐') || descLower.includes('hotpot') || descLower.includes('bbq') || descLower.includes('晚饭')) {
-      timeSlotTag = '🍲 晚餐聚餐';
-    } else if (descLower.includes('supper') || descLower.includes('宵夜') || descLower.includes('夜宵') || descLower.includes('mamak')) {
-      timeSlotTag = '🌙 深夜/宵夜';
-    } else if (descLower.includes('tea') || descLower.includes('下午茶') || descLower.includes('boba') || descLower.includes('奶茶') || descLower.includes('cafe')) {
-      timeSlotTag = '🧋 下午茶';
-    } else if (descLower.includes('lunch') || descLower.includes('午餐') || descLower.includes('中餐')) {
-      timeSlotTag = isWeekend ? '🍱 周末午餐' : '🍱 工作日午餐';
-    } else if (detectedHour !== null) {
+  let timeSlotTag = isWeekend ? '✨ 周末支出' : '✨ 工作日支出';
+
+  if (isFoodCategory) {
+    // If explicit time is verified, map to temporal meal period
+    if (detectedHour !== null) {
       if (detectedHour >= 5 && detectedHour < 11) {
         timeSlotTag = '☕ 早餐时段';
       } else if (detectedHour >= 11 && detectedHour < 15) {
@@ -738,19 +697,51 @@ export function getContextualSmartTag(
       } else {
         timeSlotTag = '🌙 深夜/宵夜';
       }
+    } else if (subLower.includes('breakfast') || subLower.includes('早餐')) {
+      timeSlotTag = '☕ 早餐时段';
+    } else if (subLower.includes('lunch') || subLower.includes('午餐')) {
+      timeSlotTag = isWeekend ? '🍱 周末午餐' : '🍱 工作日午餐';
+    } else if (subLower.includes('tea') || subLower.includes('下午茶')) {
+      timeSlotTag = '🧋 下午茶';
+    } else if (subLower.includes('dinner') || subLower.includes('晚餐')) {
+      timeSlotTag = '🍲 晚餐聚餐';
+    } else if (subLower.includes('supper') || subLower.includes('宵夜') || subLower.includes('夜宵')) {
+      timeSlotTag = '🌙 深夜/宵夜';
     } else {
-      // Hour is completely unknown and no keyword: NEVER assume lunch!
+      // NEVER assume lunch if time is unknown!
       timeSlotTag = isWeekend ? '🍽️ 周末餐饮' : '🍽️ 日常餐饮';
+    }
+  } else {
+    // Non-food categories NEVER receive food/meal tags
+    const activeSub = subCategory?.trim() || '';
+    if (catLower.includes('sport') || catLower.includes('健身') || catLower.includes('运动')) {
+      timeSlotTag = activeSub ? `🏸 ${activeSub}` : (isWeekend ? '🏅 周末运动' : '🏅 运动健身');
+    } else if (catLower.includes('transport') || catLower.includes('交通') || catLower.includes('出行')) {
+      timeSlotTag = activeSub ? `🚗 ${activeSub}` : '🚗 交通出行';
+    } else if (catLower.includes('shopping') || catLower.includes('购物') || catLower.includes('消费')) {
+      timeSlotTag = activeSub ? `🛍️ ${activeSub}` : '🛍️ 日常消费';
+    } else if (catLower.includes('entertain') || catLower.includes('娱乐')) {
+      timeSlotTag = activeSub ? `🎮 ${activeSub}` : '🎮 休闲娱乐';
+    } else if (catLower.includes('health') || catLower.includes('医疗') || catLower.includes('健康')) {
+      timeSlotTag = activeSub ? `💊 ${activeSub}` : '💊 医疗健康';
+    } else if (catLower.includes('housing') || catLower.includes('bill') || catLower.includes('居家') || catLower.includes('水电')) {
+      timeSlotTag = activeSub ? `🏠 ${activeSub}` : '🏠 居家日常';
+    } else if (catLower.includes('educat') || catLower.includes('学习') || catLower.includes('教育')) {
+      timeSlotTag = activeSub ? `📚 ${activeSub}` : '📚 学习进修';
+    } else if (catLower.includes('gift') || catLower.includes('人情') || catLower.includes('礼物')) {
+      timeSlotTag = activeSub ? `🎁 ${activeSub}` : '🎁 人情往来';
+    } else {
+      timeSlotTag = isWeekend ? '✨ 周末支出' : '✨ 工作日支出';
     }
   }
 
-  // Expense Nature
+  // 3. Expense Nature
   const isFixedCategory = catLower.includes('bill') || catLower.includes('housing') ||
-    catLower.includes('insurance') || catLower.includes('rental') || catLower.includes('unifi') ||
-    catLower.includes('sub');
+    catLower.includes('insurance') || catLower.includes('rental') || catLower.includes('sub') ||
+    catLower.includes('fixed') || catLower.includes('固定');
   const natureTag = isFixedCategory ? '固定/周期' : '日常弹性';
 
-  // Holiday check (MM-DD)
+  // 4. Holiday check
   const monthDay = txDate.slice(5, 10);
   const holidayTag = PUBLIC_HOLIDAYS_MY[monthDay];
 

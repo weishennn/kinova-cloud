@@ -145,8 +145,6 @@ export function sanitizeMerchantCandidate(rawName: string, contextText?: string)
         /\b(PETRONAS(?:\s+[A-Z0-9\s/]+)?)\b/i,
         /\b(CALTEX(?:\s+[A-Z0-9\s/]+)?)\b/i,
         /\b(BHPETROL(?:\s+[A-Z0-9\s/]+)?)\b/i,
-        /(Four\s*Beans(?:\s*四夕豆花)?)/i,
-        /(四夕豆花)/i,
         /\b(MCDONALD'?S?)\b/i,
         /\b(KFC)\b/i,
         /\b(STARBUCKS)\b/i,

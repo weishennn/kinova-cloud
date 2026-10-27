@@ -11,15 +11,8 @@ export interface MerchantCategoryRule {
 
 const STORAGE_KEY = 'cashflow_merchant_category_rules';
 
-// Pre-seeded well-known Malaysian merchant defaults
+// Pre-seeded well-known regional merchant defaults
 export const DEFAULT_MERCHANT_RULES: MerchantCategoryRule[] = [
-  {
-    id: 'rule_four_beans',
-    merchantPattern: '四夕豆花',
-    category: 'Food & Dining',
-    createdAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-01-01T00:00:00.000Z',
-  },
   {
     id: 'rule_shell',
     merchantPattern: 'Shell',

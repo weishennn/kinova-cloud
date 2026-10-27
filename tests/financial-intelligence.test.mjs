@@ -130,9 +130,11 @@ test('4. getContextualSmartTag identifies time slots, weekday vs weekend, and ho
   const tag3 = getContextualSmartTag('2026-01-01', 'Shopping', 'Gifts', 15);
   assert.ok(tag3.holidayTag?.includes('元旦'));
 
-  // Sport (羽毛球) -> Must NEVER be labeled as lunch!
-  const tagBadminton = getContextualSmartTag('2026-10-20', 'Sport', '羽毛球馆预订');
+  // Sport -> Must NEVER be labeled as lunch!
+  const tagBadminton = getContextualSmartTag('2026-10-20', 'Sport', '羽毛球馆预订', undefined, undefined, '羽毛球');
   assert.equal(tagBadminton.timeSlotTag, '🏸 羽毛球');
+  const tagSportGeneral = getContextualSmartTag('2026-10-20', 'Sport', 'Gym');
+  assert.equal(tagSportGeneral.timeSlotTag, '🏅 运动健身');
 
   // Evening dinner with time marker in description or notes -> Must be dinner, not lunch!
   const tagEveningDinner = getContextualSmartTag('2026-10-20', 'Food & Dining', '晚餐 20:15');

@@ -30,7 +30,7 @@ function getMerchantEmoji(merchant: string, category: string): string {
   if (m.includes('petrol') || m.includes('shell') || m.includes('petronas') || m.includes('caltex') || c.includes('transport')) return '⛽';
   if (m.includes('kopi') || m.includes('coffee') || m.includes('starbucks') || m.includes('zus')) return '☕';
   if (m.includes('tea') || m.includes('boba') || m.includes('chagee') || m.includes('tealive')) return '🧋';
-  if (m.includes('four beans') || m.includes('豆花') || m.includes('dessert')) return '🍨';
+  if (m.includes('dessert') || m.includes('甜品') || m.includes('ice cream')) return '🍨';
   if (m.includes('mamak') || m.includes('roti') || m.includes('nasi lemak')) return '🍳';
   if (m.includes('grocer') || m.includes('speedmart') || m.includes('lotus') || m.includes('market') || m.includes('买菜')) return '🛒';
   if (m.includes('tng') || m.includes('touch n go') || m.includes('toll')) return '🚗';
@@ -66,39 +66,39 @@ export function mineUserHabitSuggestions(
 ): HabitSuggestionItem[] {
   const hour = typeof currentHour === 'number' ? currentHour : new Date().getHours();
 
-  // Curated fallbacks for new users
+  // Curated clean fallbacks for new users
   const defaultFallback: HabitSuggestionItem[] =
     hour >= 6 && hour < 11
       ? [
-          { label: '☕ Kopi & Toast 8.50', text: 'Kopi & toast 8.50' },
-          { label: '🍳 Mamak 早餐 12', text: 'Mamak breakfast 12' },
-          { label: '⛽ Shell 汽油 82.36', text: 'Shell petrol 82.36' },
-          { label: '🛒 早市买菜 45', text: 'Groceries 45' },
+          { label: '☕ 早餐 12', text: 'Breakfast 12' },
+          { label: '⛽ 加油 50', text: 'Petrol 50' },
+          { label: '🛒 早市买菜 40', text: 'Groceries 40' },
+          { label: '☕ 咖啡 10', text: 'Coffee 10' },
         ]
       : hour >= 11 && hour < 15
       ? [
-          { label: '🍨 四夕豆花 18.74', text: 'Four Beans 四夕豆花 18.74' },
-          { label: '🍱 经济杂饭 13.50', text: 'Economy rice lunch 13.50' },
-          { label: '🛵 外卖 GrabFood 24', text: 'GrabFood lunch 24' },
-          { label: '☕ Teh C Peng 3.80', text: 'Teh C peng 3.80' },
+          { label: '🍱 午餐 15', text: 'Lunch 15' },
+          { label: '🛵 外卖 25', text: 'Food delivery 25' },
+          { label: '☕ 饮品 5', text: 'Drink 5' },
+          { label: '🏪 便利店 15', text: 'Convenience store 15' },
         ]
       : hour >= 15 && hour < 18
       ? [
-          { label: '🧋 下午茶奶茶 14', text: 'Boba tea 14' },
-          { label: '🍰 面包糕点 16.50', text: 'Bakery buns 16.50' },
-          { label: '🚗 Touch n Go 充值 50', text: 'Touch n Go reload 50' },
+          { label: '🧋 下午茶 12', text: 'Tea & snack 12' },
+          { label: '🍰 面包点心 15', text: 'Bakery 15' },
+          { label: '🚗 交通出行 20', text: 'Transport 20' },
         ]
       : hour >= 18 && hour < 22
       ? [
-          { label: '🍲 晚餐聚餐 68', text: 'Dinner 68' },
-          { label: '⛽ Shell 打油 82.36', text: 'Shell petrol 82.36' },
-          { label: '🛒 超市采购 85', text: 'Jaya Grocer groceries 85' },
-          { label: '🍨 四夕豆花甜品 18.74', text: 'Four Beans 四夕豆花 18.74' },
+          { label: '🍲 晚餐 35', text: 'Dinner 35' },
+          { label: '🛒 超市采购 60', text: 'Supermarket 60' },
+          { label: '⛽ 加油 50', text: 'Petrol 50' },
+          { label: '🍨 甜品小吃 15', text: 'Dessert 15' },
         ]
       : [
-          { label: '🌙 宵夜 Mamak 15', text: 'Mamak supper 15' },
-          { label: '🏪 便利店 18', text: 'FamilyMart supper 18' },
-          { label: '🚕 打车 Grab 25', text: 'Grab home 25' },
+          { label: '🌙 宵夜 15', text: 'Supper 15' },
+          { label: '🏪 便利店 20', text: 'Convenience store 20' },
+          { label: '🚕 打车 25', text: 'Ride 25' },
         ];
 
   if (!Array.isArray(transactions) || transactions.length < 3) {
