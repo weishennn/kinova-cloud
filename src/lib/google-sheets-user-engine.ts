@@ -965,22 +965,37 @@ async function syncPortfolioFromTradesUser(
     { ticker: string; name: string; currency: string; units: number; cost: number }
   > = {};
 
+  const headerRow = (tradeValues[0] || []).map((h) => String(h || '').trim().toLowerCase());
+  const actionIdx = headerRow.indexOf('action');
+  const tickerIdx = headerRow.indexOf('ticker');
+  const nameIdx = headerRow.findIndex((h) => h.includes('asset') || h.includes('name'));
+  const qtyIdx = headerRow.findIndex((h) => h.includes('quant') || h === 'qty');
+  const priceIdx = headerRow.indexOf('price');
+  const feesIdx = headerRow.indexOf('fees');
+  const currIdx = headerRow.indexOf('currency');
+  const notesIdx = headerRow.indexOf('notes');
+
+  const getCol = (r: unknown[], idx: number, fallbackIdx: number) => {
+    const i = idx >= 0 ? idx : fallbackIdx;
+    return r[i];
+  };
+
   for (let i = 1; i < tradeValues.length; i++) {
     const row = tradeValues[i] || [];
-    const action = String(row[2] || 'BUY').toUpperCase();
-    const ticker = String(row[3] || '').trim().toUpperCase();
-    const name = String(row[4] || ticker);
-    const quantity = Number(row[5]) || 0;
-    const price = Number(row[6]) || 0;
-    const fees = Number(row[7]) || 0;
-    const currency = String(row[9] || 'USD');
+    const action = String(getCol(row, actionIdx, 2) || 'BUY').toUpperCase();
+    const ticker = String(getCol(row, tickerIdx, 3) || '').trim().toUpperCase();
+    const name = String(getCol(row, nameIdx, 4) || ticker);
+    const quantity = Number(getCol(row, qtyIdx, 5)) || 0;
+    const price = Number(getCol(row, priceIdx, 6)) || 0;
+    const fees = Number(getCol(row, feesIdx, 7)) || 0;
+    const currency = String(getCol(row, currIdx, 9) || 'USD');
     if (!ticker || quantity <= 0) continue;
 
     if (!holdings[ticker]) {
       holdings[ticker] = { ticker, name, currency, units: 0, cost: 0 };
     }
     const h = holdings[ticker];
-    const notes = String(row[10] || '').toLowerCase();
+    const notes = String(getCol(row, notesIdx, 10) || '').toLowerCase();
     const isReinvested =
       action === 'REINVEST' ||
       (action === 'DIVIDEND' && (notes.includes('reinvest') || notes.includes('drip')));
