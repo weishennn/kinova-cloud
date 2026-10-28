@@ -134,12 +134,14 @@ export function generateProactiveAlerts<T extends MinimalTransaction>(
   }
 
   // 3. Category Spending Spikes (vs Trailing 3-month daily pace)
-  // Calculate trailing 3-month category daily averages
+  // Calculate trailing 3-month category daily averages across the total window days
   const trailingCatTotals = new Map<string, { total: number; days: number }>();
+  let totalTrailingDays = 0;
   for (let mOffset = 1; mOffset <= 3; mOffset++) {
     const pDate = new Date(currentYear, currentMonthNum - 1 - mOffset, 1);
     const pStr = `${pDate.getFullYear()}-${String(pDate.getMonth() + 1).padStart(2, '0')}`;
     const pDays = getDaysInMonth(pDate.getFullYear(), pDate.getMonth() + 1);
+    totalTrailingDays += pDays;
 
     const mExpenses = allTransactions.filter(
       (t) => t.type === 'expense' && t.date?.startsWith(pStr) && t.amount > 0
@@ -151,11 +153,11 @@ export function generateProactiveAlerts<T extends MinimalTransaction>(
       existing.total += getAmountInBaseCurrency(t.amount, t.currency);
       trailingCatTotals.set(cat, existing);
     }
+  }
 
-    // Add days for each category present
-    for (const entry of trailingCatTotals.values()) {
-      entry.days += pDays;
-    }
+  // Set the exact trailing window duration for all categories present
+  for (const entry of trailingCatTotals.values()) {
+    entry.days = totalTrailingDays;
   }
 
   // Current month category totals

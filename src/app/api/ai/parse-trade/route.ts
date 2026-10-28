@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLocalDateString } from '@/lib/date-helper';
 import { getValidGoogleSession } from '@/lib/google-auth';
 import { recordUserAiCall } from '@/lib/admin-registry';
-import { getLoadBalancedGeminiKeys, reportGeminiKeyFailure } from '@/lib/gemini-key-pool';
+import { generateGeminiContent } from '@/lib/gemini-key-pool';
 import {
   buildTradeAiPrompt,
   inferTradeAssetType,
@@ -42,129 +42,39 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const apiKeys = getLoadBalancedGeminiKeys();
-    if (apiKeys.length === 0) {
-      return NextResponse.json(
-        { success: false, error: 'GEMINI_API_KEY is not configured in server environment.' },
-        { status: 500 }
-      );
-    }
+    const prompt = buildTradeAiPrompt(today) + (textInput ? `\n\nHere are the broker trade details to analyze:\n"""\n${textInput}\n"""` : '');
 
-    const preferredModel = (process.env.GEMINI_OCR_MODEL || process.env.GEMINI_MODEL || '').trim();
-    const models = [
-      'gemini-2.5-flash',
-      preferredModel,
-      'gemini-flash-latest',
-      'gemini-3.5-flash',
-    ].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
-
-    const prompt = buildTradeAiPrompt(today);
-
-    // Build parts: image or text
-    const parts: Array<{ text?: string; inline_data?: { mime_type: string; data: string } }> = [
-      { text: prompt },
-    ];
-
-    if (imageBase64) {
-      parts.push({
-        inline_data: {
-          mime_type: mimeType,
-          data: imageBase64,
-        },
+    let cleanJson = '';
+    try {
+      const result = await generateGeminiContent({
+        prompt,
+        imageBase64: imageBase64 || undefined,
+        mimeType: imageBase64 ? mimeType : undefined,
+        responseMimeType: 'application/json',
+        thinking: false,
+        thinkingBudget: 0,
+        temperature: 0.1,
+        maxOutputTokens: 2048,
+        timeoutMs: 25_000,
       });
-    }
-
-    if (textInput) {
-      parts.push({
-        text: `Here are the broker trade details to analyze:\n"""\n${textInput}\n"""`,
-      });
+      cleanJson = result.text;
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : 'Trade extraction failed';
+      return NextResponse.json({ success: false, error: errorMsg }, { status: 502 });
     }
 
     let parsedResult: Record<string, unknown> | null = null;
-
-    for (const model of models) {
-      let res: Response | null = null;
-      let shouldTryNextModel = false;
-
-      for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx += 1) {
-        const apiKey = apiKeys[keyIdx];
+    try {
+      parsedResult = JSON.parse(cleanJson) as Record<string, unknown>;
+    } catch {
+      const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
         try {
-          res = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                contents: [{ role: 'user', parts }],
-                generationConfig: {
-                  responseMimeType: 'application/json',
-                  temperature: 0.1,
-                  maxOutputTokens: 2048,
-                },
-              }),
-              signal: AbortSignal.timeout(25000),
-            }
-          );
+          parsedResult = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
         } catch {
-          // Timeout or connection error on this key/model, failover to next key
-          continue;
-        }
-
-        if (res && res.ok) break;
-
-        // Model-level overload (503) or missing (404): failover to next candidate model immediately!
-        if (res && (res.status === 503 || res.status === 404)) {
-          shouldTryNextModel = true;
-          break;
-        }
-
-        if (res && (res.status === 429 || res.status === 401 || res.status === 403 || res.status >= 500)) {
-          reportGeminiKeyFailure(apiKey, res.status);
-          if (keyIdx + 1 < apiKeys.length) {
-            continue; // Failover to next configured API key
-          }
-        }
-        break;
-      }
-
-      if (shouldTryNextModel) continue;
-
-      if (!res || !res.ok) {
-        const status = res?.status ?? 502;
-        const userMessage = status === 429
-          ? 'Gemini quota is temporarily exhausted across all configured keys. Try again in a moment.'
-          : status === 503
-            ? 'Gemini service is temporarily overloaded (HTTP 503). Retrying...'
-            : `AI trade OCR failed (${status}). Please verify the screenshot is clear.`;
-        return NextResponse.json({ success: false, error: userMessage }, { status: 502 });
-      }
-
-      const responseData = await res.json();
-      const rawJson = responseData.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!rawJson) {
-        return NextResponse.json({ success: false, error: 'Gemini returned no trade data.' }, { status: 502 });
-      }
-
-      let cleanJson = rawJson.trim();
-      const blockMatch = cleanJson.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-      if (blockMatch) {
-        cleanJson = blockMatch[1].trim();
-      }
-
-      try {
-        parsedResult = JSON.parse(cleanJson) as Record<string, unknown>;
-      } catch {
-        const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          try {
-            parsedResult = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
-          } catch {
-            return NextResponse.json({ success: false, error: 'AI returned invalid JSON trade structure.' }, { status: 502 });
-          }
+          return NextResponse.json({ success: false, error: 'AI returned invalid JSON trade structure.' }, { status: 502 });
         }
       }
-
-      if (parsedResult) break;
     }
 
     if (!parsedResult) {

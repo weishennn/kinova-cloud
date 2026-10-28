@@ -69,8 +69,8 @@ export function AppHeader() {
             aria-label="Open Kinova AI"
           >
             <Sparkles size={13} className="text-indigo-500" />
-            <span className="hidden sm:inline">Ask Kinova AI</span>
-            <span className="sm:hidden font-medium">查价</span>
+            <span className="hidden sm:inline">Ask Kinova</span>
+            <span className="sm:hidden font-medium">Ask</span>
           </button>
           <ThemeToggle className="cockpit-icon-button" />
           <button

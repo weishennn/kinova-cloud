@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Sparkles, Mic, MicOff, Check, CornerDownLeft, Loader2, Camera, X, Pencil, Paperclip } from 'lucide-react';
@@ -8,7 +8,26 @@ import { parseNaturalExpense, ParsedExpense } from '@/lib/natural-expense-parser
 import {
   addUnifiedRow,
   applyOptimisticAddToQueryCache,
+  deleteUnifiedRow,
+  applyOptimisticDeleteToQueryCache,
 } from '@/hooks/useSheets';
+import {
+  runKinovaTurn,
+  computeDeterministicLedgerFacts,
+  type AssistantApiResponse,
+  type AssistantTurnMessage,
+} from '@/lib/kinova-assistant';
+import { routeLocalIntent, type LocalRouteResult } from '@/lib/intent-router';
+import {
+  getUserMoneyProfile,
+  updateUserMoneyProfile,
+  recordRecentAction,
+  rejectHabitChip,
+  isChipRejected,
+  type UserMoneyProfile,
+} from '@/lib/user-money-profile';
+import { FirstRunGuidance } from '@/components/shared/first-run-guidance';
+import type { HabitSuggestionItem } from '@/lib/habit-suggestions';
 import { useTransactions } from '@/hooks/useTransactions';
 import { useQueryClient } from '@tanstack/react-query';
 import { getLocalDateString, normalizeDateString } from '@/lib/date-helper';
@@ -102,25 +121,45 @@ export function SmartQuickInput() {
     description: string;
   } | null>(null);
   const [receiptRawText, setReceiptRawText] = useState('');
+  const [receiptAssistantNote, setReceiptAssistantNote] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const receiptInputRef = useRef<HTMLInputElement>(null);
 
-  // Habit-driven personalized contextual suggestions
-  const timeOfDaySuggestions = useMemo(() => {
-    return mineUserHabitSuggestions(transactions);
+  // Assistant states
+  const [sessionTurns, setSessionTurns] = useState<AssistantTurnMessage[]>([]);
+  const [assistantResult, setAssistantResult] = useState<AssistantApiResponse | null>(null);
+  const [isAssistantThinking, setIsAssistantThinking] = useState(false);
+  const [assistantError, setAssistantError] = useState<string | null>(null);
+  const [dismissedChipTexts, setDismissedChipTexts] = useState<string[]>([]);
+
+  // User Money Profile
+  const profile = useMemo<UserMoneyProfile>(() => {
+    return getUserMoneyProfile(transactions);
   }, [transactions]);
+
+  // Habit-driven personalized contextual suggestions (excluding 30-day rejected or dismissed chips)
+  const timeOfDaySuggestions = useMemo(() => {
+    return mineUserHabitSuggestions(transactions).filter(
+      (item) => !dismissedChipTexts.includes(item.text) && !isChipRejected(item.text, profile.rejectedChips)
+    );
+  }, [transactions, dismissedChipTexts, profile.rejectedChips]);
 
   // Parse in real-time as user types or dictates (0ms instant local preview)
   const localParsed: ParsedExpense | null = useMemo(() => {
     return parseNaturalExpense(input);
   }, [input]);
 
+  // 0ms Fast Local Intent Router
+  const localRoute = useMemo<LocalRouteResult | null>(() => {
+    if (!input.trim()) return null;
+    return routeLocalIntent(input, profile, getLocalDateString());
+  }, [input, profile]);
+
   const localCommand = useMemo<AiCommand | null>(() => {
     if (!localParsed) return null;
     if (localParsed.isInstallment) {
       return {
         intent: 'installment',
-        confidence: 1,
         data: {
           name: localParsed.description,
           totalPrincipal: localParsed.amount,
@@ -132,11 +171,15 @@ export function SmartQuickInput() {
         },
       };
     }
-    return { intent: 'transaction', confidence: 1, data: localParsed };
+    return { intent: 'transaction', data: localParsed };
   }, [localParsed]);
 
-  const prefersAiForTax = /\b(?:before tax|after tax|including tax|plus tax)\b/i.test(input) && !localParsed?.formula;
-  const activeCommand = prefersAiForTax && !aiParsed ? null : aiParsed || localCommand;
+  const activeCommand = useMemo<AiCommand | null>(() => {
+    if (aiParsed) return aiParsed;
+    if (assistantResult?.command) return assistantResult.command;
+    if (localRoute?.mode === 'quick_parse') return localRoute.command;
+    return localCommand;
+  }, [aiParsed, assistantResult, localRoute, localCommand]);
 
   // Real-time Malaysia LHDN Tax Relief preview for SmartQuickInput
   const taxPreviewInfo = useMemo(() => {
@@ -168,6 +211,7 @@ export function SmartQuickInput() {
     setSelectedReceiptItems([]);
     setOriginalReceiptData(null);
     setReceiptRawText('');
+    setReceiptAssistantNote(null);
     setScanError('');
     setSaveReceiptPhoto(true);
     setIsEditingDetails(false);
@@ -175,11 +219,10 @@ export function SmartQuickInput() {
 
   const updateTransactionData = (patch: Partial<AiTransactionData>) => {
     setAiParsed((current) => {
-      const base = current || localCommand;
+      const base = current || activeCommand;
       if (base?.intent === 'transaction' && base.data) {
         return {
           ...base,
-          confidence: 1,
           data: { ...base.data, ...patch },
         };
       }
@@ -394,29 +437,318 @@ export function SmartQuickInput() {
 
 
 
+  const triggerAssistantTurn = useCallback(
+    async (textToRun: string) => {
+      const trimmed = textToRun.trim();
+      if (!trimmed || isAssistantThinking) return;
+
+      setIsAssistantThinking(true);
+      setAssistantError(null);
+      try {
+        const turnResult = await runKinovaTurn({
+          text: trimmed,
+          today: getLocalDateString(),
+          profile,
+          transactions,
+          sessionTurns,
+          forceAssistant: true,
+        });
+
+        if (turnResult.source === 'assistant') {
+          setAssistantResult(turnResult.assistantResult);
+          if (turnResult.assistantResult.command) {
+            setAiParsed(turnResult.assistantResult.command);
+            setIsAiEnhanced(true);
+          }
+          setSessionTurns((prev) =>
+            [
+              ...prev,
+              { role: 'user' as const, text: trimmed },
+              {
+                role: 'assistant' as const,
+                text: turnResult.assistantResult.answer || turnResult.assistantResult.reasoning || '',
+              },
+            ].slice(-6)
+          );
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Kinova Assistant thinking failed';
+        setAssistantError(msg);
+      } finally {
+        setIsAssistantThinking(false);
+      }
+    },
+    [isAssistantThinking, profile, transactions, sessionTurns]
+  );
+
+  const handleUndoAction = async (transactionId?: string, sheetName?: string) => {
+    let targetId = transactionId;
+    let targetMonth = sheetName;
+
+    if (!targetId || !targetMonth) {
+      const recent = profile.recentActions.find((a) => a.targetType === 'transaction');
+      if (!recent || !recent.payload?.monthStr) {
+        toast.info('No recent action in this session to undo');
+        return;
+      }
+      targetId = String(recent.payload.id || recent.id);
+      targetMonth = String(recent.payload.monthStr);
+    }
+
+    applyOptimisticDeleteToQueryCache(queryClient, targetMonth, undefined, targetId);
+    try {
+      await deleteUnifiedRow(targetMonth, undefined, targetId);
+      const filtered = profile.recentActions.filter((a) => String(a.payload?.id || a.id) !== targetId);
+      updateUserMoneyProfile({ recentActions: filtered });
+      toast.success('↩️ Action undone / 已撤销');
+      void queryClient.invalidateQueries({ queryKey: ['sheet'] });
+      void queryClient.invalidateQueries({ queryKey: ['months'] });
+      void queryClient.invalidateQueries({ queryKey: ['overview'] });
+    } catch (err) {
+      console.warn('Undo error:', err);
+      toast.error('Failed to undo transaction from Google Sheets');
+    }
+  };
+
+  const handleHabitChipClick = async (item: HabitSuggestionItem) => {
+    if (!item.actionPayload) {
+      setInput(item.text);
+      inputRef.current?.focus();
+      return;
+    }
+
+    const { amount, category, description, currency = 'MYR' } = item.actionPayload;
+    const todayStr = getLocalDateString();
+    const monthStr = todayStr.substring(0, 7);
+    const tempId = `tx_${Date.now()}`;
+
+    const rowData: Record<string, any> = {
+      Id: tempId,
+      id: tempId,
+      Date: todayStr,
+      date: todayStr,
+      Type: 'expense',
+      type: 'expense',
+      Category: category,
+      category,
+      SubCategory: '',
+      subCategory: '',
+      Description: description,
+      description,
+      Amount: amount,
+      amount,
+      Currency: currency,
+      currency,
+      TripTag: '',
+      tripTag: '',
+      ReceiptUrl: '',
+      receiptUrl: '',
+      Notes: '[Habit 1-tap]',
+      notes: '[Habit 1-tap]',
+      _month: monthStr,
+      _rowIndex: 2,
+    };
+
+    applyOptimisticAddToQueryCache(queryClient, monthStr, rowData);
+
+    const ledgerWrite = addUnifiedRow(monthStr, {
+      Id: tempId,
+      id: tempId,
+      Date: todayStr,
+      Type: 'Expense',
+      Category: category,
+      SubCategory: '',
+      Description: description,
+      Amount: amount,
+      Currency: currency,
+      TripTag: '',
+      ReceiptUrl: '',
+      Notes: '[Habit 1-tap]',
+    });
+
+    recordRecentAction({
+      actionType: 'record',
+      targetType: 'transaction',
+      summary: `Logged ${currency} ${amount.toFixed(2)} for ${description}`,
+      payload: {
+        id: tempId,
+        amount,
+        category,
+        description,
+        date: todayStr,
+        monthStr,
+      },
+    });
+
+    toast.success(`✨ Logged ${currency} ${amount.toFixed(2)} for ${description}`, {
+      duration: 15000,
+      action: {
+        label: 'Undo / 撤销',
+        onClick: () => {
+          void handleUndoAction(tempId, monthStr);
+        },
+      },
+    });
+
+    void queryClient.invalidateQueries({ queryKey: ['sheet'] });
+    void queryClient.invalidateQueries({ queryKey: ['months'] });
+    void queryClient.invalidateQueries({ queryKey: ['overview'] });
+
+    void (async () => {
+      try {
+        await ledgerWrite;
+        queryClient.invalidateQueries({ queryKey: ['sheet'] });
+        queryClient.invalidateQueries({ queryKey: ['months'] });
+        queryClient.invalidateQueries({ queryKey: ['overview'] });
+      } catch (e) {
+        console.warn('Sync error:', e);
+      }
+    })();
+  };
+
+  const handleDismissHabitChip = (e: React.MouseEvent, itemText: string) => {
+    e.stopPropagation();
+    rejectHabitChip(itemText);
+    setDismissedChipTexts((prev) => [...prev, itemText]);
+    toast.info('Habit suggestion dismissed for 30 days');
+  };
+
+  const handleExecuteProposedAction = async (action: NonNullable<AssistantApiResponse['proposedAction']>) => {
+    if (action.type === 'save_transaction' && action.payload) {
+      const payload = action.payload as any;
+      const todayStr = getLocalDateString();
+      const monthStr = todayStr.substring(0, 7);
+      const tempId = `tx_${Date.now()}`;
+      const amount = Number(payload.amount) || 0;
+      const category = String(payload.category || 'Other');
+      const description = String(payload.description || 'Expense');
+      const currency = String(payload.currency || 'MYR');
+
+      const rowData = {
+        Id: tempId,
+        id: tempId,
+        Date: todayStr,
+        date: todayStr,
+        Type: 'expense',
+        type: 'expense',
+        Category: category,
+        category,
+        SubCategory: '',
+        subCategory: '',
+        Description: description,
+        description,
+        Amount: amount,
+        amount,
+        Currency: currency,
+        currency,
+        TripTag: '',
+        tripTag: '',
+        ReceiptUrl: '',
+        receiptUrl: '',
+        Notes: '[Kinova Assistant]',
+        notes: '[Kinova Assistant]',
+        _month: monthStr,
+        _rowIndex: 2,
+      };
+
+      applyOptimisticAddToQueryCache(queryClient, monthStr, rowData);
+      const ledgerWrite = addUnifiedRow(monthStr, {
+        Id: tempId,
+        id: tempId,
+        Date: todayStr,
+        Type: 'Expense',
+        Category: category,
+        SubCategory: '',
+        Description: description,
+        Amount: amount,
+        Currency: currency,
+        TripTag: '',
+        ReceiptUrl: '',
+        Notes: '[Kinova Assistant]',
+      });
+
+      recordRecentAction({
+        actionType: 'record',
+        targetType: 'transaction',
+        summary: `Recorded ${currency} ${amount.toFixed(2)} for ${description}`,
+        payload: { id: tempId, amount, category, description, date: todayStr, monthStr },
+      });
+
+      toast.success(`✨ Recorded ${currency} ${amount.toFixed(2)} for ${description}`, {
+        duration: 15000,
+        action: {
+          label: 'Undo / 撤销',
+          onClick: () => void handleUndoAction(tempId, monthStr),
+        },
+      });
+
+      setInput('');
+      setAssistantResult(null);
+
+      void (async () => {
+        try {
+          await ledgerWrite;
+          queryClient.invalidateQueries({ queryKey: ['sheet'] });
+          queryClient.invalidateQueries({ queryKey: ['months'] });
+          queryClient.invalidateQueries({ queryKey: ['overview'] });
+        } catch (e) {
+          console.warn('Sync error:', e);
+        }
+      })();
+    } else if (action.type === 'navigate' && action.payload?.path) {
+      router.push(String(action.payload.path));
+      setInput('');
+      setAssistantResult(null);
+    } else if (action.type === 'undo') {
+      void handleUndoAction();
+      setInput('');
+      setAssistantResult(null);
+    }
+  };
+
+  useEffect(() => {
+    const trimmed = input.trim();
+    if (!trimmed || trimmed.length < 2 || isScanningReceipt || receiptAttachment) {
+      setIsAssistantThinking(false);
+      setAssistantError(null);
+      return;
+    }
+
+    const isQuestionOrAdvice =
+      /\b(?:can i afford|should i|worth it|is this expensive|am i over budget|budget|advice|recommend|tax relief|trip|install|trade|stock|buy|sell)\b/i.test(
+        trimmed
+      ) || /(?:能不能买|值得吗|怎么看|贵不贵|超支|建议|税务减免|扣税|分期|买入|卖出|预算|旅行)/.test(trimmed);
+
+    if (
+      localRoute?.mode === 'quick_parse' &&
+      !isQuestionOrAdvice &&
+      !/\b(?:tax|before tax|after tax|sst|relief)\b/i.test(trimmed)
+    ) {
+      setIsAssistantThinking(false);
+      setAssistantError(null);
+      return;
+    }
+
+    if (localRoute && localRoute.mode !== 'quick_parse' && !isQuestionOrAdvice) {
+      setIsAssistantThinking(false);
+      setAssistantError(null);
+      return;
+    }
+
+    setIsAssistantThinking(true);
+    setAssistantError(null);
+
+    const timer = setTimeout(() => {
+      void triggerAssistantTurn(trimmed);
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [input, isScanningReceipt, receiptAttachment, localRoute, triggerAssistantTurn]);
+
   const handleAiParse = async () => {
     const trimmed = input.trim();
     if (trimmed.length < 4 || isAiParsing) return;
-
-    setIsAiParsing(true);
-    try {
-      const res = await fetch('/api/ai/parse-expense', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: trimmed, today: getLocalDateString() }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success || !json.data) {
-        throw new Error(json.error || 'Gemini could not understand that command');
-      }
-      setAiParsed(json.data as AiCommand);
-      setIsAiEnhanced(true);
-    } catch (error) {
-      console.warn('AI parse error, using local fallback', error);
-      toast.error(error instanceof Error ? error.message : 'Gemini parsing failed');
-    } finally {
-      setIsAiParsing(false);
-    }
+    await triggerAssistantTurn(trimmed);
   };
 
   const handleReceiptScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -545,6 +877,31 @@ export function SmartQuickInput() {
         ? ` · Saved ${tx.currency} ${tx.discountAmount.toFixed(2)} with Deals & Offers!`
         : '';
       toast.success(`✨ Receipt read: ${tx.currency} ${tx.amount.toFixed(2)} (${tx.description})${discountSuffix}`, { id: toastId });
+
+      // Generate intelligent assistant context note (duplicate check, tax relief, category/median comparison)
+      try {
+        const facts = computeDeterministicLedgerFacts(transactions, profile, tx.description, getLocalDateString(), {
+          amount: tx.amount,
+          merchant: tx.description,
+          date: tx.date,
+        });
+        if (facts.potentialDuplicate) {
+          setReceiptAssistantNote(
+            `⚠️ Matches another ${tx.currency} ${facts.potentialDuplicate.amount.toFixed(2)} on ${facts.potentialDuplicate.date}`
+          );
+        } else {
+          const catMedian = facts.categoryMedians[tx.category];
+          if (catMedian && tx.amount > catMedian * 1.5) {
+            setReceiptAssistantNote(
+              `📈 Higher than usual (${tx.currency} ${tx.amount.toFixed(2)} vs median ${tx.currency} ${catMedian.toFixed(2)} for ${tx.category})`
+            );
+          } else {
+            setReceiptAssistantNote(`✓ Verified under ${tx.category}`);
+          }
+        }
+      } catch (err) {
+        console.warn('Receipt interpretation non-fatal:', err);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Receipt scanning failed';
       setScanError(message);
@@ -803,32 +1160,40 @@ export function SmartQuickInput() {
           source: 'auto_learned',
         });
       }
+
+      recordRecentAction({
+        actionType: 'record',
+        targetType: 'transaction',
+        summary: `Recorded ${activeParsed.currency || 'MYR'} ${activeParsed.amount.toFixed(2)} for ${activeParsed.description}`,
+        payload: {
+          id: tempId,
+          amount: activeParsed.amount,
+          category: activeParsed.category,
+          description: activeParsed.description,
+          date: safeDate,
+          monthStr,
+        },
+      });
+
       setInput('');
       setAiParsed(null);
       setIsAiEnhanced(false);
       clearReceiptState();
 
-      const isOtherPeriod =
-        Boolean(monthStr) &&
-        monthStr !== selectedMonth &&
-        selectedMonth !== 'all' &&
-        selectedMonth !== `year-${monthStr.slice(0, 4)}`;
-      const toastOptions = isOtherPeriod
-        ? {
-            action: {
-              label: `View ${monthStr}`,
-              onClick: () => setSelectedMonth(monthStr),
-            },
-            duration: 5000,
-          }
-        : undefined;
+      const toastOptions = {
+        duration: 15000,
+        action: {
+          label: 'Undo / 撤销',
+          onClick: () => {
+            void handleUndoAction(tempId, monthStr);
+          },
+        },
+      };
 
       const toastMsg = receiptQueued
         ? `📸 Recorded; receipt upload is queued: ${recordedText}!`
         : savedTaxCat
         ? `🇲🇾 Recorded (${savedTaxCat.shortName} Tax Relief): ${recordedText}! Remember to attach your receipt in Invoices & Tax.`
-        : isOtherPeriod
-        ? `✨ Recorded to ${monthStr}: ${recordedText}!`
         : `✨ Recorded: ${recordedText}!`;
       toast.success(toastMsg, toastOptions);
 
@@ -858,19 +1223,27 @@ export function SmartQuickInput() {
   };
 
   return (
-    <div className="relative rounded-2xl border border-indigo-500/25 bg-white dark:bg-zinc-950 p-2.5 sm:p-3 shadow-sm space-y-1.5 transition-colors focus-within:border-indigo-500/60">
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          void handleQuickSubmit(e);
+    <div className="space-y-2">
+      <FirstRunGuidance
+        expenseCount={transactions.length}
+        onLogSampleExpense={(sample) => {
+          setInput(sample);
+          inputRef.current?.focus();
         }}
-        className="relative flex items-center gap-2"
-      >
-        <div className="relative flex-1">
-          <Sparkles className={`absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 shrink-0 pointer-events-none transition-colors ${
-            isAiParsing ? 'text-amber-800 dark:text-amber-400 animate-spin' : isAiEnhanced ? 'text-emerald-800 dark:text-emerald-400' : 'text-indigo-800 dark:text-indigo-400'
-          }`} />
+      />
+      <div className="relative rounded-2xl border border-indigo-500/25 bg-white dark:bg-zinc-950 p-2.5 sm:p-3 shadow-sm space-y-1.5 transition-colors focus-within:border-indigo-500/60">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void handleQuickSubmit(e);
+          }}
+          className="relative flex items-center gap-2"
+        >
+          <div className="relative flex-1">
+            <Sparkles className={`absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 shrink-0 pointer-events-none transition-colors ${
+              isAssistantThinking || isAiParsing ? 'text-indigo-600 dark:text-indigo-400 animate-spin' : isAiEnhanced ? 'text-purple-600 dark:text-purple-400' : 'text-slate-400'
+            }`} />
           <input
             ref={inputRef}
             type="text"
@@ -965,22 +1338,32 @@ export function SmartQuickInput() {
         </motion.button>
       </form>
 
-      {/* Time-of-day Contextual Quick Suggestions */}
-      {!input && !receiptAttachment && !isScanningReceipt && (
+      {/* Time-of-day Contextual Quick Suggestions with 1-tap logging */}
+      {!input && !receiptAttachment && !isScanningReceipt && timeOfDaySuggestions.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 pt-0.5 px-0.5">
-          <span className="text-[10px] font-semibold text-slate-500 dark:text-zinc-400">💡 推荐快捷记账：</span>
+          <span className="text-[10px] font-semibold text-slate-500 dark:text-zinc-400">💡 推荐快捷记账 (1-tap)：</span>
           {timeOfDaySuggestions.map((item) => (
-            <button
+            <div
               key={item.text}
-              type="button"
-              onClick={() => {
-                setInput(item.text);
-                inputRef.current?.focus();
-              }}
-              className="text-[11px] px-2 py-0.5 rounded-lg bg-slate-100/90 dark:bg-zinc-800/70 border border-slate-200 dark:border-white/[0.06] text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white hover:bg-slate-200/80 dark:hover:bg-zinc-700/80 transition-colors cursor-pointer"
+              className="group inline-flex items-center rounded-lg bg-slate-100/90 dark:bg-zinc-800/70 border border-slate-200 dark:border-white/[0.06] text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white hover:bg-slate-200/80 dark:hover:bg-zinc-700/80 transition-all text-[11px]"
             >
-              {item.label}
-            </button>
+              <button
+                type="button"
+                onClick={() => void handleHabitChipClick(item)}
+                className="px-2 py-0.5 font-medium cursor-pointer"
+                title={`Tap to log immediately: ${item.text}`}
+              >
+                {item.label}
+              </button>
+              <button
+                type="button"
+                onClick={(e) => handleDismissHabitChip(e, item.text)}
+                className="opacity-0 group-hover:opacity-100 px-1 py-0.5 text-slate-400 hover:text-rose-500 transition-opacity cursor-pointer"
+                title="Dismiss habit suggestion for 30 days"
+              >
+                ×
+              </button>
+            </div>
           ))}
         </div>
       )}
@@ -997,22 +1380,176 @@ export function SmartQuickInput() {
       {scanError && (
         <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-xs text-rose-800 dark:text-rose-200">
           <span>{scanError}</span>
-          <button type="button" onClick={() => setScanError('')} className="font-semibold underline underline-offset-2 hover:text-slate-950 dark:hover:text-white">Dismiss</button>
+          <button type="button" onClick={() => setScanError('')} className="font-semibold underline underline-offset-2 hover:text-slate-950 dark:hover:text-white cursor-pointer">Dismiss</button>
         </div>
       )}
 
-      {/* AI enhancement prompt */}
-      {input.trim().length >= 4 && !isAiEnhanced && !receiptAttachment && (
-        <div className="flex justify-center pt-0.5">
-          <button
-            type="button"
-            onClick={() => void handleAiParse()}
-            disabled={isAiParsing}
-            className="inline-flex min-h-[32px] items-center gap-1.5 rounded-xl px-2.5 text-[11px] font-semibold text-indigo-800 dark:text-indigo-300 hover:bg-indigo-500/10 hover:text-indigo-800 dark:hover:text-indigo-200 disabled:opacity-50 cursor-pointer touch-manipulation"
-          >
-            {isAiParsing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
-            <span>Use Gemini for tax, trades, installments & trips</span>
-          </button>
+      {/* Assistant Thinking Indicator */}
+      {isAssistantThinking && (
+        <div role="status" className="flex items-center gap-2 rounded-xl border border-indigo-500/20 bg-indigo-500/10 px-3 py-2 text-xs text-indigo-800 dark:text-indigo-200 animate-in fade-in duration-150">
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-700 dark:text-indigo-400" />
+          <span>Kinova is thinking…</span>
+        </div>
+      )}
+
+      {/* Assistant Server Error with Retry */}
+      {assistantError && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-xs text-rose-800 dark:text-rose-200">
+          <span className="truncate max-w-[280px] sm:max-w-md">{assistantError}</span>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => void triggerAssistantTurn(input)}
+              className="font-bold underline underline-offset-2 hover:text-slate-950 dark:hover:text-white cursor-pointer"
+            >
+              Retry
+            </button>
+            <button
+              type="button"
+              onClick={() => setAssistantError(null)}
+              className="text-slate-500 hover:text-slate-700 dark:hover:text-zinc-300 cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Local Router Special Modes: Undo */}
+      {localRoute?.mode === 'undo' && (
+        <div className="rounded-2xl border border-purple-500/30 bg-purple-500/10 p-3 shadow-md space-y-2 text-left animate-in fade-in duration-150">
+          <div className="text-xs font-bold text-purple-900 dark:text-purple-200 flex items-center justify-between">
+            <span>↩️ {localRoute.message}</span>
+          </div>
+          {localRoute.actionToUndo ? (
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <span className="text-xs text-slate-700 dark:text-zinc-300">
+                {String(localRoute.actionToUndo.payload?.currency || 'MYR')} {Number(localRoute.actionToUndo.payload?.amount || 0).toFixed(2)} · {String(localRoute.actionToUndo.payload?.description || '')}
+              </span>
+              <button
+                type="button"
+                onClick={() => void handleUndoAction(String(localRoute.actionToUndo?.payload?.id || localRoute.actionToUndo?.id), String(localRoute.actionToUndo?.payload?.monthStr || ''))}
+                className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow cursor-pointer transition-all"
+              >
+                Confirm Undo / 确认撤销
+              </button>
+            </div>
+          ) : (
+            <div className="text-xs text-slate-500">No confirmed action in this session to undo.</div>
+          )}
+        </div>
+      )}
+
+      {/* Local Router Special Modes: Set Preference */}
+      {localRoute?.mode === 'set_preference' && (
+        <div className="rounded-2xl border border-teal-500/30 bg-teal-500/10 p-3 shadow-md space-y-2 text-left animate-in fade-in duration-150">
+          <div className="text-xs font-bold text-teal-900 dark:text-teal-200">
+            ⚙️ {localRoute.message}
+          </div>
+          <div className="flex items-center justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                const pref = localRoute.preference;
+                if (pref.key === 'paydayDay') updateUserMoneyProfile({ paydayDay: pref.value as number });
+                else if (pref.key === 'monthlyBudgetCap') updateUserMoneyProfile({ monthlyBudgetCap: pref.value as number });
+                else if (pref.key === 'language') updateUserMoneyProfile({ language: pref.value as any });
+                toast.success(`Saved preference: ${pref.label}`);
+                setInput('');
+              }}
+              className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold shadow cursor-pointer transition-all"
+            >
+              Save to What Kinova knows / 保存偏好
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Local Router Special Modes: Navigate */}
+      {localRoute?.mode === 'navigate' && (
+        <div className="rounded-2xl border border-sky-500/30 bg-sky-500/10 p-3 shadow-md space-y-2 text-left animate-in fade-in duration-150">
+          <div className="text-xs font-bold text-sky-900 dark:text-sky-200">
+            🧭 {localRoute.message}
+          </div>
+          <div className="flex items-center justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                router.push(localRoute.path);
+                setInput('');
+              }}
+              className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold shadow cursor-pointer transition-all"
+            >
+              Go to {localRoute.label} / 前往
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Assistant Mode: Advise */}
+      {assistantResult?.mode === 'advise' && (
+        <div className="rounded-2xl border border-indigo-500/30 bg-white/95 dark:bg-zinc-950/90 p-3.5 shadow-lg space-y-2.5 text-left animate-in fade-in duration-200">
+          <div className="flex items-center justify-between border-b border-slate-200 dark:border-white/[0.06] pb-2">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300">
+              <Sparkles className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+              <span>Kinova Financial Advice</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAssistantResult(null)}
+              className="text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 cursor-pointer"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="text-sm font-medium text-slate-900 dark:text-white leading-relaxed">
+            {assistantResult.answer}
+          </div>
+          {assistantResult.reasoning && (
+            <div className="text-xs text-slate-600 dark:text-zinc-400 bg-slate-100/80 dark:bg-zinc-900/80 p-2.5 rounded-xl border border-slate-200 dark:border-white/[0.04]">
+              💡 <span className="font-semibold text-slate-700 dark:text-zinc-300">Ledger basis:</span> {assistantResult.reasoning}
+            </div>
+          )}
+          {assistantResult.proposedAction && (
+            <div className="pt-1 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => void handleExecuteProposedAction(assistantResult.proposedAction!)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow transition-all cursor-pointer"
+              >
+                <span>{assistantResult.proposedAction.label}</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Assistant Mode: Clarify / Unknown */}
+      {(assistantResult?.mode === 'clarify' || assistantResult?.mode === 'unknown') && (
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 shadow-md space-y-2 text-left animate-in fade-in duration-200">
+          <div className="text-xs font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+            <span>🤔 Kinova needs one clarification:</span>
+          </div>
+          <div className="text-xs text-slate-800 dark:text-zinc-200">
+            {assistantResult.clarification?.question || assistantResult.answer}
+          </div>
+          {assistantResult.clarification?.options && (
+            <div className="flex flex-wrap gap-2 pt-1">
+              {assistantResult.clarification.options.map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => {
+                    setInput(opt);
+                    inputRef.current?.focus();
+                  }}
+                  className="text-xs px-3 py-1.5 rounded-xl bg-white dark:bg-zinc-900 border border-amber-500/30 font-medium text-slate-800 dark:text-zinc-200 hover:bg-amber-500/20 transition-all cursor-pointer"
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -1033,9 +1570,11 @@ export function SmartQuickInput() {
                   <div className="flex items-center gap-2">
                     <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800 dark:text-emerald-300">
                       <Camera className="h-3 w-3" />
-                      Receipt OCR Ready
+                      Receipt read
                     </span>
-                    <span className="text-[11px] text-slate-600 dark:text-zinc-400">Edit details or tap save below</span>
+                    <span className="text-[11px] text-slate-600 dark:text-zinc-400">
+                      {receiptAssistantNote || 'Edit details or tap save below'}
+                    </span>
                   </div>
                   <button
                     type="button"
@@ -1403,17 +1942,14 @@ export function SmartQuickInput() {
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="text-[11px] font-semibold text-slate-600 dark:text-zinc-400">Preview:</span>
                     
-                    {isAiEnhanced && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 to-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/40 text-[10px] font-bold shadow-sm">
-                        <Sparkles className="h-3 w-3 text-amber-800 dark:text-amber-400 animate-pulse" />
-                        Gemini AI
+                    {assistantResult?.command || (aiParsed && isAiEnhanced) ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-indigo-500/20 to-purple-500/20 text-indigo-800 dark:text-indigo-300 border border-indigo-500/40 text-[10px] font-bold shadow-sm">
+                        <Sparkles className="h-3 w-3 text-indigo-700 dark:text-indigo-400 animate-pulse" />
+                        Kinova Assistant
                       </span>
-                    )}
-
-                    {isAiParsing && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 text-[10px] font-medium animate-pulse">
-                        <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                        AI parsing...
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-slate-300 dark:border-zinc-700 text-[10px] font-medium shadow-sm">
+                        ⚡ Quick parse
                       </span>
                     )}
 
@@ -1712,5 +2248,6 @@ export function SmartQuickInput() {
         )}
       </AnimatePresence>
     </div>
+  </div>
   );
 }

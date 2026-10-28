@@ -3,7 +3,7 @@ import { getLocalDateString, parseLocalDate } from '@/lib/date-helper';
 import { normalizeToCanonicalCategory } from '@/lib/canonical-categories';
 import { getValidGoogleSession } from '@/lib/google-auth';
 import { recordUserAiCall } from '@/lib/admin-registry';
-import { getLoadBalancedGeminiKeys, reportGeminiKeyFailure } from '@/lib/gemini-key-pool';
+import { generateGeminiContent } from '@/lib/gemini-key-pool';
 import type {
   AiCommand,
   AiInstallmentData,
@@ -365,108 +365,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Text is required and must be 1,000 characters or fewer' }, { status: 400 });
     }
 
-    const apiKeys = getLoadBalancedGeminiKeys();
-    if (apiKeys.length === 0) {
-      return NextResponse.json({ success: false, error: 'GEMINI_API_KEY is not configured in environment' }, { status: 500 });
-    }
+    try {
+      const result = await generateGeminiContent({
+        prompt: `User command: ${text}`,
+        systemInstruction: SYSTEM_PROMPT.replace('{{TODAY}}', today),
+        responseMimeType: 'application/json',
+        thinking: false,
+        thinkingBudget: 0,
+        temperature: 0.1,
+        maxOutputTokens: 2048,
+        timeoutMs: 20_000,
+      });
 
-    const preferredModel = (process.env.GEMINI_MODEL || 'gemini-2.5-flash').trim();
-    const models = [preferredModel, 'gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-flash-latest'].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
-    let lastError = 'No response from model';
-
-    for (const model of models) {
-      let shouldTryNextModel = false;
-
-      for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx += 1) {
-        const apiKey = apiKeys[keyIdx];
-        let res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-goog-api-key': apiKey,
-          },
-          body: JSON.stringify({
-            contents: [{
-              role: 'user',
-              parts: [{ text: `${SYSTEM_PROMPT.replace('{{TODAY}}', today)}\n\nUser command: ${text}` }],
-            }],
-            generationConfig: {
-              responseMimeType: 'application/json',
-              temperature: 0.1,
-              maxOutputTokens: 2048,
-              thinkingConfig: {
-                thinkingBudget: 0,
-              },
-            },
-          }),
-          signal: AbortSignal.timeout(12000),
-        }).catch(() => null);
-
-        // Transient 503 / 500 handling: 1 quick retry with backoff if server is temporarily overloaded
-        if (res && (res.status === 503 || res.status === 500)) {
-          await new Promise((resolve) => setTimeout(resolve, 800));
-          const retryRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-goog-api-key': apiKey,
-            },
-            body: JSON.stringify({
-              contents: [{
-                role: 'user',
-                parts: [{ text: `${SYSTEM_PROMPT.replace('{{TODAY}}', today)}\n\nUser command: ${text}` }],
-              }],
-              generationConfig: {
-                responseMimeType: 'application/json',
-                temperature: 0.1,
-                maxOutputTokens: 2048,
-                thinkingConfig: {
-                  thinkingBudget: 0,
-                },
-              },
-            }),
-            signal: AbortSignal.timeout(12000),
-          }).catch(() => null);
-          if (retryRes) res = retryRes;
-        }
-
-        if (!res || !res.ok) {
-          lastError = res ? `Gemini ${res.status}` : 'Request timeout';
-          if (res && (res.status === 429 || res.status === 401 || res.status === 403 || res.status >= 500)) {
-            reportGeminiKeyFailure(apiKey, res.status);
-            if (keyIdx + 1 < apiKeys.length) {
-              continue; // Failover to next configured API key
-            }
-          }
-          if (!res || res.status === 404 || res.status >= 500) {
-            shouldTryNextModel = true;
-            break;
-          }
-          break;
-        }
-
-        const responseData = await res.json();
-        const rawJson = responseData.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!rawJson) {
-          lastError = 'Empty response from model';
-          break;
-        }
-
-        try {
-          const parsed = JSON.parse(rawJson);
-          const command = normalizeCommand(parsed, today, text);
-          if (command) return NextResponse.json({ success: true, data: command, model });
-          lastError = 'Model returned an invalid command shape';
-        } catch {
-          lastError = 'Model returned invalid JSON';
-        }
-        break;
+      try {
+        const parsed = JSON.parse(result.text);
+        const command = normalizeCommand(parsed, today, text);
+        if (command) return NextResponse.json({ success: true, data: command, model: result.model });
+        return NextResponse.json({ success: false, error: 'Model returned an invalid command shape' }, { status: 502 });
+      } catch {
+        return NextResponse.json({ success: false, error: 'Model returned invalid JSON' }, { status: 502 });
       }
-
-      if (!shouldTryNextModel) break;
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : 'AI command parsing failed';
+      return NextResponse.json({ success: false, error: errorMsg }, { status: 502 });
     }
-
-    return NextResponse.json({ success: false, error: lastError }, { status: 502 });
   } catch {
     return NextResponse.json({ success: false, error: 'AI command parsing failed' }, { status: 500 });
   }

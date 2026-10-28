@@ -1,9 +1,17 @@
-import { getLocalDateString } from './date-helper.ts';
+import { getLocalDateString, parseLocalDate } from './date-helper.ts';
+import { isChipRejected, type RejectedChip } from './user-money-profile.ts';
 
 export interface HabitSuggestionItem {
   label: string;
   text: string;
   isPersonalized?: boolean;
+  actionPayload?: {
+    amount: number;
+    currency: string;
+    category: string;
+    description: string;
+    type: 'Expense';
+  };
 }
 
 export interface MinimalTransaction {
@@ -58,15 +66,26 @@ function cleanMerchantName(desc: string, cat: string): string {
 
 /**
  * Mines user's past 90-day transactions to generate truly personalized, habit-driven suggestions.
- * Follows time-of-day contextual habits with intelligent fallback.
+ * Enforces:
+ * - 90-day weekday/weekend + hour bucket
+ * - Median amount
+ * - Hiding rejected chips for 30 days
+ * - NO default habits once 3+ real expenses exist
+ * - Action payload for 1-tap logging
  */
 export function mineUserHabitSuggestions(
   transactions: MinimalTransaction[],
-  currentHour?: number
+  currentHour?: number,
+  isWeekendDay?: boolean,
+  rejectedChips?: RejectedChip[],
+  nowMs: number = Date.now()
 ): HabitSuggestionItem[] {
-  const hour = typeof currentHour === 'number' ? currentHour : new Date().getHours();
+  const hour = typeof currentHour === 'number' ? currentHour : new Date(nowMs).getHours();
+  const isWeekend = typeof isWeekendDay === 'boolean'
+    ? isWeekendDay
+    : [0, 6].includes(new Date(nowMs).getDay());
 
-  // Curated clean fallbacks for new users
+  // Curated clean fallbacks for brand new users (fewer than 3 real expenses)
   const defaultFallback: HabitSuggestionItem[] =
     hour >= 6 && hour < 11
       ? [
@@ -101,22 +120,22 @@ export function mineUserHabitSuggestions(
           { label: '🚕 打车 25', text: 'Ride 25' },
         ];
 
-  if (!Array.isArray(transactions) || transactions.length < 3) {
-    return defaultFallback;
-  }
-
-  // Filter 90-day expenses
-  const now = new Date();
-  const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-  const cutoffDate = getLocalDateString(ninetyDaysAgo);
-
-  const recentExpenses = transactions.filter(
-    (t) => t.type === 'expense' && t.date >= cutoffDate && t.amount > 0
+  const allRealExpenses = (transactions || []).filter(
+    (t) => String(t.type || '').toLowerCase() === 'expense' && Number(t.amount) > 0
   );
 
-  if (recentExpenses.length < 3) {
-    return defaultFallback;
+  // If user has fewer than 3 expenses in their ledger, return default fallback (filtered by rejection)
+  if (allRealExpenses.length < 3) {
+    return defaultFallback.filter((item) => !isChipRejected(item.text, rejectedChips, nowMs));
   }
+
+  // User has >= 3 real expenses: STRICT RULE: DO NOT SHOW DEFAULT FALLBACK!
+  // Filter expenses from past 90 days, or use all real expenses if older
+  const ninetyDaysAgo = new Date(nowMs - 90 * 24 * 60 * 60 * 1000);
+  const cutoffDate = getLocalDateString(ninetyDaysAgo);
+
+  const past90Expenses = allRealExpenses.filter((t) => t.date && t.date >= cutoffDate);
+  const candidateExpenses = past90Expenses.length >= 3 ? past90Expenses : allRealExpenses;
 
   // Group by cleaned merchant name
   const merchantMap = new Map<
@@ -126,29 +145,38 @@ export function mineUserHabitSuggestions(
       category: string;
       amounts: number[];
       count: number;
+      weekendCount: number;
+      weekdayCount: number;
     }
   >();
 
-  for (const t of recentExpenses) {
+  for (const t of candidateExpenses) {
     const rawDesc = t.description || t.category || '';
     const merchant = cleanMerchantName(rawDesc, t.category || '');
     const key = merchant.toLowerCase();
+
+    const txDate = parseLocalDate(t.date || '');
+    const isTxWeekend = !Number.isNaN(txDate.getTime()) && (txDate.getDay() === 0 || txDate.getDay() === 6);
 
     const existing = merchantMap.get(key);
     if (existing) {
       existing.amounts.push(t.amount);
       existing.count += 1;
+      if (isTxWeekend) existing.weekendCount += 1;
+      else existing.weekdayCount += 1;
     } else {
       merchantMap.set(key, {
         merchant,
         category: t.category || 'Other',
         amounts: [t.amount],
         count: 1,
+        weekendCount: isTxWeekend ? 1 : 0,
+        weekdayCount: isTxWeekend ? 0 : 1,
       });
     }
   }
 
-  // Define category preference according to current time of day
+  // Time-of-day category preferences
   const isMorning = hour >= 6 && hour < 11;
   const isLunch = hour >= 11 && hour < 15;
   const isAfternoon = hour >= 15 && hour < 18;
@@ -174,22 +202,46 @@ export function mineUserHabitSuggestions(
       if (name.includes('mamak') || name.includes('familymart') || name.includes('supper') || cat.includes('food')) timeRelevance += 3;
     }
 
-    const score = item.count * timeRelevance;
+    // Weekday vs weekend weight
+    const dayAffinity = isWeekend
+      ? 1 + (item.weekendCount / Math.max(1, item.count)) * 0.8
+      : 1 + (item.weekdayCount / Math.max(1, item.count)) * 0.8;
+
+    const score = item.count * timeRelevance * dayAffinity;
     return { ...item, score };
   });
 
   scoredMerchants.sort((a, b) => b.score - a.score);
 
-  const personalized: HabitSuggestionItem[] = scoredMerchants.slice(0, 4).map((item) => {
+  const personalized: HabitSuggestionItem[] = [];
+
+  for (const item of scoredMerchants) {
+    if (personalized.length >= 4) break;
+
     const medianAmt = getMedian(item.amounts);
     const roundedAmt = medianAmt % 1 === 0 ? medianAmt.toString() : medianAmt.toFixed(2);
     const emoji = getMerchantEmoji(item.merchant, item.category);
-    return {
-      label: `${emoji} ${item.merchant} ${roundedAmt}`,
-      text: `${item.merchant} ${roundedAmt}`,
-      isPersonalized: true,
-    };
-  });
+    const chipText = `${item.merchant} ${roundedAmt}`;
 
-  return personalized.length >= 2 ? personalized : defaultFallback;
+    // Suppress if user rejected this chip within last 30 days
+    if (isChipRejected(chipText, rejectedChips, nowMs) || isChipRejected(item.merchant, rejectedChips, nowMs)) {
+      continue;
+    }
+
+    personalized.push({
+      label: `${emoji} ${item.merchant} ${roundedAmt}`,
+      text: chipText,
+      isPersonalized: true,
+      actionPayload: {
+        amount: Number(medianAmt.toFixed(2)),
+        currency: 'MYR',
+        category: item.category,
+        description: item.merchant,
+        type: 'Expense',
+      },
+    });
+  }
+
+  // When user has >= 3 real expenses, NEVER show default fake habits!
+  return personalized;
 }

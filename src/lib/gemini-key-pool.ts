@@ -30,12 +30,28 @@ const NUMBERED_KEY_NAMES = [
 const QUOTA_COOLDOWN_MS = 60_000; // 60s cooldown on HTTP 429
 const AUTH_COOLDOWN_MS = 10 * 60_000; // 10m cooldown on HTTP 401/403
 
-export const STANDARD_GEMINI_MODEL = 'gemini-flash-latest';
+export const STANDARD_GEMINI_MODEL = 'gemini-2.5-flash';
 export const STANDARD_GEMINI_MODELS = [
-  'gemini-flash-latest',
-  'gemini-3.8-flash',
   'gemini-2.5-flash',
+  'gemini-flash-latest',
 ] as const;
+
+export function getStandardGeminiModelOrder(
+  env: Record<string, string | undefined> = process.env
+): string[] {
+  const preferred = (env.GEMINI_MODEL || '').trim();
+  const models: string[] = [];
+  if (preferred) {
+    models.push(preferred);
+  }
+  if (!models.includes('gemini-2.5-flash')) {
+    models.push('gemini-2.5-flash');
+  }
+  if (!models.includes('gemini-flash-latest')) {
+    models.push('gemini-flash-latest');
+  }
+  return models;
+}
 
 let roundRobinCursor = 0;
 const keyCooldownUntil = new Map<string, number>();
@@ -134,4 +150,224 @@ export function reportGeminiKeyFailure(
 export function resetGeminiKeyPoolStateForTests(): void {
   roundRobinCursor = 0;
   keyCooldownUntil.clear();
+}
+
+export function extractTextFromGeminiResponse(data: unknown): string {
+  if (!data || typeof data !== 'object') return '';
+  const candidates = (data as { candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }> }).candidates;
+  if (!Array.isArray(candidates) || candidates.length === 0) return '';
+  const parts = candidates[0]?.content?.parts;
+  if (!Array.isArray(parts)) return '';
+
+  const textParts: string[] = [];
+  for (const part of parts) {
+    if (part && typeof part.text === 'string' && !part.thought) {
+      textParts.push(part.text);
+    }
+  }
+  return textParts.join('');
+}
+
+export function stripJsonFences(raw: string): string {
+  let clean = raw.trim();
+  const blockMatch = clean.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (blockMatch) {
+    clean = blockMatch[1].trim();
+  }
+  return clean;
+}
+
+export interface GenerateGeminiOptions {
+  prompt: string;
+  systemInstruction?: string;
+  imageBase64?: string;
+  mimeType?: string;
+  thinking?: boolean;
+  thinkingBudget?: number;
+  temperature?: number;
+  maxOutputTokens?: number;
+  responseMimeType?: string;
+  timeoutMs?: number;
+  models?: string[];
+  fetchFn?: typeof fetch;
+  env?: Record<string, string | undefined>;
+}
+
+export interface GenerateGeminiResult {
+  text: string;
+  rawText: string;
+  model: string;
+  candidates?: unknown[];
+}
+
+/**
+ * Single unified helper for calling Gemini across the entire Kinova application.
+ *
+ * Enforces:
+ * - Strict model order: process.env.GEMINI_MODEL -> gemini-2.5-flash -> gemini-flash-latest
+ * - Load-balanced key rotation and cooldown on 429/401/403
+ * - Transparent retry on 400 when thinkingConfig/thinkingBudget is unsupported
+ * - Concatenation of all non-thought parts (ignores `thought: true`)
+ * - Clean stripping of markdown code fences
+ * - Timeouts: default 20s (thinking=false) / 45s (thinking=true)
+ */
+export async function generateGeminiContent(
+  options: GenerateGeminiOptions
+): Promise<GenerateGeminiResult> {
+  const env = options.env || process.env;
+  const apiKeys = getLoadBalancedGeminiKeys(env);
+  if (apiKeys.length === 0) {
+    throw new Error('GEMINI_API_KEY is not configured in server environment');
+  }
+
+  const models = options.models && options.models.length > 0
+    ? options.models
+    : getStandardGeminiModelOrder(env);
+
+  const fetchImpl = options.fetchFn || fetch;
+  const isThinkingTurn = options.thinking !== false;
+  const defaultTimeout = isThinkingTurn ? 45_000 : 20_000;
+  const timeoutMs = options.timeoutMs ?? defaultTimeout;
+
+  const defaultTemp = isThinkingTurn ? 0.4 : 0.1;
+  const temperature = options.temperature ?? defaultTemp;
+
+  const defaultMaxTokens = isThinkingTurn ? 4096 : 2048;
+  const maxOutputTokens = options.maxOutputTokens ?? defaultMaxTokens;
+
+  const defaultBudget = isThinkingTurn ? (options.thinkingBudget ?? 2048) : 0;
+  const thinkingBudget = options.thinkingBudget ?? defaultBudget;
+
+  const cleanBase64 = options.imageBase64
+    ? options.imageBase64.replace(/^data:[^;]+;base64,/, '').trim()
+    : '';
+
+  let lastError = 'No response from model';
+
+  for (const model of models) {
+    let shouldTryNextModel = false;
+
+    for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx += 1) {
+      const apiKey = apiKeys[keyIdx];
+
+      const callModel = async (withThinking: boolean) => {
+        const parts: Array<Record<string, unknown>> = [];
+        if (cleanBase64) {
+          parts.push({
+            inline_data: {
+              mime_type: options.mimeType || 'image/jpeg',
+              data: cleanBase64,
+            },
+          });
+        }
+        parts.push({ text: options.prompt });
+
+        const generationConfig: Record<string, unknown> = {
+          temperature,
+          maxOutputTokens,
+        };
+        if (options.responseMimeType) {
+          generationConfig.responseMimeType = options.responseMimeType;
+        }
+        if (withThinking && thinkingBudget > 0) {
+          generationConfig.thinkingConfig = {
+            thinkingBudget,
+          };
+        }
+
+        const reqBody: Record<string, unknown> = {
+          contents: [{ role: 'user', parts }],
+          generationConfig,
+        };
+
+        if (options.systemInstruction) {
+          reqBody.systemInstruction = {
+            parts: [{ text: options.systemInstruction }],
+          };
+        }
+
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+        return fetchImpl(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
+          },
+          body: JSON.stringify(reqBody),
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+      };
+
+      try {
+        let res = await callModel(isThinkingTurn);
+
+        // Transient 503 / 500 quick retry
+        if (res && (res.status === 503 || res.status === 500)) {
+          await new Promise((r) => setTimeout(r, 600));
+          res = await callModel(isThinkingTurn);
+        }
+
+        if (res.status === 400) {
+          const errBody = await res.text().catch(() => '');
+          console.warn(`[Gemini] Model ${model} returned 400:`, errBody.slice(0, 300));
+          if (isThinkingTurn && (errBody.includes('thinkingConfig') || errBody.includes('thinkingBudget'))) {
+            console.warn(`[Gemini] Retrying ${model} without thinkingConfig...`);
+            const retryRes = await callModel(false);
+            if (retryRes.ok) {
+              res = retryRes;
+            } else {
+              const retryErr = await retryRes.text().catch(() => '');
+              console.warn(`[Gemini] Retry without thinkingConfig failed: ${retryRes.status} ${retryErr.slice(0, 200)}`);
+              shouldTryNextModel = true;
+              break;
+            }
+          } else {
+            lastError = `Gemini 400: ${errBody.slice(0, 100)}`;
+            shouldTryNextModel = true;
+            break;
+          }
+        }
+
+        if (!res.ok) {
+          lastError = `Gemini ${res.status}`;
+          if (res.status === 429 || res.status === 401 || res.status === 403 || res.status >= 500) {
+            reportGeminiKeyFailure(apiKey, res.status);
+            if (keyIdx + 1 < apiKeys.length) {
+              continue; // try next key
+            }
+          }
+          if (res.status === 404 || res.status >= 500) {
+            shouldTryNextModel = true;
+            break;
+          }
+          break;
+        }
+
+        const responseData = await res.json();
+        const rawText = extractTextFromGeminiResponse(responseData);
+        if (!rawText) {
+          lastError = 'Empty response from model';
+          continue;
+        }
+
+        const cleanText = stripJsonFences(rawText);
+        return {
+          text: cleanText,
+          rawText,
+          model,
+          candidates: responseData.candidates,
+        };
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        lastError = errorMsg;
+        console.warn(`[Gemini] Attempt with model ${model} failed:`, errorMsg);
+      }
+    }
+
+    if (!shouldTryNextModel) {
+      // Completed key loop without requiring model fallback
+    }
+  }
+
+  throw new Error(lastError || 'Gemini request failed across all keys and models');
 }

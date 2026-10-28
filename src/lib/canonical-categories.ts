@@ -336,20 +336,32 @@ function inferExpenseCategoryFromContext(text: string): CanonicalExpenseCategory
   if (/gift|present|birthday|souvenir|angpow|angpao|red packet|礼物|送礼|红包|礼金|手信/i.test(lower)) {
     return 'Gift';
   }
-  if (/shell|petronas|caltex|bhpetrol|petron|grab|parking|toll|fuel|petrol|ron95|ron97|diesel/i.test(lower)) {
+  if (/shell|petronas|caltex|bhpetrol|petron|grab|parking|toll|fuel|petrol|ron95|ron97|diesel|交通|打车|加油|汽油|油费|停车|过路费/i.test(lower)) {
     return 'Transport';
   }
-  if (/food|rice|noodle|makan|kopi|coffee|cafe|restaurant|tea|burger|chicken|zapfan|bak kut|hawker|dining|grocer|groceries|supermarket|market|pasar|lotus|giant|aeon|jaya grocer|village grocer|econsave|mydin|cold storage|nsk|买菜|超市/i.test(lower)) {
+  if (/food|rice|noodle|makan|kopi|coffee|cafe|restaurant|tea|burger|chicken|zapfan|bak kut|hawker|dining|grocer|groceries|supermarket|market|pasar|lotus|giant|aeon|jaya grocer|village grocer|econsave|mydin|cold storage|nsk|买菜|超市|餐饮|吃饭|餐馆|饮食|外卖|午餐|晚餐|早餐|零食|饮料|奶茶/i.test(lower)) {
     return 'Food & Dining';
   }
-  if (/doctor|clinic|pharmacy|hospital|panadol|watson|guardian|dental/i.test(lower)) {
+  if (/doctor|clinic|pharmacy|hospital|panadol|watson|guardian|dental|医疗|看病|医院|诊所|药房|买药/i.test(lower)) {
     return 'Health';
   }
-  if (/netflix|spotify|cinema|movie|gsc|tgv|game|steam/i.test(lower)) {
+  if (/netflix|spotify|cinema|movie|gsc|tgv|game|steam|娱乐|电影|游戏|唱歌|追剧/i.test(lower)) {
     return 'Entertainment';
   }
-  if (/tnb|electric|water|syabas|air selangor|unifi|maxis|celcom|digi|rental|maintenance/i.test(lower)) {
+  if (/tnb|electric|water|syabas|air selangor|unifi|maxis|celcom|digi|rental|maintenance|住房|房租|水电|账单|话费|宽带|物业/i.test(lower)) {
     return 'Housing & Bills';
+  }
+  if (/parents|family|父母|家用|孝顺/i.test(lower)) {
+    return 'Parents';
+  }
+  if (/insurance|takaful|保险|保单|保费/i.test(lower)) {
+    return 'Insurance';
+  }
+  if (/education|school|tuition|教育|学费|培训|课程|买书/i.test(lower)) {
+    return 'Education';
+  }
+  if (/shopping|clothes|fashion|shoes|mall|购物|衣服|数码|买东西|网购/i.test(lower)) {
+    return 'Shopping';
   }
   return 'Other';
 }

@@ -45,6 +45,7 @@ import {
   computeDeterministicLedgerFacts,
   type DeterministicLedgerFacts,
 } from '@/lib/copilot-ledger-facts';
+import { getUserMoneyProfile } from '@/lib/user-money-profile';
 
 interface ReceiptPriceSearchProps {
   returnTo?: string;
@@ -333,17 +334,72 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
     return Array.from(storeMap.values()).sort((a, b) => a.minUnitPrice - b.minUnitPrice);
   }, [activeIntent, matches]);
 
-  // Dynamic quick suggestions
-  const suggestions = useMemo(() => [
-    { text: '我在四夕豆花吃过什么？消费多少？', type: 'copilot', icon: '🍨' },
-    { text: '今年我在哪里打汽油最便宜？', type: 'copilot', icon: '⛽' },
-    { text: '这个月在餐饮 Food 花了多少？', type: 'analytics', icon: '📊' },
-    { text: '查上个月交通与汽油总支出', type: 'analytics', icon: '🚗' },
-    { text: '我买过鸡饭多少钱？', type: 'price', icon: '🍗' },
-    { text: '查鸡蛋/牛奶公开发售参考价', type: 'price', icon: '🛒' },
-    { text: '现在有什么美股/ETF值得买？', type: 'stock', icon: '📈' },
-    { text: 'NVDA 现在可以买吗？走势如何', type: 'stock', icon: '💻' },
-  ], []);
+  // Dynamic quick suggestions from user's actual top merchants, categories, and goals
+  const suggestions = useMemo(() => {
+    const list: Array<{ text: string; type: string; icon: string }> = [];
+    const profile = getUserMoneyProfile(allTransactions);
+
+    if (profile.goals && profile.goals.length > 0) {
+      const topGoal = profile.goals[0];
+      list.push({
+        text: `距离「${topGoal.name}」目标还差多少？`,
+        type: 'copilot',
+        icon: '🎯',
+      });
+    }
+
+    const merchantCounts = new Map<string, number>();
+    const categoryCounts = new Map<string, number>();
+    for (const t of allTransactions) {
+      if (t.type?.toLowerCase() === 'expense' && t.amount > 0) {
+        if (t.description && t.description.length >= 2) {
+          merchantCounts.set(t.description, (merchantCounts.get(t.description) || 0) + 1);
+        }
+        if (t.category) {
+          categoryCounts.set(t.category, (categoryCounts.get(t.category) || 0) + 1);
+        }
+      }
+    }
+
+    const topMerchants = Array.from(merchantCounts.entries()).sort((a, b) => b[1] - a[1]);
+    const topCategories = Array.from(categoryCounts.entries()).sort((a, b) => b[1] - a[1]);
+
+    if (topMerchants.length > 0) {
+      list.push({
+        text: `我在 ${topMerchants[0][0]} 一共消费了多少？`,
+        type: 'copilot',
+        icon: '🏪',
+      });
+    }
+
+    if (topCategories.length > 0) {
+      list.push({
+        text: `这个月在 ${topCategories[0][0]} 花了多少？`,
+        type: 'analytics',
+        icon: '📊',
+      });
+    }
+
+    const hasTransport = topCategories.some(([c]) => c.toLowerCase().includes('transport'));
+    if (hasTransport) {
+      list.push({
+        text: '今年我在哪里打汽油最便宜？',
+        type: 'copilot',
+        icon: '⛽',
+      });
+    } else {
+      list.push({
+        text: '查上个月整体支出总额',
+        type: 'analytics',
+        icon: '💳',
+      });
+    }
+
+    list.push({ text: '查鸡蛋与牛奶公开发售参考价', type: 'price', icon: '🛒' });
+    list.push({ text: '现在有什么稳健指数ETF适合定投？', type: 'stock', icon: '📈' });
+
+    return list.slice(0, 8);
+  }, [allTransactions]);
 
   const copilotMatchingTransactions = useMemo(() => {
     const ids = copilotState.matchingTransactionIds || copilotState.deterministicFacts?.matchingTransactionIds;

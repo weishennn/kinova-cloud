@@ -68,7 +68,7 @@ export interface AiTripData {
 }
 
 type AiCommandMeta = {
-  confidence: number;
+  confidence?: number;
   missingFields?: string[];
   model?: string;
 };

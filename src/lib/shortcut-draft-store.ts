@@ -852,7 +852,6 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
   const candidateModels = [
     preferred,
     'gemini-2.5-flash',
-    'gemini-3.5-flash',
     'gemini-flash-latest',
   ]
     .filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);

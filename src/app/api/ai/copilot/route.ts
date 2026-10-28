@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getValidGoogleSession } from '@/lib/google-auth';
 import { recordUserAiCall } from '@/lib/admin-registry';
-import {
-  getLoadBalancedGeminiKeys,
-  reportGeminiKeyFailure,
-  STANDARD_GEMINI_MODEL,
-  STANDARD_GEMINI_MODELS,
-} from '@/lib/gemini-key-pool';
+import { generateGeminiContent } from '@/lib/gemini-key-pool';
 import { getLocalDateString } from '@/lib/date-helper';
 
 interface CopilotTransactionContext {
@@ -92,14 +87,6 @@ export async function POST(req: NextRequest) {
           : undefined,
       }));
 
-    const apiKeys = getLoadBalancedGeminiKeys();
-    if (apiKeys.length === 0) {
-      return NextResponse.json(
-        { success: false, error: 'Kinova Copilot requires a configured server GEMINI_API_KEY.' },
-        { status: 503 }
-      );
-    }
-
     const deterministicFacts = body?.deterministicFacts && typeof body.deterministicFacts === 'object'
       ? body.deterministicFacts
       : null;
@@ -164,77 +151,36 @@ Return strictly a valid JSON object matching this schema:
   "actionTip": string | null
 }`;
 
-    const preferredModel = process.env.GEMINI_MODEL || STANDARD_GEMINI_MODEL;
-    const models = [preferredModel, ...STANDARD_GEMINI_MODELS].filter((v, i, a) => a.indexOf(v) === i);
+    const result = await generateGeminiContent({
+      prompt,
+      responseMimeType: 'application/json',
+      thinking: true,
+      thinkingBudget: 2048,
+      temperature: 0.4,
+      maxOutputTokens: 4096,
+      timeoutMs: 45_000,
+    });
 
-    for (const model of models) {
-      for (const apiKey of apiKeys) {
-        try {
-          const res = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-goog-api-key': apiKey,
-              },
-              body: JSON.stringify({
-                contents: [{ role: 'user', parts: [{ text: prompt }] }],
-                generationConfig: {
-                  responseMimeType: 'application/json',
-                  temperature: 0.1,
-                  maxOutputTokens: 2048,
-                  thinkingConfig: {
-                    thinkingBudget: 0,
-                  },
-                },
-              }),
-              signal: AbortSignal.timeout(20000),
-            }
-          );
-
-          if (res.ok) {
-            const data = await res.json();
-            const rawJson = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (rawJson) {
-              let clean = rawJson.trim();
-              const blockMatch = clean.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-              if (blockMatch) clean = blockMatch[1].trim();
-              const parsed = JSON.parse(clean);
-              if (deterministicFacts) {
-                parsed.timeframe = deterministicFacts.timeframeLabel || parsed.timeframe || '';
-                parsed.matchedCount = Number(deterministicFacts.transactionCount) || 0;
-                parsed.isFoundInPersonalLedger = Boolean(deterministicFacts.isFoundInPersonalLedger);
-                parsed.exactTotalSpent = Number(deterministicFacts.exactTotalSpent) || 0;
-                parsed.matchingTransactionIds = Array.isArray(deterministicFacts.matchingTransactionIds)
-                  ? deterministicFacts.matchingTransactionIds
-                  : [];
-                if ((!parsed.priceLadder || parsed.priceLadder.length === 0) && Array.isArray(deterministicFacts.priceLadder)) {
-                  parsed.priceLadder = deterministicFacts.priceLadder;
-                }
-              }
-              return NextResponse.json({ success: true, data: parsed });
-            }
-          }
-
-          if (res.status === 429 || res.status === 401 || res.status === 403 || res.status >= 500) {
-            reportGeminiKeyFailure(apiKey, res.status);
-          }
-        } catch (err) {
-          console.warn('[KinovaCopilot] Attempt failed:', err);
-        }
+    const parsed = JSON.parse(result.text);
+    if (deterministicFacts) {
+      parsed.timeframe = deterministicFacts.timeframeLabel || parsed.timeframe || '';
+      parsed.matchedCount = Number(deterministicFacts.transactionCount) || 0;
+      parsed.isFoundInPersonalLedger = Boolean(deterministicFacts.isFoundInPersonalLedger);
+      parsed.exactTotalSpent = Number(deterministicFacts.exactTotalSpent) || 0;
+      parsed.matchingTransactionIds = Array.isArray(deterministicFacts.matchingTransactionIds)
+        ? deterministicFacts.matchingTransactionIds
+        : [];
+      if ((!parsed.priceLadder || parsed.priceLadder.length === 0) && Array.isArray(deterministicFacts.priceLadder)) {
+        parsed.priceLadder = deterministicFacts.priceLadder;
       }
     }
-
-    return NextResponse.json(
-      { success: false, error: 'Kinova Copilot service is temporarily busy. Please try again.' },
-      { status: 502 }
-    );
+    return NextResponse.json({ success: true, data: parsed, model: result.model });
   } catch (error) {
-    console.error('[KinovaCopilot] Unexpected error:', error);
+    console.error('[KinovaCopilot] Error:', error);
+    const errorMsg = error instanceof Error ? error.message : 'Failed to process copilot query.';
     return NextResponse.json(
-      { success: false, error: 'Failed to process copilot query.' },
-      { status: 500 }
+      { success: false, error: errorMsg },
+      { status: 502 }
     );
   }
 }

@@ -29,6 +29,7 @@ import { toast } from 'sonner';
 import { CockpitPageHeading } from '@/components/money-cockpit/cockpit-page-heading';
 import { GoogleAccountAndAdminPanel } from '@/components/settings/google-account-admin-panel';
 import { MerchantRulesManager } from '@/components/settings/merchant-rules-manager';
+import { WhatKinovaKnows } from '@/components/settings/what-kinova-knows';
 import { saveSettingWithCloudSync, syncCloudSettingsWithLocal, SETTINGS_UPDATED_EVENT } from '@/lib/cloud-settings-sync';
 import {
   getPlanMigrationComparisons,
@@ -1776,6 +1777,9 @@ export default function SettingsPage() {
         </div>
       </section>
 
+
+      {/* What Kinova Knows Section */}
+      <WhatKinovaKnows />
 
       {/* App Preferences Section */}
       <section className="space-y-4">

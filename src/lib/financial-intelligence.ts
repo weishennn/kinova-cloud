@@ -73,6 +73,7 @@ export interface FinancialHealthReport {
   grade: 'S' | 'A' | 'B' | 'C' | 'D';
   gradeLabel: string;
   summary: string;
+  hasSufficientData?: boolean;
   dimensions: {
     savingsRate: HealthDimension;
     budgetDiscipline: HealthDimension;
@@ -243,13 +244,18 @@ export function calculateFinancialHealthScore(params: {
     }
   }
 
+  const hasSufficientData = effectiveIncome > 0 && emergencyFundBalance > 0;
   const totalScore = Math.min(100, Math.max(0, savingsRateScore + budgetScore + fixedScore + bufferScore));
 
   let grade: FinancialHealthReport['grade'] = 'A';
   let gradeLabel = '财务健康良好';
   let summary = '各项财务指标运行平稳，自由现金流充沛。';
 
-  if (totalScore >= 90) {
+  if (!hasSufficientData) {
+    grade = 'D';
+    gradeLabel = '数据不足，暂不评分';
+    summary = '暂无基准月收入或应急储备记录。在偏好设置中补充收入与应急金后，即可解锁精准评分。';
+  } else if (totalScore >= 90) {
     grade = 'S';
     gradeLabel = '卓越稳健 (Top Tier)';
     summary = '储蓄率与预算控制均处于极佳状态，财务护城河非常深厚。';
@@ -288,7 +294,8 @@ export function calculateFinancialHealthScore(params: {
   }
 
   return {
-    totalScore,
+    totalScore: hasSufficientData ? totalScore : 0,
+    hasSufficientData,
     grade,
     gradeLabel,
     summary,
@@ -362,6 +369,7 @@ export function predictCashflowTrajectory(params: {
   transactions: MinimalTransactionRecord[];
   startingCash?: number;
   baselineMonthlyIncome?: number;
+  paydayDay?: number | null;
   commitmentsOverride?: RecurringCommitmentItem[];
   installmentsOverride?: SavedInstallmentItem[];
   referenceDateStr?: string;
@@ -371,6 +379,7 @@ export function predictCashflowTrajectory(params: {
     transactions,
     startingCash = 0,
     baselineMonthlyIncome = 0,
+    paydayDay,
     commitmentsOverride,
     installmentsOverride,
     referenceDateStr,
@@ -434,8 +443,9 @@ export function predictCashflowTrajectory(params: {
     let dayOutflow = dailyDiscretionaryBurn;
     const noteItems: string[] = [];
 
-    // Monthly Salary/Income typically arrives on day 25 or 28
-    if (dayOfMonth === 25 && baselineMonthlyIncome > 0) {
+    // Monthly Salary/Income arrives on configured payday
+    // If payday is null or unset, do NOT invent or book day 25!
+    if (typeof paydayDay === 'number' && paydayDay >= 1 && paydayDay <= 31 && dayOfMonth === paydayDay && baselineMonthlyIncome > 0) {
       dayInflow += baselineMonthlyIncome;
       noteItems.push(`预计收入入账: +${baselineMonthlyIncome}`);
     }
@@ -495,6 +505,10 @@ export function predictCashflowTrajectory(params: {
   } else if (lowestPoint.balance < (startingCash > 0 ? startingCash * 0.2 : 500)) {
     status = 'tight';
     insightMessage = `💡 提示：第 ${lowestPoint.dayOffset} 天（${lowestPoint.dateStr}）余额将降至低位（RM ${lowestPoint.balance.toFixed(0)}），需注意缓冲。`;
+  }
+
+  if (paydayDay == null && baselineMonthlyIncome > 0) {
+    insightMessage = `${insightMessage}（发薪日未指定，预测暂未计入薪水入账，可在设置中补充发薪日以完善预测）`;
   }
 
   return {
@@ -841,9 +855,13 @@ export function generateAiFinancialBriefing(
   const commitments = getStoredCommitments();
   const upcomingCommitmentsTotal = commitments.reduce((s, c) => s + (c.amount || 0), 0);
 
-  const actionableTip = totalSpending > 2500
-    ? '智能管家提示：大额消费后建议适度保持 3-5 天的轻量消费周期，快速平抑月度开销均线。'
-    : '智能管家提示：当前消费节奏稳健可控，周末如有社交活动可放心体验，资金储备充足。';
+  const remainingBudgetText = budgetCap && budgetCap > 0
+    ? `当前距离预算上限还剩 RM ${(budgetCap - totalSpending).toFixed(2)}。`
+    : '暂未设定月度预算上限。';
+
+  const actionableTip = totalSpending > 0
+    ? `智能管家依据：本月累计已支出 RM ${totalSpending.toFixed(2)}，其中「${topCategoryName}」占比 ${Math.round(topCategoryRatio * 100)}%（RM ${topCategoryAmount.toFixed(2)}）。${remainingBudgetText}`
+    : '本月暂无支出记录，保持记账以形成个性化财务分析。';
 
   return {
     periodLabel: `${currentMonth} 财务深度简报`,

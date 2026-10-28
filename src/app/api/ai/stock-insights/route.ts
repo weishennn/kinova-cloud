@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getValidGoogleSession } from '@/lib/google-auth';
 import { recordUserAiCall } from '@/lib/admin-registry';
-import { getLoadBalancedGeminiKeys, reportGeminiKeyFailure, STANDARD_GEMINI_MODEL, STANDARD_GEMINI_MODELS } from '@/lib/gemini-key-pool';
+import { getLoadBalancedGeminiKeys, reportGeminiKeyFailure, generateGeminiContent, STANDARD_GEMINI_MODEL, STANDARD_GEMINI_MODELS } from '@/lib/gemini-key-pool';
 
 interface GroundedWebSource {
   title: string;
@@ -208,54 +208,19 @@ ${quoteContext}
     }
 
     // Phase 2: If Search failed or timed out, fall back immediately to direct generation!
-    // Since real-time Yahoo Finance quote is already injected into the prompt, direct generation is fast (2-3s) & comprehensive.
     if (!summary) {
-      directLoop: for (const apiKey of apiKeys) {
-        for (const model of models) {
-          try {
-            const directRes = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-              {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'x-goog-api-key': apiKey,
-                },
-                body: JSON.stringify({
-                  contents: [{ role: 'user', parts: [{ text: prompt }] }],
-                  generationConfig: {
-                    temperature: 0.1,
-                    maxOutputTokens: 1000,
-                    thinkingConfig: {
-                      thinkingBudget: 0,
-                    },
-                  },
-                }),
-                signal: AbortSignal.timeout(8000),
-              }
-            ).catch(() => null);
-
-            if (directRes && directRes.ok) {
-              const data = await directRes.json();
-              const candidate = data?.candidates?.[0];
-              const text = Array.isArray(candidate?.content?.parts)
-                ? candidate.content.parts
-                    .map((part: { text?: unknown }) => safeText(part?.text, 9000))
-                    .filter(Boolean)
-                    .join('\n')
-                    .slice(0, 10000)
-                : '';
-              if (text) {
-                summary = text;
-                break directLoop;
-              }
-            } else if (directRes && (directRes.status === 429 || directRes.status === 401 || directRes.status === 403 || directRes.status >= 500)) {
-              reportGeminiKeyFailure(apiKey, directRes.status);
-            }
-          } catch {
-            // Continue
-          }
-        }
+      try {
+        const directResult = await generateGeminiContent({
+          prompt,
+          thinking: false,
+          thinkingBudget: 0,
+          temperature: 0.1,
+          maxOutputTokens: 1000,
+          timeoutMs: 10_000,
+        });
+        summary = directResult.rawText.slice(0, 10000);
+      } catch (directErr) {
+        console.warn('[StockInsights] Direct generation fallback error:', directErr);
       }
     }
 

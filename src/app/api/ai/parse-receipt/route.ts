@@ -3,7 +3,7 @@ import { getLocalDateString, normalizeDateString } from '@/lib/date-helper';
 import { normalizeToCanonicalCategory } from '@/lib/canonical-categories';
 import { getValidGoogleSession } from '@/lib/google-auth';
 import { recordUserAiCall } from '@/lib/admin-registry';
-import { getLoadBalancedGeminiKeys, reportGeminiKeyFailure } from '@/lib/gemini-key-pool';
+import { generateGeminiContent } from '@/lib/gemini-key-pool';
 
 const VALID_CURRENCIES = new Set(['MYR', 'USD', 'SGD', 'EUR', 'GBP', 'JPY', 'AUD', 'IDR', 'THB', 'CNY', 'HKD']);
 
@@ -170,19 +170,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'A valid JPEG, PNG, or WebP receipt image is required' }, { status: 400 });
     }
 
-    const apiKeys = getLoadBalancedGeminiKeys();
-    if (apiKeys.length === 0) {
-      return NextResponse.json({ success: false, error: 'GEMINI_API_KEY is not configured in environment' }, { status: 500 });
-    }
-
-    const preferredModel = (process.env.GEMINI_OCR_MODEL || process.env.GEMINI_MODEL || '').trim();
-    const models = [
-      'gemini-2.5-flash',
-      preferredModel,
-      'gemini-flash-latest',
-      'gemini-3.5-flash',
-    ].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
-
     const prompt = `You are an intelligent financial OCR and receipt analysis AI.
 Analyze this receipt or payment confirmation screenshot and return ONLY valid JSON.
 Today is ${today}.
@@ -208,50 +195,21 @@ CRITICAL INSTRUCTIONS:
 3. FUEL / PETROL & SUBSIDY DEDUCTIONS:
    - Gas and petrol stations belong to category "Transport".
    - Extract purchased fuel line items into "items" with litres and unit price when printed.
-   - DEDUCTION & NET CHARGE AUDIT: Receipts and fuel pumps often display an unsubsidized gross amount, government subsidies, loyalty vouchers, or member discounts alongside the actual customer payment. "amount" MUST ALWAYS BE THE ACTUAL NET OUT-OF-POCKET AMOUNT CHARGED TO THE CARD OR PAID IN CASH. Extract "billAmount" (gross pre-discount), "discountAmount" (subsidies + vouchers + discounts), and "dealsDescription" summarizing the deductions.
+   - DEDUCTION & NET CHARGE AUDIT: Receipts and fuel pumps often display an unsubsidized gross amount, government subsidies, loyalty vouchers, or member discounts alongside the actual customer payment. "amount" MUST ALWAYS BE THE ACTUAL NET OUT-OF-POCKET AMOUNT CHARGED.
 
-4. NET AMOUNT PAID VS PRE-DISCOUNT BILL:
-   - "amount" MUST ALWAYS BE THE ACTUAL NET OUT-OF-POCKET AMOUNT PAID.
-   - NEVER record the pre-discount bill amount as the expense "amount".
-   - Extract "billAmount", "discountAmount", and "dealsDescription" when applicable.
+4. TAX, SERVICE CHARGE & ROUNDING:
+   - Calculate or extract net subtotal, SST, and service charges.
+   - Do not mistake cash rounding adjustments (e.g. 1-5 cents) for tax.
 
-5. DATE RECOGNITION:
-   - Receipts standardly use DD/MM/YYYY or YYYY-MM-DD.
-   - If a 2-digit year is printed (e.g. "25/10/26"), expand to 2026.
-   - NEVER confuse transaction date with expiry dates ("EXP", "Best Before"). Fallback to ${today} if missing.
-
-6. TAXES & ROUNDING (INCLUSIVE VS EXCLUSIVE INTELLIGENCE):
-   - Determine whether tax (SST, GST, VAT) is ALREADY INCLUDED in the printed line items (taxIncluded: true) or ADDED ON TOP (taxIncluded: false):
-     * If receipt states 'Inclu.', 'Inc.', 'Inclusive', 'Base Amt.', or if sum(items.amount) equals subtotal or total (e.g. items sum to 127.30 and total is 127.30 with SST 7.21 on base 120.09), then TAX IS ALREADY INCLUDED in the printed line items. Set "taxIncluded": true.
-     * When taxIncluded is true: item prices MUST remain the printed inclusive prices. "amount" is the total net amount paid (e.g. 127.30). Do NOT strip tax from individual items!
-     * When tax is added on top (exclusive): sum(items) + tax = amount, set "taxIncluded": false.
-   - Taxes: array of ALL tax and service charge lines printed, e.g. [{"label": "Service Charge 10%", "rate": 10, "amount": 3.02}, {"label": "SST 6%", "rate": 6, "amount": 1.81}].
-   - CRITICAL FOR ROUNDING: NEVER include "Rounding", "Rounding Adjustment", "Pelarasan", "Pelarasan Genapan", or "Genap" in taxes or taxAmount! Rounding (±0.01 to ±0.05) is NOT a tax!
-
-7. ITEMS (PRESERVE REPEATED LINES & QUANTITY AUDIT):
-   - Array of every purchased line with { "name": string, "quantity": number, "unitPrice": number, "amount": number, "brand": string|null, "productType": string|null, "category": string }.
-   - REPEATED DISHES: Receipts frequently list the exact same dish multiple times on separate lines (e.g. Line A: 1x Chilli Pan Mee, Line B: 2x Chilli Pan Mee, Line C: 1x Chilli Pan Mee). NEVER merge, consolidate, or drop repeated lines! Every printed line MUST be its own item in "items".
-   - QUANTITY FOOTER: Check the receipt's printed quantity check if present (e.g. '11 Qty'). Verify that sum(item.quantity) matches the printed total quantity.
-   - If "2 Laksa 18.00" is already the line total, set quantity: 2, unitPrice: 9.00, amount: 18.00 (do NOT multiply again).
-   - "amount" is the full line total for that item row.
-
-8. CATEGORIES (STRICT PREDEFINED LIST):
-   - "category" and item "category" MUST be chosen ONLY from:
-     [Food & Dining, Transport, Shopping, Housing & Bills, Parents, Insurance, Entertainment, Health, Education, Sport, Gift, Other].
-   - NEVER invent custom category names (e.g. do NOT use "Groceries", "Food", "Beverages", "Dining Out", "Dining", "Electronics", "Utilities", "Coffee" — all food, groceries, dining, and supermarket purchases belong strictly to "Food & Dining"). Map them to the list above!
-
-Return JSON shape:
+Return ONLY this JSON shape:
 {
+  "merchant": string,
+  "date": "YYYY-MM-DD",
   "amount": number,
-  "currency": "MYR",
+  "currency": string,
   "category": string,
   "description": string,
-  "date": "YYYY-MM-DD",
   "subtotal": number | null,
-  "billAmount": number | null,
-  "discountAmount": number | null,
-  "dealsDescription": string | null,
-  "taxes": [{"label": string, "rate": number | null, "amount": number | null}],
   "taxAmount": number | null,
   "taxRate": number | null,
   "taxIncluded": boolean,
@@ -260,95 +218,42 @@ Return JSON shape:
   "notes": string
 }`;
 
-    for (const model of models) {
-      let res: Response | null = null;
-      let shouldTryNextModel = false;
+    let cleanJson = '';
+    let usedModel = 'gemini-2.5-flash';
+    try {
+      const result = await generateGeminiContent({
+        prompt,
+        imageBase64,
+        mimeType,
+        responseMimeType: 'application/json',
+        thinking: false,
+        thinkingBudget: 0,
+        temperature: 0.1,
+        maxOutputTokens: 4096,
+        timeoutMs: 25_000,
+      });
+      cleanJson = result.text;
+      usedModel = result.model;
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : 'Gemini OCR failed';
+      return NextResponse.json({ success: false, error: errorMsg }, { status: 502 });
+    }
 
-      for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx += 1) {
-        const apiKey = apiKeys[keyIdx];
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(cleanJson) as Record<string, unknown>;
+    } catch {
+      const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
         try {
-          res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              contents: [{
-                role: 'user',
-                parts: [
-                  { text: prompt },
-                  { inline_data: { mime_type: mimeType, data: imageBase64 } },
-                ],
-              }],
-              generationConfig: {
-                responseMimeType: 'application/json',
-                temperature: 0.1,
-                maxOutputTokens: 4096,
-              },
-            }),
-            signal: AbortSignal.timeout(25000),
-          });
+          parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
         } catch {
-          // Timeout or connection error on this key/model, failover to next key
-          continue;
-        }
-
-        if (res && res.ok) break;
-
-        // Model-level overload (503) or missing (404): failover to next candidate model immediately!
-        if (res && (res.status === 503 || res.status === 404)) {
-          shouldTryNextModel = true;
-          break;
-        }
-
-        if (res && (res.status === 429 || res.status === 401 || res.status === 403 || res.status >= 500)) {
-          reportGeminiKeyFailure(apiKey, res.status);
-          if (keyIdx + 1 < apiKeys.length) {
-            continue; // Failover to next configured API key
-          }
-        }
-        break;
-      }
-
-      if (shouldTryNextModel) continue;
-
-      if (!res || !res.ok) {
-        const status = res?.status ?? 502;
-        const userMessage = status === 429
-          ? 'Gemini quota is temporarily exhausted across all configured keys. Try again in a moment.'
-          : status === 503
-            ? 'Gemini 服务暂时繁忙 (HTTP 503 Overloaded)，已自动重试及切换备用模型，请稍等 2-3 秒后再试。'
-            : status === 401 || status === 403
-              ? 'Gemini rejected the API key. Check GEMINI_API_KEY in environment.'
-              : `Gemini OCR failed (${status}). Please try a clearer receipt image.`;
-        return NextResponse.json({ success: false, error: userMessage }, { status: 502 });
-      }
-
-      const responseData = await res.json();
-      const rawJson = responseData.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!rawJson) return NextResponse.json({ success: false, error: 'Gemini OCR returned no text result' }, { status: 502 });
-
-      let cleanJson = rawJson.trim();
-      const blockMatch = cleanJson.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-      if (blockMatch) {
-        cleanJson = blockMatch[1].trim();
-      }
-
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(cleanJson) as Record<string, unknown>;
-      } catch {
-        const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          try {
-            parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
-          } catch {
-            return NextResponse.json({ success: false, error: 'Gemini OCR returned invalid JSON' }, { status: 502 });
-          }
-        } else {
           return NextResponse.json({ success: false, error: 'Gemini OCR returned invalid JSON' }, { status: 502 });
         }
+      } else {
+        return NextResponse.json({ success: false, error: 'Gemini OCR returned invalid JSON' }, { status: 502 });
       }
+    }
 
       try {
         const rawParsedItems: RawKinovaReceiptItem[] = Array.isArray(parsed.items)
@@ -672,14 +577,11 @@ Return JSON shape:
             },
             items,
           },
-          model,
+          model: usedModel,
         });
       } catch {
         return NextResponse.json({ success: false, error: 'Gemini OCR returned invalid JSON' }, { status: 502 });
       }
-    }
-
-    return NextResponse.json({ success: false, error: 'No OCR model was available' }, { status: 502 });
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : 'Receipt OCR failed';
     console.error('[ReceiptOCR] Uncaught error in route:', err);
