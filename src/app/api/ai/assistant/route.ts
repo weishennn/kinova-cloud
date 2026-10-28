@@ -4,6 +4,7 @@ import { recordUserAiCall } from '@/lib/admin-registry';
 import { generateGeminiContent } from '@/lib/gemini-key-pool';
 import { getLocalDateString } from '@/lib/date-helper';
 import { normalizeToCanonicalCategory } from '@/lib/canonical-categories';
+import { parseAssistantJsonResponse } from '@/lib/kinova-assistant';
 
 export interface AssistantTurn {
   role: 'user' | 'assistant';
@@ -181,17 +182,12 @@ export async function POST(req: NextRequest) {
 
     let parsedResult: Record<string, unknown>;
     try {
-      parsedResult = JSON.parse(result.text);
+      parsedResult = parseAssistantJsonResponse(result.text);
     } catch {
-      const match = result.text.match(/\{[\s\S]*\}/);
-      if (match) {
-        parsedResult = JSON.parse(match[0]);
-      } else {
-        return NextResponse.json(
-          { success: false, error: 'Assistant returned invalid JSON' },
-          { status: 502 }
-        );
-      }
+      return NextResponse.json(
+        { success: false, error: 'Assistant returned invalid JSON' },
+        { status: 502 }
+      );
     }
 
     // Sanitize category if command is present

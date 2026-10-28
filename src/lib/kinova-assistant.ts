@@ -268,3 +268,35 @@ export async function runKinovaTurn(
     model: responseJson.model,
   };
 }
+
+/**
+ * Safely parses raw assistant text output into structured JSON,
+ * stripping markdown fences and thought blocks.
+ */
+export function parseAssistantJsonResponse(rawText: string): Record<string, unknown> {
+  if (!rawText || typeof rawText !== 'string') {
+    throw new Error('Empty assistant response');
+  }
+
+  let clean = rawText.trim();
+  // Strip code fences if present
+  const fenceMatch = clean.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (fenceMatch) {
+    clean = fenceMatch[1].trim();
+  }
+
+  try {
+    return JSON.parse(clean);
+  } catch {
+    const match = clean.match(/\{[\s\S]*\}/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]);
+      } catch {
+        throw new Error('Assistant returned invalid JSON');
+      }
+    }
+    throw new Error('Assistant returned invalid JSON');
+  }
+}
+

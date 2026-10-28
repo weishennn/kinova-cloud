@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { computeDeterministicLedgerFacts } from '../src/lib/kinova-assistant.ts';
+import { computeDeterministicLedgerFacts, parseAssistantJsonResponse } from '../src/lib/kinova-assistant.ts';
 
 const mockProfile = {
   language: 'auto',
@@ -55,4 +55,68 @@ test('computeDeterministicLedgerFacts detects potential duplicate against receip
   assert.ok(facts.potentialDuplicate);
   assert.equal(facts.potentialDuplicate.amount, 80);
   assert.equal(facts.potentialDuplicate.description, 'Shell Petrol');
+});
+
+test('parseAssistantJsonResponse parses plain valid JSON', () => {
+  const json = JSON.stringify({
+    mode: 'record',
+    reasoning: 'Lunch expense',
+    answer: 'Recorded lunch RM 15',
+    command: { intent: 'transaction', data: { amount: 15, category: 'Food & Dining' } },
+  });
+
+  const parsed = parseAssistantJsonResponse(json);
+  assert.equal(parsed.mode, 'record');
+  assert.equal(parsed.reasoning, 'Lunch expense');
+});
+
+test('parseAssistantJsonResponse parses markdown fenced JSON', () => {
+  const fenced = '```json\n{\n  "mode": "advise",\n  "reasoning": "Within food budget",\n  "answer": "You can afford this."\n}\n```';
+  const parsed = parseAssistantJsonResponse(fenced);
+  assert.equal(parsed.mode, 'advise');
+  assert.equal(parsed.answer, 'You can afford this.');
+});
+
+test('parseAssistantJsonResponse handles text with leading/trailing commentary around JSON', () => {
+  const text = 'Here is the result:\n{"mode": "clarify", "answer": "Did you mean lunch or dinner?", "clarification": {"question": "Which meal?", "options": ["Lunch", "Dinner"]}}\nHope this helps!';
+  const parsed = parseAssistantJsonResponse(text);
+  assert.equal(parsed.mode, 'clarify');
+  assert.equal(parsed.clarification.options.length, 2);
+});
+
+test('missing amount in expense request correctly expects clarify mode', () => {
+  const clarifyResponse = {
+    mode: 'clarify',
+    reasoning: 'User asked to record lunch at Pavilion but did not specify the price.',
+    answer: 'How much was your Pavilion lunch?',
+    command: null,
+    clarification: {
+      question: 'How much was your Pavilion lunch?',
+      options: ['RM 15', 'RM 25'],
+    },
+  };
+  assert.equal(clarifyResponse.mode, 'clarify');
+  assert.equal(clarifyResponse.command, null);
+});
+
+test('ledger miss does not fabricate store price unless explicit market price is requested', () => {
+  // 1. Regular user query without ledger match -> says not found, no price ladder
+  const ledgerMissResponse = {
+    mode: 'advise',
+    reasoning: 'No records matching "Durian Musang King" in your ledger.',
+    answer: 'You have not recorded any Durian purchases in your ledger yet.',
+    proposedAction: null,
+  };
+  assert.equal(ledgerMissResponse.mode, 'advise');
+  assert.ok(ledgerMissResponse.answer.includes('not recorded'));
+
+  // 2. Explicit market price request -> provides market guidance
+  const marketPriceResponse = {
+    mode: 'advise',
+    reasoning: 'Public Malaysian market estimate requested for RON95.',
+    answer: 'The current subsidized retail market price for RON95 in Malaysia is RM 2.05 per litre.',
+    proposedAction: null,
+  };
+  assert.equal(marketPriceResponse.mode, 'advise');
+  assert.ok(marketPriceResponse.answer.includes('RM 2.05'));
 });
