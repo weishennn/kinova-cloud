@@ -263,7 +263,28 @@ export default function InvestmentsPage() {
         return;
       }
       clearAllSwrCache();
-      await queryClient.invalidateQueries();
+
+      // Immediately seed cache with the freshly returned trades for 0ms instant display
+      if (Array.isArray(data.trades) && data.trades.length > 0) {
+        queryClient.setQueryData(['sheet', 'Trades', 'active'], {
+          headers: [
+            'Id', 'Date', 'Action', 'Ticker', 'Asset Name',
+            'Quantity', 'Price', 'Fees', 'Net Total', 'Currency', 'Notes'
+          ],
+          rows: data.trades,
+        });
+      }
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['sheet'] }),
+        queryClient.invalidateQueries({ queryKey: ['portfolio'] }),
+        queryClient.refetchQueries({ queryKey: ['sheet', 'Trades', 'active'] }),
+        queryClient.refetchQueries({ queryKey: ['portfolio'] }),
+        queryClient.refetchQueries({ queryKey: ['months'] }),
+      ]);
+
+      // Switch to Trade History tab so the user immediately sees the trades table
+      setActiveTab('trades');
 
       const parts = [];
       if (data.syncedTrades > 0) parts.push(`${data.syncedTrades} new trade${data.syncedTrades > 1 ? 's' : ''}`);
@@ -271,10 +292,10 @@ export default function InvestmentsPage() {
 
       if (parts.length === 0) {
         toast.success(
-          `✨ Moomoo is fully up-to-date! All trades & deposits already synced. Portfolio: $${data.portfolioSummary?.totalAssetsUsd || '99.00'} USD (RM ${data.portfolioSummary?.totalAssetsMyr || '403.58'})`
+          `✨ Moomoo is fully up-to-date! Switched to Trade History (${data.trades?.length || trades.length} trades recorded).`
         );
       } else {
-        toast.success(`✨ Synced from Moomoo: Added ${parts.join(' & ')}!`);
+        toast.success(`✨ Synced from Moomoo: Added ${parts.join(' & ')}! Switched to Trade History.`);
       }
     } catch {
       toast.error('Network error connecting to Moomoo sync API');

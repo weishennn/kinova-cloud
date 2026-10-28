@@ -183,7 +183,24 @@ export async function POST(req: NextRequest) {
     const existingTradesRes = await executeUserGoogleAction(session, 'getTrades', {}).catch(() => ({
       result: { rows: [] },
     }));
-    const existingRows = ((existingTradesRes as any)?.result?.rows || []) as Array<Record<string, unknown>>;
+    const rawExistingRows = ((existingTradesRes as any)?.result?.rows || []) as Array<Record<string, unknown>>;
+
+    // Deduplicate any accidental duplicate rows from previous sync runs
+    const seenTickers = new Set<string>();
+    const existingRows: Array<Record<string, unknown>> = [];
+    for (const r of rawExistingRows) {
+      const ticker = String(r.Ticker || '').toUpperCase();
+      const rowId = String(r.Id || '');
+      if (!ticker) continue;
+      if (seenTickers.has(ticker)) {
+        if (rowId) {
+          await executeUserGoogleAction(session, 'deleteRow', { sheetName: 'Trades', id: rowId }).catch(() => null);
+        }
+      } else {
+        seenTickers.add(ticker);
+        existingRows.push(r);
+      }
+    }
 
     let syncedTrades = 0;
     let skippedTrades = 0;
@@ -217,17 +234,7 @@ export async function POST(req: NextRequest) {
       const currency = String(order.currency || 'USD').toUpperCase();
       const stockName = String(order.stock_name || ticker);
 
-      // Check if already logged
-      const isAlreadyLogged = existingRows.some((r) => {
-        const notes = String(r.Notes || '');
-        if (orderId && notes.includes(orderId)) return true;
-        const rTicker = String(r.Ticker || '').toUpperCase();
-        const rDate = String(r.Date || '');
-        const rQty = Math.abs(parseFloat(String(r.Quantity || '0')));
-        return rTicker === ticker && rDate === orderDate && Math.abs(rQty - qty) < 0.0001;
-      });
-
-      if (isAlreadyLogged) {
+      if (seenTickers.has(ticker)) {
         skippedTrades++;
         continue;
       }
@@ -252,6 +259,13 @@ export async function POST(req: NextRequest) {
         },
       });
 
+      seenTickers.add(ticker);
+      existingRows.push({
+        Ticker: ticker,
+        Date: orderDate,
+        Quantity: qty,
+        Notes: `Order: ${orderId}`,
+      });
       syncedTrades++;
     }
 
@@ -259,11 +273,12 @@ export async function POST(req: NextRequest) {
     for (const pos of positionsList) {
       const rawCode = String(pos.code || '');
       const ticker = rawCode.replace(/^(US\.|HK\.|MY\.)/, '').toUpperCase();
-      const isAlreadyInTrades = existingRows.some(
-        (r) => String(r.Ticker || '').toUpperCase() === ticker
-      );
 
-      if (!isAlreadyInTrades && parseFloat(pos.qty || '0') > 0) {
+      if (seenTickers.has(ticker)) {
+        continue;
+      }
+
+      if (parseFloat(pos.qty || '0') > 0) {
         // Find execution in cash logs
         const buyExec = cashLogsList.find(
           (c: any) => c.symbol === ticker && c.transaction_name === 'Stock Buy Execution'
@@ -293,6 +308,8 @@ export async function POST(req: NextRequest) {
             notes: `Moomoo Auto-Sync Holding (${ticker})`,
           },
         });
+
+        seenTickers.add(ticker);
         syncedTrades++;
       }
     }
@@ -352,6 +369,13 @@ export async function POST(req: NextRequest) {
     const fundsUsd = fundsUsdRes?.data?.d;
     const fundsMyr = fundsMyrRes?.data?.d;
 
+    // Force synchronize the Portfolio formulas sheet
+    await executeUserGoogleAction(session, 'syncPortfolio', {}).catch(() => null);
+
+    // Fetch the clean trades list from Google Sheets
+    const freshTradesRes = await executeUserGoogleAction(session, 'getTrades', {}).catch(() => null);
+    const freshTrades = ((freshTradesRes as any)?.result?.rows || []) as Array<Record<string, unknown>>;
+
     return NextResponse.json({
       success: true,
       message: `Moomoo sync completed. Synced ${syncedTrades} trades and ${syncedDeposits} cash deposits.`,
@@ -359,6 +383,7 @@ export async function POST(req: NextRequest) {
       skippedTrades,
       syncedDeposits,
       skippedDeposits,
+      trades: freshTrades,
       portfolioSummary: {
         totalAssetsUsd: fundsUsd?.total_assets || '99.00',
         totalAssetsMyr: fundsMyr?.total_assets || '403.58',

@@ -584,15 +584,13 @@ export const sheetsData = {
       if (res.success && res.data) {
         const rawRows = res.data.rows || [];
         const mergedRows = applyPendingMutations(rawRows, sheetName);
-        if (mergedRows.length > rawRows.length) {
-          setSwrCachedData('getSheetData', { sheetName }, {
-            success: true,
-            data: {
-              headers: res.data.headers || [],
-              rows: mergedRows,
-            },
-          });
-        }
+        setSwrCachedData('getSheetData', { sheetName }, {
+          success: true,
+          data: {
+            headers: res.data.headers || [],
+            rows: mergedRows,
+          },
+        });
         return {
           headers: res.data.headers || [],
           rows: mergedRows,
