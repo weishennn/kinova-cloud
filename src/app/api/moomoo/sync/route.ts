@@ -57,13 +57,20 @@ export async function GET(req: NextRequest) {
       config,
     }).catch((e) => ({ success: false, error: String(e) }));
 
-    // 4. If any authorized real accounts exist, query their positions, orders, cash logs, funds
-    const realAccounts = (authAccsRes as any)?.data?.accounts || [];
+    // 4. Query positions, orders, cash logs, and funds for discovered real accounts
+    const authData = (authAccsRes as any)?.data;
+    const realAccounts = authData?.d?.accounts || authData?.accounts || [];
     const realResults: Record<string, unknown> = {};
 
+    // Collect all candidate IDs to query
+    const candidateIds = new Set<string>();
     for (const acc of realAccounts) {
-      const accId = String(acc.account_id || acc.acc_id || acc.id || '');
-      if (!accId) continue;
+      if (acc.account_id) candidateIds.add(String(acc.account_id));
+      if (acc.account_card_number) candidateIds.add(String(acc.account_card_number));
+      if (acc.univs_account_card_number) candidateIds.add(String(acc.univs_account_card_number));
+    }
+
+    for (const accId of candidateIds) {
       const [pos, orders, cash, funds] = await Promise.all([
         callMoomooApi(`/api/v1.0/accounts/${accId}/positions`, { method: 'GET', config }).catch(() => null),
         callMoomooApi(`/api/v1.0/accounts/${accId}/orders_history`, { method: 'GET', config }).catch(() => null),
@@ -83,8 +90,6 @@ export async function GET(req: NextRequest) {
       apiKeyPrefix: config.apiKey.slice(0, 6) + '***',
       connectionStatus: 'CONNECTED',
       authorizedTradingAccounts: (authAccsRes as any)?.data || (authAccsRes as any)?.error,
-      simulatedAccounts: (simAccsRes as any)?.data || (simAccsRes as any)?.error,
-      testSimPositions: (testSimPos as any)?.data || (testSimPos as any)?.error,
       realResults,
     });
   } catch (err) {

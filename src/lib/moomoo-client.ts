@@ -160,8 +160,14 @@ export async function callMoomooApi<T = unknown>(
     const rawText = await res.text().catch(() => '');
     let json: any = null;
     try {
-      json = JSON.parse(rawText);
-    } catch {}
+      // Preserve large 64-bit integer IDs as strings to prevent JS float precision loss
+      const safeText = rawText.replace(/"(account_id|order_id|trade_id|pstn_id)":\s*(\d{14,})/g, '"$1": "$2"');
+      json = JSON.parse(safeText);
+    } catch {
+      try {
+        json = JSON.parse(rawText);
+      } catch {}
+    }
 
     if (!res.ok) {
       const errMsg = json?.message || json?.error || (rawText && rawText.length < 200 ? rawText : `HTTP ${res.status} ${res.statusText}`);
