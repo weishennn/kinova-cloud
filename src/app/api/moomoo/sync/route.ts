@@ -39,21 +39,42 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Test querying real discovered account IDs:
-    // 2947143 (Malaysia), 5705555 (US), 5705556 (HK)
-    const testAccountIds = ['5705555', '2947143', '5705556'];
-    const accountResults: Record<string, unknown> = {};
+    // 1. Discover authorized real trading accounts
+    const authAccsRes = await callMoomooApi('/api/v1.0/accounts/authorized_trd_accs', {
+      method: 'GET',
+      config,
+    }).catch((e) => ({ success: false, error: String(e) }));
 
-    for (const accId of testAccountIds) {
-      const [pos, orders, cash] = await Promise.all([
+    // 2. Discover simulated trading accounts
+    const simAccsRes = await callMoomooApi('/api/v1.0/sim-trade/accounts', {
+      method: 'GET',
+      config,
+    }).catch((e) => ({ success: false, error: String(e) }));
+
+    // 3. Test sim-trade position query for account 2947143
+    const testSimPos = await callMoomooApi('/api/v1.0/sim-trade/2947143/positions', {
+      method: 'GET',
+      config,
+    }).catch((e) => ({ success: false, error: String(e) }));
+
+    // 4. If any authorized real accounts exist, query their positions, orders, cash logs, funds
+    const realAccounts = (authAccsRes as any)?.data?.accounts || [];
+    const realResults: Record<string, unknown> = {};
+
+    for (const acc of realAccounts) {
+      const accId = String(acc.account_id || acc.acc_id || acc.id || '');
+      if (!accId) continue;
+      const [pos, orders, cash, funds] = await Promise.all([
         callMoomooApi(`/api/v1.0/accounts/${accId}/positions`, { method: 'GET', config }).catch(() => null),
         callMoomooApi(`/api/v1.0/accounts/${accId}/orders_history`, { method: 'GET', config }).catch(() => null),
         callMoomooApi(`/api/v1.0/accounts/${accId}/cash_logs`, { method: 'GET', config }).catch(() => null),
+        callMoomooApi(`/api/v1.0/accounts/${accId}/funds`, { method: 'GET', config }).catch(() => null),
       ]);
-      accountResults[accId] = {
+      realResults[accId] = {
         positions: pos?.data || pos?.error,
         orders: orders?.data || orders?.error,
         cash: cash?.data || cash?.error,
+        funds: funds?.data || funds?.error,
       };
     }
 
@@ -61,8 +82,10 @@ export async function GET(req: NextRequest) {
       configured: true,
       apiKeyPrefix: config.apiKey.slice(0, 6) + '***',
       connectionStatus: 'CONNECTED',
-      connectionDetails: 'Connection successful',
-      accountResults,
+      authorizedTradingAccounts: (authAccsRes as any)?.data || (authAccsRes as any)?.error,
+      simulatedAccounts: (simAccsRes as any)?.data || (simAccsRes as any)?.error,
+      testSimPositions: (testSimPos as any)?.data || (testSimPos as any)?.error,
+      realResults,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
