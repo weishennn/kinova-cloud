@@ -30,17 +30,27 @@ export function getMoomooConfig(): MoomooConfig | null {
 /**
  * Builds the signature base string per Moomoo OpenAPI Traditional API Key spec:
  * {timestamp_ms}\n{http_method}\n{request_path}\n{query_string}\n{body_part}
+ *
+ * Field requirements:
+ * 1. timestamp_ms: Current millisecond timestamp (must match X-Timestamp header)
+ * 2. http_method: Uppercase (GET, POST, etc.)
+ * 3. request_path: Path excluding domain/query (e.g. /api/v1.0/quote/stock-basicinfo)
+ * 4. query_string: URL query string without leading '?' (empty string if none)
+ * 5. body_part: Lowercase hex SHA-256 digest of raw body bytes (empty string if no body)
  */
 export function buildMoomooSignatureString(params: {
   timestamp: string;
   method: string;
   path: string;
   queryString?: string;
-  body?: string;
+  rawBody?: string;
 }): string {
   const methodUpper = params.method.toUpperCase();
   const query = (params.queryString || '').replace(/^\?/, '');
-  const bodyPart = params.body || '';
+  let bodyPart = '';
+  if (params.rawBody && params.rawBody.length > 0) {
+    bodyPart = crypto.createHash('sha256').update(params.rawBody, 'utf8').digest('hex').toLowerCase();
+  }
   return `${params.timestamp}\n${methodUpper}\n${params.path}\n${query}\n${bodyPart}`;
 }
 
@@ -109,7 +119,7 @@ export async function callMoomooApi<T = unknown>(
     method,
     path,
     queryString,
-    body: bodyString,
+    rawBody: bodyString,
   });
 
   let signature: string;
