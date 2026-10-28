@@ -330,7 +330,7 @@ CRITICAL INSTRUCTIONS:
 
 5. CATEGORIES:
    - [Food & Dining, Transport, Shopping, Housing & Bills, Parents, Insurance, Entertainment, Health, Education, Sport, Gift, Other].
-   - CRITICAL: category MUST be selected ONLY from this list. NEVER invent custom category names.
+   - CRITICAL: category MUST be selected ONLY from this list. NEVER invent custom category names. Specifically, NEVER use "Groceries", "Food", "Beverages", or "Dining" — all food, groceries, dining, and supermarket expenses MUST strictly be "Food & Dining".
 
 Return JSON shape:
 {

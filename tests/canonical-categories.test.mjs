@@ -18,7 +18,12 @@ test('1. Canonical categories include Sport and Gift', () => {
 test('2. normalizeToCanonicalCategory maps Gemini hallucinations to valid categories', () => {
   // Common Gemini / OCR hallucinations for expenses:
   assert.equal(normalizeToCanonicalCategory('Groceries', 'Expense'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('groceries', 'Expense'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('Food', 'Expense'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('food', 'Expense'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('Dining', 'Expense'), 'Food & Dining');
   assert.equal(normalizeToCanonicalCategory('Dining Out', 'Expense'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('Supermarket', 'Expense'), 'Food & Dining');
   assert.equal(normalizeToCanonicalCategory('Coffee', 'Expense'), 'Food & Dining');
   assert.equal(normalizeToCanonicalCategory('Fuel', 'Expense'), 'Transport');
   assert.equal(normalizeToCanonicalCategory('Gas', 'Expense'), 'Transport');
@@ -43,6 +48,8 @@ test('3. Context-aware category fallback when category is missing or invalid', (
   assert.equal(normalizeToCanonicalCategory('', 'Expense', 'Birthday present for friend'), 'Gift');
   assert.equal(normalizeToCanonicalCategory('', 'Expense', 'Shell V-Power fuel'), 'Transport');
   assert.equal(normalizeToCanonicalCategory('', 'Expense', 'Chicken rice lunch'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('', 'Expense', 'Jaya Grocer weekly groceries'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('', 'Expense', 'Village Grocer vegetables'), 'Food & Dining');
 });
 
 test('4. Income categories normalization', () => {

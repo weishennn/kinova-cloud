@@ -72,7 +72,7 @@ export function mineUserHabitSuggestions(
       ? [
           { label: '☕ 早餐 12', text: 'Breakfast 12' },
           { label: '⛽ 加油 50', text: 'Petrol 50' },
-          { label: '🛒 早市买菜 40', text: 'Groceries 40' },
+          { label: '🛒 早市买菜 40', text: 'Pasar 40' },
           { label: '☕ 咖啡 10', text: 'Coffee 10' },
         ]
       : hour >= 11 && hour < 15

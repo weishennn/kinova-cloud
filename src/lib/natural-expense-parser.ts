@@ -28,7 +28,9 @@ const CATEGORY_KEYWORDS: Record<string, string[]> = {
     'starbucks', 'coffee', 'cafe', 'teh', 'kopi', 'roti', 'nasi', 'mee', 'rice', 'noodle',
     'burger', 'pizza', 'sushi', 'ramen', 'boba', 'tea', 'bakery', 'bread', 'food', 'makan',
     'restaurant', 'cafe', 'grabfood', 'foodpanda', 'shopeefood', 'subway', 'mixue', 'chagee',
-    'village park', 'oriental kopi', 'tea garden'
+    'village park', 'oriental kopi', 'tea garden', 'groceries', 'grocery', 'supermarket',
+    'market', 'pasar', 'jaya grocer', 'village grocer', 'lotus', 'giant', 'aeon', 'econsave',
+    'mydin', 'nsk', '买菜', '超市'
   ],
   'Transport': [
     'petrol', 'fuel', 'gas', 'shell', 'petronas', 'caltex', 'bhp', 'petron', 'grab', 'ride',

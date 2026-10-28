@@ -238,7 +238,7 @@ CRITICAL INSTRUCTIONS:
 8. CATEGORIES (STRICT PREDEFINED LIST):
    - "category" and item "category" MUST be chosen ONLY from:
      [Food & Dining, Transport, Shopping, Housing & Bills, Parents, Insurance, Entertainment, Health, Education, Sport, Gift, Other].
-   - NEVER invent custom category names (e.g. do NOT use "Groceries", "Beverages", "Dining Out", "Electronics", "Utilities", "Coffee"). Map them to the list above!
+   - NEVER invent custom category names (e.g. do NOT use "Groceries", "Food", "Beverages", "Dining Out", "Dining", "Electronics", "Utilities", "Coffee" — all food, groceries, dining, and supermarket purchases belong strictly to "Food & Dining"). Map them to the list above!
 
 Return JSON shape:
 {

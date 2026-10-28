@@ -65,11 +65,17 @@ const EXPENSE_SYNONYMS: Record<string, CanonicalExpenseCategory> = {
   food: 'Food & Dining',
   dining: 'Food & Dining',
   diningout: 'Food & Dining',
+  fooddining: 'Food & Dining',
+  foodanddining: 'Food & Dining',
   restaurant: 'Food & Dining',
   cafe: 'Food & Dining',
   groceries: 'Food & Dining',
   grocery: 'Food & Dining',
+  grocer: 'Food & Dining',
   supermarket: 'Food & Dining',
+  supermarkets: 'Food & Dining',
+  market: 'Food & Dining',
+  pasar: 'Food & Dining',
   meals: 'Food & Dining',
   meal: 'Food & Dining',
   lunch: 'Food & Dining',
@@ -333,7 +339,7 @@ function inferExpenseCategoryFromContext(text: string): CanonicalExpenseCategory
   if (/shell|petronas|caltex|bhpetrol|petron|grab|parking|toll|fuel|petrol|ron95|ron97|diesel/i.test(lower)) {
     return 'Transport';
   }
-  if (/food|rice|noodle|makan|kopi|coffee|cafe|restaurant|tea|burger|chicken|zapfan|bak kut|hawker|dining/i.test(lower)) {
+  if (/food|rice|noodle|makan|kopi|coffee|cafe|restaurant|tea|burger|chicken|zapfan|bak kut|hawker|dining|grocer|groceries|supermarket|market|pasar|lotus|giant|aeon|jaya grocer|village grocer|econsave|mydin|cold storage|nsk|买菜|超市/i.test(lower)) {
     return 'Food & Dining';
   }
   if (/doctor|clinic|pharmacy|hospital|panadol|watson|guardian|dental/i.test(lower)) {

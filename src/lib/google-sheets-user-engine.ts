@@ -2,6 +2,7 @@ import { GoogleUserSession } from './google-auth';
 import { getAdminUserRegistry, updateUserDriveIds } from './admin-registry';
 import { ensureGoogleApiSuccess } from './google-api-result';
 import { detectConcurrentFieldConflict } from './conflict-policy';
+import { normalizeToCanonicalCategory } from './canonical-categories';
 
 export const DEFAULT_MONTHLY_HEADERS = [
   'Id', 'Date', 'Type', 'Category', 'SubCategory', 'Description',
@@ -767,7 +768,13 @@ function parseValuesToRows(sheetName: string, values: unknown[][], fallbackHeade
     };
     let hasData = false;
     for (let j = 0; j < effectiveHeaders.length; j++) {
-      const val = rowArr[j] !== undefined && rowArr[j] !== null ? rowArr[j] : '';
+      let val = rowArr[j] !== undefined && rowArr[j] !== null ? rowArr[j] : '';
+      if (effectiveHeaders[j].toLowerCase() === 'category') {
+        const catStr = String(val).trim();
+        if (/^(groceries|grocery|food|dining)$/i.test(catStr)) {
+          val = 'Food & Dining';
+        }
+      }
       rowObj[effectiveHeaders[j]] = val;
       if (val !== '') hasData = true;
     }
@@ -775,6 +782,60 @@ function parseValuesToRows(sheetName: string, values: unknown[][], fallbackHeade
   }
 
   return { headers: effectiveHeaders, rows };
+}
+
+/**
+ * Automatically inspects the 'Category' column in a sheet tab.
+ * If any rows contain legacy labels like "Groceries", "Food", or "Dining",
+ * it immediately batch-updates those cells in Google Sheets to "Food & Dining".
+ * This ensures the user's charts and SUMIF formulas in Google Sheets are 100% complete.
+ */
+async function autoSanitizeSheetCategories(
+  spreadsheetId: string,
+  accessToken: string,
+  sheetName: string,
+  values: unknown[][],
+  headers: string[]
+): Promise<number> {
+  if (!values || values.length <= 1) return 0;
+  const catColIdx = headers.findIndex((h) => h.toLowerCase() === 'category');
+  if (catColIdx < 0) return 0;
+
+  const updates: Array<{ range: string; values: string[][] }> = [];
+  const colLetter = String.fromCharCode(65 + catColIdx);
+
+  for (let i = 1; i < values.length; i++) {
+    const rawVal = String(values[i]?.[catColIdx] ?? '').trim();
+    if (/^(groceries|grocery|food|dining)$/i.test(rawVal)) {
+      const rowIndex = i + 1;
+      updates.push({
+        range: `'${sheetName}'!${colLetter}${rowIndex}`,
+        values: [['Food & Dining']],
+      });
+      // Mutate in-place so current query results are already clean
+      values[i][catColIdx] = 'Food & Dining';
+    }
+  }
+
+  if (updates.length > 0) {
+    try {
+      await googleApiFetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values:batchUpdate`,
+        accessToken,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            valueInputOption: 'USER_ENTERED',
+            data: updates,
+          }),
+        }
+      );
+    } catch (err) {
+      console.warn(`[CategorySanitizer] Failed to batch-update legacy categories in ${sheetName}:`, err);
+    }
+  }
+
+  return updates.length;
 }
 
 function getMonthListFromMeta(meta: SpreadsheetMetadata): string[] {
@@ -1127,6 +1188,7 @@ export async function executeUserGoogleAction(
                 index: meta.sheets.length,
               },
             });
+            await autoSanitizeSheetCategories(spreadsheetId, accessToken, sheetName, directValues, getDefaultHeadersForSheet(sheetName));
             return wrap(parseValuesToRows(sheetName, directValues, getDefaultHeadersForSheet(sheetName)));
           }
           return wrap({
@@ -1143,6 +1205,9 @@ export async function executeUserGoogleAction(
         await ensureSheetExists(spreadsheetId, accessToken, meta, sheetName);
       }
       const values = await readSheetValues(spreadsheetId, accessToken, sheetName);
+      if (isMonthlyTab) {
+        await autoSanitizeSheetCategories(spreadsheetId, accessToken, sheetName, values, getDefaultHeadersForSheet(sheetName));
+      }
       return wrap(parseValuesToRows(sheetName, values, getDefaultHeadersForSheet(sheetName)));
     }
 
@@ -1178,7 +1243,9 @@ export async function executeUserGoogleAction(
         const valueRanges = Array.isArray(batchData.valueRanges) ? batchData.valueRanges : [];
         valueRanges.forEach((vr: { values?: unknown[][] }, idx: number) => {
           const mName = months[idx];
-          const parsed = parseValuesToRows(mName, vr.values || [], DEFAULT_MONTHLY_HEADERS);
+          const mValues = vr.values || [];
+          void autoSanitizeSheetCategories(spreadsheetId, accessToken, mName, mValues, DEFAULT_MONTHLY_HEADERS);
+          const parsed = parseValuesToRows(mName, mValues, DEFAULT_MONTHLY_HEADERS);
           if (parsed.headers.length > 0) headers = parsed.headers;
           allRows = allRows.concat(parsed.rows);
         });
@@ -1329,6 +1396,17 @@ export async function executeUserGoogleAction(
         rowData.Currency = 'MYR';
       }
 
+      // Strictly enforce canonical categories so "Groceries", "Food", etc. NEVER enter the Google Sheet
+      if (rowData.Category !== undefined || rowData.category !== undefined) {
+        const rawCat = String(rowData.Category || rowData.category || '').trim();
+        const rawType = String(rowData.Type || rowData.type || 'Expense').trim();
+        const rawDesc = String(rowData.Description || rowData.description || '').trim();
+        const normalizedCat = normalizeToCanonicalCategory(rawCat, rawType, rawDesc);
+        if (rowData.Category !== undefined) rowData.Category = normalizedCat;
+        if (rowData.category !== undefined) rowData.category = normalizedCat;
+        if (rowData.Category === undefined && rowData.category !== undefined) rowData.Category = normalizedCat;
+      }
+
       const newRow = headers.map((h) => {
         if (rowData[h] !== undefined && rowData[h] !== null) return rowData[h];
         const lowerH = h.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -1466,6 +1544,17 @@ export async function executeUserGoogleAction(
 
       if (matchedRow === -1) {
         throw new Error(`Record not found for update (${requestedId || rowIndex})`);
+      }
+
+      // Strictly enforce canonical categories so "Groceries", "Food", etc. NEVER enter the Google Sheet
+      if (rowData.Category !== undefined || rowData.category !== undefined) {
+        const rawCat = String(rowData.Category || rowData.category || '').trim();
+        const rawType = String(rowData.Type || rowData.type || 'Expense').trim();
+        const rawDesc = String(rowData.Description || rowData.description || '').trim();
+        const normalizedCat = normalizeToCanonicalCategory(rawCat, rawType, rawDesc);
+        if (rowData.Category !== undefined) rowData.Category = normalizedCat;
+        if (rowData.category !== undefined) rowData.category = normalizedCat;
+        if (rowData.Category === undefined && rowData.category !== undefined) rowData.Category = normalizedCat;
       }
 
       const existingRow = values[matchedRow - 1] || [];
@@ -1787,11 +1876,78 @@ export async function executeUserGoogleAction(
       return wrap({ synced: true, sheet: 'Portfolio' });
     }
 
+    case 'sanitizeCategories': {
+      const months = getMonthListFromMeta(meta);
+      let totalSanitized = 0;
+      const sanitizedSheets: string[] = [];
+
+      for (const mName of months) {
+        const values = await readSheetValues(spreadsheetId, accessToken, mName);
+        const count = await autoSanitizeSheetCategories(
+          spreadsheetId,
+          accessToken,
+          mName,
+          values,
+          getDefaultHeadersForSheet(mName)
+        );
+        if (count > 0) {
+          totalSanitized += count;
+          sanitizedSheets.push(mName);
+        }
+      }
+
+      // Also sanitize custom Categories tab if present
+      const catSheetExists = meta.sheets.some((s) => s.properties.title === 'Categories');
+      if (catSheetExists) {
+        const catValues = await readSheetValues(spreadsheetId, accessToken, 'Categories');
+        if (catValues.length > 1) {
+          const catUpdates: Array<{ range: string; values: string[][] }> = [];
+          for (let i = 1; i < catValues.length; i++) {
+            const nameVal = String(catValues[i]?.[1] ?? '').trim();
+            if (/^(groceries|grocery|food|dining)$/i.test(nameVal)) {
+              catUpdates.push({
+                range: `'Categories'!B${i + 1}`,
+                values: [['Food & Dining']],
+              });
+            }
+          }
+          if (catUpdates.length > 0) {
+            await googleApiFetch(
+              `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values:batchUpdate`,
+              accessToken,
+              {
+                method: 'POST',
+                body: JSON.stringify({
+                  valueInputOption: 'USER_ENTERED',
+                  data: catUpdates,
+                }),
+              }
+            );
+            totalSanitized += catUpdates.length;
+            sanitizedSheets.push('Categories');
+          }
+        }
+      }
+
+      return wrap({
+        success: true,
+        totalSanitized,
+        sanitizedSheets,
+        message: `Successfully sanitized ${totalSanitized} legacy category labels across ${sanitizedSheets.length} sheet tabs to "Food & Dining".`,
+      });
+    }
+
     case 'syncOverview':
     case 'syncAll':
     case 'syncAllSheets': {
       await syncPortfolioFromTradesUser(spreadsheetId, accessToken, meta);
       await syncOverviewSheetForMeta(spreadsheetId, accessToken, meta);
+      // Auto-sanitize all monthly tabs so Google Sheet charts remain 100% complete
+      const months = getMonthListFromMeta(meta);
+      for (const mName of months) {
+        const values = await readSheetValues(spreadsheetId, accessToken, mName);
+        void autoSanitizeSheetCategories(spreadsheetId, accessToken, mName, values, getDefaultHeadersForSheet(mName));
+      }
       return wrap({ success: true, synced: true, message: 'All sheets synchronized successfully' });
     }
 

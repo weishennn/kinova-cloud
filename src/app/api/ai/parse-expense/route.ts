@@ -321,7 +321,7 @@ You MUST set 'category' ONLY to one of the following exact canonical category na
 - For Expense/Installment: "Food & Dining", "Transport", "Shopping", "Housing & Bills", "Parents", "Insurance", "Entertainment", "Health", "Education", "Sport", "Gift", "Other"
 - For Income: "Salary", "Claim Allowance", "Freelance", "Investment Return", "Gift & Bonus", "Other"
 - For Investment: "Fixed Deposit", "ASNB / Unit Trust", "EPF / KWSP", "Emergency Savings", "Other Savings"
-NEVER invent categories like "Groceries", "Utilities", "Dining", "Bills", "Technology", "Coffee". Map them to the valid list above!
+NEVER invent categories like "Groceries", "Food", "Utilities", "Dining", "Bills", "Technology", "Coffee" — all food, groceries, dining, and supermarket expenses MUST be "Food & Dining"! Map them to the valid list above!
 
 Use these exact shapes:
 {
