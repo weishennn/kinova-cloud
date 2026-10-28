@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getMoomooConfig, callMoomooApi } from '@/lib/moomoo-client';
 import { getValidGoogleSession } from '@/lib/google-auth';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   try {
     const config = getMoomooConfig();
