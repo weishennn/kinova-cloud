@@ -39,22 +39,30 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const [simAccs, tradeAccs, rootAccs] = await Promise.all([
-      callMoomooApi('/api/v1.0/sim-trade/accounts', { method: 'GET', config }).catch(() => null),
-      callMoomooApi('/api/v1.0/trade/accounts', { method: 'GET', config }).catch(() => null),
-      callMoomooApi('/api/v1.0/accounts', { method: 'GET', config }).catch(() => null),
-    ]);
+    // Test querying real discovered account IDs:
+    // 2947143 (Malaysia), 5705555 (US), 5705556 (HK)
+    const testAccountIds = ['5705555', '2947143', '5705556'];
+    const accountResults: Record<string, unknown> = {};
+
+    for (const accId of testAccountIds) {
+      const [pos, orders, cash] = await Promise.all([
+        callMoomooApi(`/api/v1.0/accounts/${accId}/positions`, { method: 'GET', config }).catch(() => null),
+        callMoomooApi(`/api/v1.0/accounts/${accId}/orders_history`, { method: 'GET', config }).catch(() => null),
+        callMoomooApi(`/api/v1.0/accounts/${accId}/cash_logs`, { method: 'GET', config }).catch(() => null),
+      ]);
+      accountResults[accId] = {
+        positions: pos?.data || pos?.error,
+        orders: orders?.data || orders?.error,
+        cash: cash?.data || cash?.error,
+      };
+    }
 
     return NextResponse.json({
       configured: true,
       apiKeyPrefix: config.apiKey.slice(0, 6) + '***',
-      accountIdProvided: config.accountId || '103963619',
       connectionStatus: 'CONNECTED',
-      accountDiscovery: {
-        simAccounts: simAccs?.data || simAccs?.error,
-        tradeAccounts: tradeAccs?.data || tradeAccs?.error,
-        rootAccounts: rootAccs?.data || rootAccs?.error,
-      },
+      connectionDetails: 'Connection successful',
+      accountResults,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
