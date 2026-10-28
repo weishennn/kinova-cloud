@@ -111,7 +111,7 @@ export function usePortfolio() {
 
   return useQuery({
     queryKey: ['portfolio'],
-    staleTime: 60 * 1000, // 1 min freshness for active market quotes
+    staleTime: 5 * 1000, // 5s freshness so deletions/updates reflect immediately
     gcTime: 15 * 60 * 1000,
     refetchOnMount: true,
     initialData: initialHoldings,
@@ -489,16 +489,21 @@ export function useDeleteRow() {
     onMutate: ({ sheetName, rowIndex, id }) => {
       applyOptimisticDeleteToQueryCache(queryClient, sheetName, rowIndex, id);
     },
-    onSuccess: (_res, { sheetName }) => {
+    onSuccess: async (_res, { sheetName }) => {
+      clearAllSwrCache();
       const isTxSheet = sheetName === 'Transactions' || /^\d{4}-\d{2}$/.test(sheetName);
       if (!isTxSheet) {
-        queryClient.invalidateQueries({ queryKey: ['sheet', sheetName] });
+        await queryClient.invalidateQueries({ queryKey: ['sheet', sheetName] });
         if (sheetName === 'Trades') {
-          queryClient.invalidateQueries({ queryKey: ['portfolio'] });
-          queryClient.invalidateQueries({ queryKey: ['trades'] });
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['portfolio'] }),
+            queryClient.invalidateQueries({ queryKey: ['trades'] }),
+            queryClient.refetchQueries({ queryKey: ['sheet', 'Trades', 'active'] }),
+            queryClient.refetchQueries({ queryKey: ['portfolio'] }),
+          ]);
         }
       }
-      queryClient.invalidateQueries({ queryKey: ['overview'] });
+      await queryClient.invalidateQueries({ queryKey: ['overview'] });
     },
   });
 }

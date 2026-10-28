@@ -694,6 +694,13 @@ export default function InvestmentsPage() {
 
     try {
       await deleteTradeMutation.mutateAsync({ sheetName: 'Trades', id: trade.id, rowIndex: trade.rowIndex });
+      clearAllSwrCache();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['sheet'] }),
+        queryClient.invalidateQueries({ queryKey: ['portfolio'] }),
+        queryClient.refetchQueries({ queryKey: ['sheet', 'Trades', 'active'] }),
+        queryClient.refetchQueries({ queryKey: ['portfolio'] }),
+      ]);
       toast.success('Trade deleted and holdings recalculated');
     } catch (error: any) {
       console.error(error);
@@ -939,8 +946,13 @@ export default function InvestmentsPage() {
           <button
             onClick={async () => {
               clearAllSwrCache();
-              await queryClient.refetchQueries({ queryKey: ['portfolio'] });
-              toast.success('Live stock quotes refreshed! 📈');
+              await Promise.all([
+                queryClient.invalidateQueries({ queryKey: ['sheet'] }),
+                queryClient.invalidateQueries({ queryKey: ['portfolio'] }),
+                queryClient.refetchQueries({ queryKey: ['sheet', 'Trades', 'active'] }),
+                queryClient.refetchQueries({ queryKey: ['portfolio'] }),
+              ]);
+              toast.success('Holdings & live quotes refreshed! 📈');
             }}
             disabled={isPortfolioLoading}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white bg-white/90 dark:bg-zinc-900/90 hover:bg-slate-100 dark:hover:bg-zinc-800 border border-slate-200 dark:border-white/[0.08] shadow-sm transition-all active:scale-95 cursor-pointer touch-manipulation disabled:opacity-50"
