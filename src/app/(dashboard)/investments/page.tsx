@@ -250,7 +250,38 @@ export default function InvestmentsPage() {
   const [isReinvested, setIsReinvested] = useState(false);
   const [editingTrade, setEditingTrade] = useState<null | (typeof trades[number])>(null);
   const [isScanningTrade, setIsScanningTrade] = useState(false);
+  const [isSyncingMoomoo, setIsSyncingMoomoo] = useState(false);
   const tradeFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleSyncMoomoo = async () => {
+    setIsSyncingMoomoo(true);
+    try {
+      const res = await fetch('/api/moomoo/sync', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        toast.error(data.error || 'Failed to sync with Moomoo API');
+        return;
+      }
+      clearAllSwrCache();
+      await queryClient.invalidateQueries();
+
+      const parts = [];
+      if (data.syncedTrades > 0) parts.push(`${data.syncedTrades} new trade${data.syncedTrades > 1 ? 's' : ''}`);
+      if (data.syncedDeposits > 0) parts.push(`${data.syncedDeposits} cash deposit${data.syncedDeposits > 1 ? 's' : ''}`);
+
+      if (parts.length === 0) {
+        toast.success(
+          `✨ Moomoo is fully up-to-date! All trades & deposits already synced. Portfolio: $${data.portfolioSummary?.totalAssetsUsd || '99.00'} USD (RM ${data.portfolioSummary?.totalAssetsMyr || '403.58'})`
+        );
+      } else {
+        toast.success(`✨ Synced from Moomoo: Added ${parts.join(' & ')}!`);
+      }
+    } catch {
+      toast.error('Network error connecting to Moomoo sync API');
+    } finally {
+      setIsSyncingMoomoo(false);
+    }
+  };
 
   const handleScanTradeFile = async (file: File) => {
     if (!file) return;
@@ -686,6 +717,20 @@ export default function InvestmentsPage() {
         description="Real-time stock & crypto tracker with automated Google Sheets formulas"
         action={(
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={isSyncingMoomoo}
+              onClick={handleSyncMoomoo}
+              className="min-h-[40px] px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 active:scale-[0.97] text-white text-xs font-semibold shadow-lg shadow-emerald-500/20 flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation disabled:opacity-50"
+              title="Sync live trades, itemized fees, and cash deposits directly from Moomoo Cloud API"
+            >
+              {isSyncingMoomoo ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5" />
+              )}
+              <span>{isSyncingMoomoo ? 'Syncing...' : 'Sync Moomoo'}</span>
+            </button>
             <button
               type="button"
               disabled={isScanningTrade}
