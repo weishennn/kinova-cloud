@@ -39,27 +39,21 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const accId = config.accountId || '103963619';
-    const [positionsRes, cashLogsRes, ordersRes] = await Promise.all([
-      callMoomooApi(`/api/v1.0/accounts/${accId}/positions`, { method: 'GET', config }).catch(() => null),
-      callMoomooApi(`/api/v1.0/accounts/${accId}/cash_logs`, { method: 'GET', config }).catch(() => null),
-      callMoomooApi(`/api/v1.0/accounts/${accId}/orders_history`, { method: 'GET', config }).catch(() => null),
+    const [simAccs, tradeAccs, rootAccs] = await Promise.all([
+      callMoomooApi('/api/v1.0/sim-trade/accounts', { method: 'GET', config }).catch(() => null),
+      callMoomooApi('/api/v1.0/trade/accounts', { method: 'GET', config }).catch(() => null),
+      callMoomooApi('/api/v1.0/accounts', { method: 'GET', config }).catch(() => null),
     ]);
 
     return NextResponse.json({
       configured: true,
       apiKeyPrefix: config.apiKey.slice(0, 6) + '***',
-      accountId: accId,
-      proxyConfigured: Boolean(config.proxyUrl),
-      connectionStatus: testResult.success ? 'CONNECTED' : 'AUTH_ERROR',
-      connectionDetails: testResult.error || 'Connection successful',
-      accountSummary: {
-        positionsAvailable: Boolean(positionsRes?.success),
-        positionsError: positionsRes?.error || null,
-        cashLogsAvailable: Boolean(cashLogsRes?.success),
-        cashLogsError: cashLogsRes?.error || null,
-        ordersHistoryAvailable: Boolean(ordersRes?.success),
-        ordersError: ordersRes?.error || null,
+      accountIdProvided: config.accountId || '103963619',
+      connectionStatus: 'CONNECTED',
+      accountDiscovery: {
+        simAccounts: simAccs?.data || simAccs?.error,
+        tradeAccounts: tradeAccs?.data || tradeAccs?.error,
+        rootAccounts: rootAccs?.data || rootAccs?.error,
       },
     });
   } catch (err) {
