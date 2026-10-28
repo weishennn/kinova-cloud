@@ -37,16 +37,30 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    const accId = config.accountId || '103963619';
+    const [positionsRes, cashLogsRes, ordersRes] = await Promise.all([
+      callMoomooApi(`/api/v1.0/accounts/${accId}/positions`, { method: 'GET', config }).catch(() => null),
+      callMoomooApi(`/api/v1.0/accounts/${accId}/cash_logs`, { method: 'GET', config }).catch(() => null),
+      callMoomooApi(`/api/v1.0/accounts/${accId}/orders_history`, { method: 'GET', config }).catch(() => null),
+    ]);
+
     return NextResponse.json({
       configured: true,
       apiKeyPrefix: config.apiKey.slice(0, 6) + '***',
-      accountId: config.accountId || 'default',
-      secretKeyFormat: config.secretKey.includes('-----BEGIN')
-        ? 'PEM_KEY'
-        : `TOKEN_LEN_${config.secretKey.length}`,
+      accountId: accId,
       proxyConfigured: Boolean(config.proxyUrl),
       connectionStatus: testResult.success ? 'CONNECTED' : 'AUTH_ERROR',
       connectionDetails: testResult.error || 'Connection successful',
+      accountSummary: {
+        positionsAvailable: Boolean(positionsRes?.success),
+        positionsCount: Array.isArray((positionsRes?.data as any)?.positions || positionsRes?.data) ? ((positionsRes?.data as any)?.positions || positionsRes?.data).length : 0,
+        cashLogsAvailable: Boolean(cashLogsRes?.success),
+        cashLogsCount: Array.isArray((cashLogsRes?.data as any)?.cash_logs || cashLogsRes?.data) ? ((cashLogsRes?.data as any)?.cash_logs || cashLogsRes?.data).length : 0,
+        ordersHistoryAvailable: Boolean(ordersRes?.success),
+        ordersCount: Array.isArray((ordersRes?.data as any)?.orders || ordersRes?.data) ? ((ordersRes?.data as any)?.orders || ordersRes?.data).length : 0,
+        sampleCashLog: (cashLogsRes?.data as any)?.cash_logs?.[0] || null,
+        sampleOrder: (ordersRes?.data as any)?.orders?.[0] || null,
+      },
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
