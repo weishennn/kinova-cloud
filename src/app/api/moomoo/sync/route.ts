@@ -55,13 +55,11 @@ export async function GET(req: NextRequest) {
       connectionDetails: testResult.error || 'Connection successful',
       accountSummary: {
         positionsAvailable: Boolean(positionsRes?.success),
-        positionsCount: Array.isArray((positionsRes?.data as any)?.positions || positionsRes?.data) ? ((positionsRes?.data as any)?.positions || positionsRes?.data).length : 0,
+        positionsError: positionsRes?.error || null,
         cashLogsAvailable: Boolean(cashLogsRes?.success),
-        cashLogsCount: Array.isArray((cashLogsRes?.data as any)?.cash_logs || cashLogsRes?.data) ? ((cashLogsRes?.data as any)?.cash_logs || cashLogsRes?.data).length : 0,
+        cashLogsError: cashLogsRes?.error || null,
         ordersHistoryAvailable: Boolean(ordersRes?.success),
-        ordersCount: Array.isArray((ordersRes?.data as any)?.orders || ordersRes?.data) ? ((ordersRes?.data as any)?.orders || ordersRes?.data).length : 0,
-        sampleCashLog: (cashLogsRes?.data as any)?.cash_logs?.[0] || null,
-        sampleOrder: (ordersRes?.data as any)?.orders?.[0] || null,
+        ordersError: ordersRes?.error || null,
       },
     });
   } catch (err) {
