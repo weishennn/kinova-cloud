@@ -48,15 +48,31 @@ export function buildMoomooSignatureString(params: {
  * Signs the payload using either RSA-SHA256 (if PEM formatted private key)
  * or HMAC-SHA256 (if standard secret string).
  */
-export function signMoomooRequest(signingString: string, secretKey: string): string {
+export function signMoomooRequest(signingString: string, rawSecretKey: string): string {
+  // Normalize escaped newlines from environment variables
+  const secretKey = (rawSecretKey || '').replace(/\\n/g, '\n').trim();
   const isPem = secretKey.includes('-----BEGIN');
+
   if (isPem) {
-    const signer = crypto.createSign('RSA-SHA256');
-    signer.update(signingString, 'utf8');
-    return signer.sign(secretKey, 'base64');
+    try {
+      // 1. Try Ed25519 first (Moomoo's default & recommended algorithm)
+      // In Node.js, Ed25519 digest algorithm must be null
+      const sig = crypto.sign(null, Buffer.from(signingString, 'utf8'), secretKey);
+      return sig.toString('base64');
+    } catch {
+      // 2. If Ed25519 failed, try RSA-SHA256
+      try {
+        const signer = crypto.createSign('RSA-SHA256');
+        signer.update(signingString, 'utf8');
+        return signer.sign(secretKey, 'base64');
+      } catch {
+        // 3. Fallback to crypto.sign with sha256
+        return crypto.sign('sha256', Buffer.from(signingString, 'utf8'), secretKey).toString('base64');
+      }
+    }
   }
 
-  // Fallback to HMAC-SHA256
+  // Fallback to HMAC-SHA256 if standard secret string
   const hmac = crypto.createHmac('sha256', secretKey);
   hmac.update(signingString, 'utf8');
   return hmac.digest('base64');
@@ -96,7 +112,17 @@ export async function callMoomooApi<T = unknown>(
     body: bodyString,
   });
 
-  const signature = signMoomooRequest(signingString, config.secretKey);
+  let signature: string;
+  try {
+    signature = signMoomooRequest(signingString, config.secretKey);
+  } catch (signErr) {
+    const msg = signErr instanceof Error ? signErr.message : 'Signature calculation failed';
+    return {
+      success: false,
+      error: `Failed to sign request with MOOMOO_SECRET_KEY: ${msg}`,
+      status: 400,
+    };
+  }
 
   const fullUrl = `${config.baseUrl}${path}${queryString ? `?${queryString}` : ''}`;
 
