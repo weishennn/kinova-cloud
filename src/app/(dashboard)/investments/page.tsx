@@ -264,8 +264,30 @@ export default function InvestmentsPage() {
       }
       clearAllSwrCache();
 
+      // Clear any local tombstone entries for trades so applyPendingMutations won't hide freshly synced trades
+      if (typeof window !== 'undefined') {
+        try {
+          const raw = localStorage.getItem('cashflow_deleted_tombstones');
+          if (raw) {
+            const tombstones = JSON.parse(raw);
+            let modified = false;
+            for (const key of Object.keys(tombstones)) {
+              if (key.startsWith('moo_') || tombstones[key]?.sheetName === 'Trades') {
+                delete tombstones[key];
+                modified = true;
+              }
+            }
+            if (modified) {
+              localStorage.setItem('cashflow_deleted_tombstones', JSON.stringify(tombstones));
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+
       // Immediately seed cache with the freshly returned trades for 0ms instant display
-      if (Array.isArray(data.trades) && data.trades.length > 0) {
+      if (Array.isArray(data.trades)) {
         queryClient.setQueryData(['sheet', 'Trades', 'active'], {
           headers: [
             'Id', 'Date', 'Action', 'Ticker', 'Asset Name',
@@ -273,6 +295,10 @@ export default function InvestmentsPage() {
           ],
           rows: data.trades,
         });
+      }
+
+      if (Array.isArray(data.portfolio)) {
+        queryClient.setQueryData(['portfolio'], data.portfolio);
       }
 
       await Promise.all([

@@ -909,6 +909,48 @@ async function recordDeletedTombstone(
   );
 }
 
+async function removeDeletedTombstone(
+  spreadsheetId: string,
+  accessToken: string,
+  meta: SpreadsheetMetadata,
+  id: string
+): Promise<void> {
+  const normalizedId = String(id || '').trim();
+  if (!normalizedId) return;
+  await ensureSheetExists(spreadsheetId, accessToken, meta, 'Deleted Records');
+  const values = await readSheetValues(spreadsheetId, accessToken, 'Deleted Records');
+  const sheetMeta = meta.sheets.find((s) => s.properties.title === 'Deleted Records');
+  if (!sheetMeta) return;
+
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i]?.[0] ?? '').trim() === normalizedId) {
+      const matchedRow = i + 1;
+      await googleApiFetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`,
+        accessToken,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            requests: [
+              {
+                deleteDimension: {
+                  range: {
+                    sheetId: sheetMeta.properties.sheetId,
+                    dimension: 'ROWS',
+                    startIndex: matchedRow - 1,
+                    endIndex: matchedRow,
+                  },
+                },
+              },
+            ],
+          }),
+        }
+      );
+      return;
+    }
+  }
+}
+
 async function syncPortfolioFromTradesUser(
   spreadsheetId: string,
   accessToken: string,
@@ -1218,7 +1260,9 @@ export async function executeUserGoogleAction(
       }
       const requestedId = String(rowData.Id || rowData.id || '').trim();
 
-      if (requestedId && !rowData._forceRestore) {
+      if (requestedId && rowData._forceRestore) {
+        await removeDeletedTombstone(spreadsheetId, accessToken, meta, requestedId).catch(() => null);
+      } else if (requestedId && !rowData._forceRestore) {
         const tombstoned = await hasDeletedTombstone(spreadsheetId, accessToken, meta, requestedId);
         if (tombstoned) {
           return wrap({
@@ -1519,8 +1563,15 @@ export async function executeUserGoogleAction(
 
         for (const sName of candidateSheets) {
           const values = await readSheetValues(spreadsheetId, accessToken, sName);
+          const sHeaders = values.length > 0 ? (values[0] || []).map((h) => String(h || '').trim().toLowerCase()) : [];
+          const idCol = sHeaders.indexOf('id');
+
           for (let i = 1; i < values.length; i++) {
-            if (String(values[i]?.[0] ?? '').trim() === targetId) {
+            const r = values[i] || [];
+            const colId = idCol >= 0 ? String(r[idCol] ?? '').trim() : String(r[0] ?? '').trim();
+            const anyColMatch = r.some((c) => String(c ?? '').trim() === targetId);
+
+            if (colId === targetId || anyColMatch) {
               const matchedRow = i + 1;
               await recordDeletedTombstone(spreadsheetId, accessToken, meta, targetId, sName, mutationId);
               const sheetMeta = meta.sheets.find((s) => s.properties.title === sName);
@@ -1562,18 +1613,9 @@ export async function executeUserGoogleAction(
             }
           }
         }
-
-        await recordDeletedTombstone(spreadsheetId, accessToken, meta, targetId, rawSheetName || 'Transactions', mutationId);
-        return wrap({
-          deleted: true,
-          verified: true,
-          verifiedId: targetId,
-          tombstoned: true,
-          id: targetId,
-          alreadyDeleted: true,
-        });
       }
 
+      // If targetId was not matched, but rawSheetName and rowIndex > 1 are provided, delete by rowIndex
       if (rawSheetName && rowIndex > 1) {
         const sheetMeta = meta.sheets.find((s) => s.properties.title === rawSheetName);
         if (sheetMeta) {
@@ -1598,13 +1640,35 @@ export async function executeUserGoogleAction(
               }),
             }
           );
+          if (rawSheetName === 'Trades') {
+            await syncPortfolioFromTradesUser(spreadsheetId, accessToken, meta);
+          }
+          if (targetId) {
+            await recordDeletedTombstone(spreadsheetId, accessToken, meta, targetId, rawSheetName, mutationId);
+          }
           return wrap({
             deleted: true,
             verified: true,
-            verifiedId: String(rowIndex),
+            verifiedId: targetId || String(rowIndex),
             rowIndex,
+            sheetName: rawSheetName,
           });
         }
+      }
+
+      if (targetId) {
+        await recordDeletedTombstone(spreadsheetId, accessToken, meta, targetId, rawSheetName || 'Transactions', mutationId);
+        if (rawSheetName === 'Trades') {
+          await syncPortfolioFromTradesUser(spreadsheetId, accessToken, meta);
+        }
+        return wrap({
+          deleted: true,
+          verified: true,
+          verifiedId: targetId,
+          tombstoned: true,
+          id: targetId,
+          alreadyDeleted: true,
+        });
       }
 
       return wrap({ deleted: false, verified: false, message: 'Record not found for deletion' });
@@ -1623,6 +1687,7 @@ export async function executeUserGoogleAction(
       const netTotal = Number(trade.total || trade['Net Total']) || quantity * price;
       const currency = String(trade.currency || trade.Currency || 'USD').toUpperCase();
       const notes = String(trade.notes || trade.Notes || '');
+      const forceRestore = trade._forceRestore !== false;
 
       await executeUserGoogleAction(session, 'addRow', {
         sheetName: 'Trades',
@@ -1638,6 +1703,7 @@ export async function executeUserGoogleAction(
           'Net Total': netTotal,
           Currency: currency,
           Notes: notes,
+          _forceRestore: forceRestore,
         },
       });
 

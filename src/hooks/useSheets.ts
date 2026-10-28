@@ -183,7 +183,10 @@ export function usePortfolio() {
 
       holdingsList = Object.values(holdings).filter(row => Number(row['Units Held']) > 0);
 
-      if (holdingsList.length === 0) {
+      // Only fallback to raw Portfolio tab if Trades sheet has never been created or loaded.
+      // If Trades sheet exists (even with 0 rows after trade deletion), do not resurrect ghost holdings!
+      const hasTradesSheet = Boolean(tradesRes && Array.isArray(tradesRes.rows) && tradesRes.headers && tradesRes.headers.length > 0);
+      if (holdingsList.length === 0 && !hasTradesSheet) {
         // Fallback for Google Sheets Direct Mode Portfolio tab
         const res = await sheetsApi.getPortfolio();
         if (res.data && res.data.length > 0) {

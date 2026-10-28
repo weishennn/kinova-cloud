@@ -185,23 +185,6 @@ export async function POST(req: NextRequest) {
     }));
     const rawExistingRows = ((existingTradesRes as any)?.result?.rows || []) as Array<Record<string, unknown>>;
 
-    // Deduplicate any accidental duplicate rows from previous sync runs
-    const seenTickers = new Set<string>();
-    const existingRows: Array<Record<string, unknown>> = [];
-    for (const r of rawExistingRows) {
-      const ticker = String(r.Ticker || '').toUpperCase();
-      const rowId = String(r.Id || '');
-      if (!ticker) continue;
-      if (seenTickers.has(ticker)) {
-        if (rowId) {
-          await executeUserGoogleAction(session, 'deleteRow', { sheetName: 'Trades', id: rowId }).catch(() => null);
-        }
-      } else {
-        seenTickers.add(ticker);
-        existingRows.push(r);
-      }
-    }
-
     let syncedTrades = 0;
     let skippedTrades = 0;
 
@@ -234,7 +217,19 @@ export async function POST(req: NextRequest) {
       const currency = String(order.currency || 'USD').toUpperCase();
       const stockName = String(order.stock_name || ticker);
 
-      if (seenTickers.has(ticker)) {
+      // Check if this specific order is already logged
+      const isAlreadyLogged = rawExistingRows.some((r) => {
+        const notes = String(r.Notes || '');
+        const rId = String(r.Id || '');
+        if (orderId && (notes.includes(orderId) || rId.includes(orderId))) return true;
+        const rTicker = String(r.Ticker || '').toUpperCase();
+        const rDate = String(r.Date || '');
+        const rQty = Math.abs(parseFloat(String(r.Quantity || '0')));
+        const rAction = String(r.Action || 'BUY').toUpperCase();
+        return rTicker === ticker && rDate === orderDate && Math.abs(rQty - qty) < 0.0001 && rAction === action;
+      });
+
+      if (isAlreadyLogged) {
         skippedTrades++;
         continue;
       }
@@ -242,10 +237,11 @@ export async function POST(req: NextRequest) {
       // Approximate or lookup fee
       const fees = feeBySymbol[ticker] || 0.50;
       const netTotal = parseFloat((qty * price + fees).toFixed(2));
+      const tradeId = `moo_${orderId || Date.now().toString(36)}_${Date.now().toString(36)}`;
 
       await executeUserGoogleAction(session, 'addTrade', {
         tradeData: {
-          Id: `moo_${orderId || Date.now().toString(36)}`,
+          Id: tradeId,
           date: orderDate,
           action,
           ticker,
@@ -256,14 +252,16 @@ export async function POST(req: NextRequest) {
           total: netTotal,
           currency,
           notes: `Moomoo Auto-Sync (Order: ${orderId})`,
+          _forceRestore: true,
         },
       });
 
-      seenTickers.add(ticker);
-      existingRows.push({
+      rawExistingRows.push({
+        Id: tradeId,
         Ticker: ticker,
         Date: orderDate,
         Quantity: qty,
+        Action: action,
         Notes: `Order: ${orderId}`,
       });
       syncedTrades++;
@@ -273,45 +271,63 @@ export async function POST(req: NextRequest) {
     for (const pos of positionsList) {
       const rawCode = String(pos.code || '');
       const ticker = rawCode.replace(/^(US\.|HK\.|MY\.)/, '').toUpperCase();
+      const posQty = parseFloat(pos.qty || '0');
+      if (posQty <= 0) continue;
 
-      if (seenTickers.has(ticker)) {
+      // Check if this ticker is already covered by ANY trade (either in rawExistingRows or filled ordersList)
+      const hasExistingTradeForTicker = rawExistingRows.some(
+        (r) => String(r.Ticker || '').toUpperCase() === ticker
+      );
+      const hasOrderForTicker = ordersList.some(
+        (o: any) =>
+          (o.order_status === 'FILLED_ALL' || o.order_status === 'FILLED_PART') &&
+          String(o.code || '').replace(/^(US\.|HK\.|MY\.)/, '').toUpperCase() === ticker
+      );
+
+      if (hasExistingTradeForTicker || hasOrderForTicker) {
         continue;
       }
 
-      if (parseFloat(pos.qty || '0') > 0) {
-        // Find execution in cash logs
-        const buyExec = cashLogsList.find(
-          (c: any) => c.symbol === ticker && c.transaction_name === 'Stock Buy Execution'
-        );
-        const buyFee = cashLogsList.find(
-          (c: any) => c.symbol === ticker && c.transaction_name === 'Stock Buy Fee'
-        );
+      // Find execution in cash logs
+      const buyExec = cashLogsList.find(
+        (c: any) => c.symbol === ticker && c.transaction_name === 'Stock Buy Execution'
+      );
+      const buyFee = cashLogsList.find(
+        (c: any) => c.symbol === ticker && c.transaction_name === 'Stock Buy Fee'
+      );
 
-        const tradeDate = buyExec ? parseMoomooDate(buyExec.created_time) : '2026-06-13';
-        const qty = parseFloat(pos.qty || '0');
-        const price = parseFloat(pos.cost_price || '0');
-        const fees = buyFee ? Math.abs(parseFloat(buyFee.cash_change || '0')) : 0.47;
-        const netTotal = parseFloat((qty * price + fees).toFixed(2));
+      const tradeDate = buyExec ? parseMoomooDate(buyExec.created_time) : '2026-06-13';
+      const price = parseFloat(pos.cost_price || '0');
+      const fees = buyFee ? Math.abs(parseFloat(buyFee.cash_change || '0')) : 0.47;
+      const netTotal = parseFloat((posQty * price + fees).toFixed(2));
+      const posTradeId = `moo_pos_${ticker.toLowerCase()}_${Date.now().toString(36)}`;
 
-        await executeUserGoogleAction(session, 'addTrade', {
-          tradeData: {
-            Id: `moo_pos_${ticker.toLowerCase()}_${Date.now().toString(36)}`,
-            date: tradeDate,
-            action: 'BUY',
-            ticker,
-            assetName: String(pos.stock_name || ticker),
-            quantity: qty,
-            price,
-            fees,
-            total: netTotal,
-            currency: 'USD',
-            notes: `Moomoo Auto-Sync Holding (${ticker})`,
-          },
-        });
+      await executeUserGoogleAction(session, 'addTrade', {
+        tradeData: {
+          Id: posTradeId,
+          date: tradeDate,
+          action: 'BUY',
+          ticker,
+          assetName: String(pos.stock_name || ticker),
+          quantity: posQty,
+          price,
+          fees,
+          total: netTotal,
+          currency: 'USD',
+          notes: `Moomoo Auto-Sync Holding (${ticker})`,
+          _forceRestore: true,
+        },
+      });
 
-        seenTickers.add(ticker);
-        syncedTrades++;
-      }
+      rawExistingRows.push({
+        Id: posTradeId,
+        Ticker: ticker,
+        Date: tradeDate,
+        Quantity: posQty,
+        Action: 'BUY',
+        Notes: `Holding: ${ticker}`,
+      });
+      syncedTrades++;
     }
 
     // 4. Sync cash top-ups (deposits) from cash logs
@@ -372,9 +388,12 @@ export async function POST(req: NextRequest) {
     // Force synchronize the Portfolio formulas sheet
     await executeUserGoogleAction(session, 'syncPortfolio', {}).catch(() => null);
 
-    // Fetch the clean trades list from Google Sheets
+    // Fetch the clean trades and portfolio lists from Google Sheets
     const freshTradesRes = await executeUserGoogleAction(session, 'getTrades', {}).catch(() => null);
     const freshTrades = ((freshTradesRes as any)?.result?.rows || []) as Array<Record<string, unknown>>;
+
+    const freshPortfolioRes = await executeUserGoogleAction(session, 'getPortfolio', {}).catch(() => null);
+    const freshPortfolio = ((freshPortfolioRes as any)?.result || []) as Array<Record<string, unknown>>;
 
     return NextResponse.json({
       success: true,
@@ -384,6 +403,7 @@ export async function POST(req: NextRequest) {
       syncedDeposits,
       skippedDeposits,
       trades: freshTrades,
+      portfolio: freshPortfolio,
       portfolioSummary: {
         totalAssetsUsd: fundsUsd?.total_assets || '99.00',
         totalAssetsMyr: fundsMyr?.total_assets || '403.58',
