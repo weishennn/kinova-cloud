@@ -62,26 +62,54 @@ export async function GET(req: NextRequest) {
     const realAccounts = authData?.d?.accounts || authData?.accounts || [];
     const realResults: Record<string, unknown> = {};
 
-    // Collect all candidate IDs to query
-    const candidateIds = new Set<string>();
-    for (const acc of realAccounts) {
-      if (acc.account_id) candidateIds.add(String(acc.account_id));
-      if (acc.account_card_number) candidateIds.add(String(acc.account_card_number));
-      if (acc.univs_account_card_number) candidateIds.add(String(acc.univs_account_card_number));
-    }
+    const nowMs = Date.now();
+    const beginTimeMicroseconds = (nowMs - 365 * 24 * 60 * 60 * 1000) * 1000;
+    const endTimeMicroseconds = (nowMs + 24 * 60 * 60 * 1000) * 1000;
 
-    for (const accId of candidateIds) {
-      const [pos, orders, cash, funds] = await Promise.all([
+    for (const acc of realAccounts) {
+      const accId = String(acc.account_id || '');
+      if (!accId) continue;
+
+      const [pos, ordersUs, ordersMy, cash, fundsUsd, fundsMyr] = await Promise.all([
         callMoomooApi(`/api/v1.0/accounts/${accId}/positions`, { method: 'GET', config }).catch(() => null),
-        callMoomooApi(`/api/v1.0/accounts/${accId}/orders_history`, { method: 'GET', config }).catch(() => null),
-        callMoomooApi(`/api/v1.0/accounts/${accId}/cash_logs`, { method: 'GET', config }).catch(() => null),
-        callMoomooApi(`/api/v1.0/accounts/${accId}/funds`, { method: 'GET', config }).catch(() => null),
+        callMoomooApi(`/api/v1.0/accounts/${accId}/orders_history`, {
+          method: 'GET',
+          params: { trd_market: 'US' },
+          config,
+        }).catch(() => null),
+        callMoomooApi(`/api/v1.0/accounts/${accId}/orders_history`, {
+          method: 'GET',
+          params: { trd_market: 'MY' },
+          config,
+        }).catch(() => null),
+        callMoomooApi(`/api/v1.0/accounts/${accId}/cash_logs`, {
+          method: 'GET',
+          params: {
+            begin_time: beginTimeMicroseconds,
+            end_time: endTimeMicroseconds,
+            page_size: 20,
+          },
+          config,
+        }).catch(() => null),
+        callMoomooApi(`/api/v1.0/accounts/${accId}/funds`, {
+          method: 'GET',
+          params: { currency: 'USD' },
+          config,
+        }).catch(() => null),
+        callMoomooApi(`/api/v1.0/accounts/${accId}/funds`, {
+          method: 'GET',
+          params: { currency: 'MYR' },
+          config,
+        }).catch(() => null),
       ]);
+
       realResults[accId] = {
         positions: pos?.data || pos?.error,
-        orders: orders?.data || orders?.error,
-        cash: cash?.data || cash?.error,
-        funds: funds?.data || funds?.error,
+        ordersUs: ordersUs?.data || ordersUs?.error,
+        ordersMy: ordersMy?.data || ordersMy?.error,
+        cashLogs: cash?.data || cash?.error,
+        fundsUsd: fundsUsd?.data || fundsUsd?.error,
+        fundsMyr: fundsMyr?.data || fundsMyr?.error,
       };
     }
 
