@@ -292,7 +292,6 @@ export default function InvestmentsPage() {
         toast.error(data.error || 'Failed to sync with Moomoo API');
         return;
       }
-      clearAllSwrCache();
 
       // Clear any local tombstone entries and pending delete mutations for trades
       if (typeof window !== 'undefined') {
@@ -1030,7 +1029,6 @@ export default function InvestmentsPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={async () => {
-              clearAllSwrCache();
               await Promise.all([
                 queryClient.invalidateQueries({ queryKey: ['sheet'] }),
                 queryClient.invalidateQueries({ queryKey: ['portfolio'] }),

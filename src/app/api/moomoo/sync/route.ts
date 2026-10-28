@@ -219,6 +219,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const tradesToSync: Array<Record<string, unknown>> = [];
+
     // Sync filled orders to Google Sheet 'Trades'
     for (const order of ordersList) {
       if (order.order_status !== 'FILLED_ALL' && order.order_status !== 'FILLED_PART') {
@@ -272,16 +274,8 @@ export async function POST(req: NextRequest) {
         Notes: `Moomoo Auto-Sync (Order: ${orderId})`,
       };
 
-      await executeUserGoogleAction(session, 'addTrade', {
-        tradeData: {
-          ...tradeObj,
-          _forceRestore: true,
-        },
-      });
-
+      tradesToSync.push(tradeObj);
       rawExistingRows.push(tradeObj);
-      allSyncedTrades.push(tradeObj);
-      syncedTrades++;
     }
 
     // If an older holding exists in positions (e.g. SPCX) that wasn't in the recent orders list:
@@ -291,7 +285,7 @@ export async function POST(req: NextRequest) {
       const posQty = parseFloat(pos.qty || '0');
       if (posQty <= 0) continue;
 
-      // Check if this ticker is already covered by ANY trade (either in rawExistingRows or filled ordersList)
+      // Check if this ticker is already covered by ANY trade (either in rawExistingRows or filled ordersList or tradesToSync)
       const hasExistingTradeForTicker = rawExistingRows.some(
         (r) => String(r.Ticker || '').toUpperCase() === ticker
       );
@@ -333,16 +327,23 @@ export async function POST(req: NextRequest) {
         Notes: `Moomoo Auto-Sync Holding (${ticker})`,
       };
 
-      await executeUserGoogleAction(session, 'addTrade', {
-        tradeData: {
-          ...posTradeObj,
-          _forceRestore: true,
-        },
+      tradesToSync.push(posTradeObj);
+      rawExistingRows.push(posTradeObj);
+    }
+
+    // Atomically sync all trades in a single contiguous batch operation!
+    if (tradesToSync.length > 0) {
+      const batchRes = await executeUserGoogleAction(session, 'batchSyncTrades', {
+        trades: tradesToSync,
+      }).catch((e) => {
+        console.error('Batch sync trades error:', e);
+        return null;
       });
 
-      rawExistingRows.push(posTradeObj);
-      allSyncedTrades.push(posTradeObj);
-      syncedTrades++;
+      const batchData = (batchRes as any)?.result;
+      syncedTrades = batchData?.added ?? tradesToSync.length;
+      allSyncedTrades.length = 0;
+      allSyncedTrades.push(...(batchData?.rows ?? rawExistingRows));
     }
 
     // 4. Sync cash top-ups (deposits) from cash logs

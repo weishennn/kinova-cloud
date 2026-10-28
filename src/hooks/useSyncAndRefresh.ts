@@ -30,7 +30,6 @@ export function useSyncAndRefresh() {
       }
 
       // Refresh visible queries only after cloud reconciliation has completed.
-      clearAllSwrCache();
       await queryClient.invalidateQueries();
       await queryClient.refetchQueries({ type: 'active' }, { throwOnError: false });
 
@@ -41,7 +40,6 @@ export function useSyncAndRefresh() {
       setTimeout(() => setJustRefreshed(false), 2000);
     } catch (err) {
       console.error('Sync & Refresh error', err);
-      clearAllSwrCache();
       await queryClient.refetchQueries({ type: 'active' }, { throwOnError: false });
       if (!options?.silent) {
         toast.error(err instanceof Error ? err.message : 'Sync failed. Your pending changes are still saved on this device.');

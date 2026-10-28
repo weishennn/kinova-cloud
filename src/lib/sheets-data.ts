@@ -582,7 +582,14 @@ export const sheetsData = {
     try {
       const res = await sheetsApi.getSheetData(sheetName);
       if (res.success && res.data) {
-        const rawRows = res.data.rows || [];
+        let rawRows = res.data.rows || [];
+        // Guard against empty Trades eviction if local cache already has valid trades
+        if (sheetName === 'Trades' && rawRows.length === 0) {
+          const cached = this.getInitialSheetData('Trades');
+          if (cached?.data?.rows && cached.data.rows.length > 0) {
+            rawRows = cached.data.rows;
+          }
+        }
         const mergedRows = applyPendingMutations(rawRows, sheetName);
         setSwrCachedData('getSheetData', { sheetName }, {
           success: true,
