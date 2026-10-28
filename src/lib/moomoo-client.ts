@@ -157,13 +157,18 @@ export async function callMoomooApi<T = unknown>(
     };
 
     const res = await fetch(fullUrl, fetchOptions);
-    const json = await res.json().catch(() => null);
+    const rawText = await res.text().catch(() => '');
+    let json: any = null;
+    try {
+      json = JSON.parse(rawText);
+    } catch {}
 
     if (!res.ok) {
-      const errMsg = json?.message || json?.error || `HTTP ${res.status} ${res.statusText}`;
+      const errMsg = json?.message || json?.error || (rawText && rawText.length < 200 ? rawText : `HTTP ${res.status} ${res.statusText}`);
+      const wwwAuth = res.headers.get('www-authenticate') || '';
       return {
         success: false,
-        error: errMsg,
+        error: `${errMsg}${wwwAuth ? ` [WWW-Authenticate: ${wwwAuth}]` : ''}`,
         status: res.status,
       };
     }

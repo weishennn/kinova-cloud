@@ -18,16 +18,32 @@ export async function GET(req: NextRequest) {
     }
 
     // Ping Moomoo API to test connection
-    const testResult = await callMoomooApi('/api/v1.0/quote/stock-basicinfo', {
+    let testResult = await callMoomooApi('/api/v1.0/quote/stock-basicinfo', {
       method: 'POST',
       body: { symbols: ['US.AAPL'] },
       config,
     });
 
+    if (!testResult.success) {
+      // Fallback: try GET endpoint
+      const getTest = await callMoomooApi('/api/v1.0/sim-trade/accounts', {
+        method: 'GET',
+        config,
+      });
+      if (getTest.success) {
+        testResult = getTest;
+      } else {
+        testResult.error = `${testResult.error} | GET: ${getTest.error}`;
+      }
+    }
+
     return NextResponse.json({
       configured: true,
       apiKeyPrefix: config.apiKey.slice(0, 6) + '***',
       accountId: config.accountId || 'default',
+      secretKeyFormat: config.secretKey.includes('-----BEGIN')
+        ? 'PEM_KEY'
+        : `TOKEN_LEN_${config.secretKey.length}`,
       proxyConfigured: Boolean(config.proxyUrl),
       connectionStatus: testResult.success ? 'CONNECTED' : 'AUTH_ERROR',
       connectionDetails: testResult.error || 'Connection successful',
