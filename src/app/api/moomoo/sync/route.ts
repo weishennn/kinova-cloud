@@ -1,19 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getMoomooConfig, callMoomooApi } from '@/lib/moomoo-client';
-import { getValidGoogleSession } from '@/lib/google-auth';
+import { getValidGoogleSession, setSessionCookie } from '@/lib/google-auth';
 import { executeUserGoogleAction } from '@/lib/google-sheets-user-engine';
 
 export const dynamic = 'force-dynamic';
 
-function parseMoomooDate(str: string): string {
-  if (!str) return new Date().toISOString().split('T')[0];
-  const firstPart = str.split(' ')[0];
-  const parts = firstPart.split('/');
-  if (parts.length === 3) {
-    const month = parts[0].padStart(2, '0');
-    const day = parts[1].padStart(2, '0');
-    const year = parts[2];
+function parseMoomooDate(val: any): string {
+  if (!val) return new Date().toISOString().split('T')[0];
+  if (typeof val === 'number' || /^\d+$/.test(String(val).trim())) {
+    const num = Number(val);
+    if (num > 1e14) {
+      // microseconds (16 digits)
+      return new Date(num / 1000).toISOString().split('T')[0];
+    }
+    if (num > 1e11) {
+      // milliseconds (13 digits)
+      return new Date(num).toISOString().split('T')[0];
+    }
+    if (num > 1e8) {
+      // seconds (10 digits)
+      return new Date(num * 1000).toISOString().split('T')[0];
+    }
+  }
+  const str = String(val).trim();
+  const firstPart = str.split(' ')[0].split('T')[0];
+  const slashParts = firstPart.split('/');
+  if (slashParts.length === 3) {
+    const month = slashParts[0].padStart(2, '0');
+    const day = slashParts[1].padStart(2, '0');
+    const year = slashParts[2];
     return `${year}-${month}-${day}`;
+  }
+  const dashParts = firstPart.split('-');
+  if (dashParts.length === 3) {
+    return firstPart;
   }
   return new Date().toISOString().split('T')[0];
 }
@@ -104,7 +124,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { session } = await getValidGoogleSession(req);
+    const { session, refreshed } = await getValidGoogleSession(req);
     if (!session) {
       return NextResponse.json(
         { success: false, error: 'Unauthorized. Please log in to your account first.' },
@@ -187,6 +207,7 @@ export async function POST(req: NextRequest) {
 
     let syncedTrades = 0;
     let skippedTrades = 0;
+    const allSyncedTrades: Array<Record<string, unknown>> = [...rawExistingRows];
 
     // Build fee lookup map from cash logs: { symbol -> total fee }
     const feeBySymbol: Record<string, number> = {};
@@ -207,9 +228,7 @@ export async function POST(req: NextRequest) {
       const rawCode = String(order.code || '');
       const ticker = rawCode.replace(/^(US\.|HK\.|MY\.)/, '').toUpperCase();
       const orderId = String(order.order_id || '');
-      const orderDate = order.create_time
-        ? new Date(Number(order.create_time) / 1000).toISOString().split('T')[0]
-        : new Date().toISOString().split('T')[0];
+      const orderDate = parseMoomooDate(order.create_time || order.updated_time || order.time);
 
       const qty = parseFloat(order.dealt_qty || order.qty || '0');
       const price = parseFloat(order.dealt_avg_price || order.price || '0');
@@ -239,31 +258,29 @@ export async function POST(req: NextRequest) {
       const netTotal = parseFloat((qty * price + fees).toFixed(2));
       const tradeId = `moo_${orderId || Date.now().toString(36)}_${Date.now().toString(36)}`;
 
+      const tradeObj = {
+        Id: tradeId,
+        Date: orderDate,
+        Action: action,
+        Ticker: ticker,
+        'Asset Name': stockName,
+        Quantity: qty,
+        Price: price,
+        Fees: fees,
+        'Net Total': netTotal,
+        Currency: currency,
+        Notes: `Moomoo Auto-Sync (Order: ${orderId})`,
+      };
+
       await executeUserGoogleAction(session, 'addTrade', {
         tradeData: {
-          Id: tradeId,
-          date: orderDate,
-          action,
-          ticker,
-          assetName: stockName,
-          quantity: qty,
-          price,
-          fees,
-          total: netTotal,
-          currency,
-          notes: `Moomoo Auto-Sync (Order: ${orderId})`,
+          ...tradeObj,
           _forceRestore: true,
         },
       });
 
-      rawExistingRows.push({
-        Id: tradeId,
-        Ticker: ticker,
-        Date: orderDate,
-        Quantity: qty,
-        Action: action,
-        Notes: `Order: ${orderId}`,
-      });
+      rawExistingRows.push(tradeObj);
+      allSyncedTrades.push(tradeObj);
       syncedTrades++;
     }
 
@@ -302,31 +319,29 @@ export async function POST(req: NextRequest) {
       const netTotal = parseFloat((posQty * price + fees).toFixed(2));
       const posTradeId = `moo_pos_${ticker.toLowerCase()}_${Date.now().toString(36)}`;
 
+      const posTradeObj = {
+        Id: posTradeId,
+        Date: tradeDate,
+        Action: 'BUY',
+        Ticker: ticker,
+        'Asset Name': String(pos.stock_name || ticker),
+        Quantity: posQty,
+        Price: price,
+        Fees: fees,
+        'Net Total': netTotal,
+        Currency: 'USD',
+        Notes: `Moomoo Auto-Sync Holding (${ticker})`,
+      };
+
       await executeUserGoogleAction(session, 'addTrade', {
         tradeData: {
-          Id: posTradeId,
-          date: tradeDate,
-          action: 'BUY',
-          ticker,
-          assetName: String(pos.stock_name || ticker),
-          quantity: posQty,
-          price,
-          fees,
-          total: netTotal,
-          currency: 'USD',
-          notes: `Moomoo Auto-Sync Holding (${ticker})`,
+          ...posTradeObj,
           _forceRestore: true,
         },
       });
 
-      rawExistingRows.push({
-        Id: posTradeId,
-        Ticker: ticker,
-        Date: tradeDate,
-        Quantity: posQty,
-        Action: 'BUY',
-        Notes: `Holding: ${ticker}`,
-      });
+      rawExistingRows.push(posTradeObj);
+      allSyncedTrades.push(posTradeObj);
       syncedTrades++;
     }
 
@@ -395,15 +410,49 @@ export async function POST(req: NextRequest) {
     const freshPortfolioRes = await executeUserGoogleAction(session, 'getPortfolio', {}).catch(() => null);
     const freshPortfolio = ((freshPortfolioRes as any)?.result || []) as Array<Record<string, unknown>>;
 
-    return NextResponse.json({
+    // Defensively ensure trades is NEVER empty when trades were synced or existed
+    const resolvedTrades = freshTrades.length > 0
+      ? freshTrades
+      : allSyncedTrades.length > 0
+        ? allSyncedTrades
+        : rawExistingRows;
+
+    // Defensively ensure portfolio is NEVER empty when positions exist
+    let resolvedPortfolio = freshPortfolio;
+    if (resolvedPortfolio.length === 0 && positionsList.length > 0) {
+      resolvedPortfolio = positionsList
+        .filter((p: any) => parseFloat(p.qty || '0') > 0)
+        .map((p: any) => {
+          const rawCode = String(p.code || '');
+          const ticker = rawCode.replace(/^(US\.|HK\.|MY\.)/, '').toUpperCase();
+          const units = parseFloat(p.qty || '0');
+          const avgCost = parseFloat(p.cost_price || '0');
+          const livePrice = parseFloat(p.nominal_price || p.cost_price || '0');
+          return {
+            Ticker: ticker,
+            'Asset Name': String(p.stock_name || ticker),
+            Type: 'Stock',
+            Currency: 'USD',
+            'Units Held': units,
+            'Avg Cost': avgCost,
+            'Total Cost': parseFloat((units * avgCost).toFixed(2)),
+            'Live Price': livePrice,
+            'Market Value': parseFloat((units * livePrice).toFixed(2)),
+            'Profit / Loss': parseFloat(((units * livePrice) - (units * avgCost)).toFixed(2)),
+            'Return %': avgCost > 0 ? parseFloat((((livePrice - avgCost) / avgCost) * 100).toFixed(2)) : 0,
+          };
+        });
+    }
+
+    const response = NextResponse.json({
       success: true,
       message: `Moomoo sync completed. Synced ${syncedTrades} trades and ${syncedDeposits} cash deposits.`,
       syncedTrades,
       skippedTrades,
       syncedDeposits,
       skippedDeposits,
-      trades: freshTrades,
-      portfolio: freshPortfolio,
+      trades: resolvedTrades,
+      portfolio: resolvedPortfolio,
       portfolioSummary: {
         totalAssetsUsd: fundsUsd?.total_assets || '99.00',
         totalAssetsMyr: fundsMyr?.total_assets || '403.58',
@@ -412,6 +461,11 @@ export async function POST(req: NextRequest) {
       },
       timestamp: new Date().toISOString(),
     });
+
+    if (refreshed) {
+      setSessionCookie(response, session);
+    }
+    return response;
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Sync failed';
     return NextResponse.json({ success: false, error: msg }, { status: 500 });

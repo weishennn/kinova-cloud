@@ -121,7 +121,17 @@ export function usePortfolio() {
 
       // 1. Compute holdings directly from fresh logged Trades and keep React Query cache in sync
       const tradesRes = await getUnifiedSheetData('Trades');
-      queryClient.setQueryData(['sheet', 'Trades', 'active'], tradesRes);
+      const existingTradesQuery = queryClient.getQueryData<any>(['sheet', 'Trades', 'active']);
+      const existingRows = Array.isArray(existingTradesQuery)
+        ? existingTradesQuery
+        : existingTradesQuery?.rows || [];
+
+      if (tradesRes && Array.isArray(tradesRes.rows) && tradesRes.rows.length > 0) {
+        queryClient.setQueryData(['sheet', 'Trades', 'active'], tradesRes);
+      } else if (existingRows.length > 0 && (!tradesRes || !tradesRes.rows || tradesRes.rows.length === 0)) {
+        if (!tradesRes.rows) tradesRes.rows = [];
+        tradesRes.rows = existingRows;
+      }
       const holdings: Record<string, Record<string, unknown>> = {};
       const sortedTrades = [...(tradesRes.rows || [])].sort((a, b) => {
         const dateA = String(a.Date || a.date || '');

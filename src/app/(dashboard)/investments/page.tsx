@@ -10,7 +10,7 @@ import {
 import dynamic from 'next/dynamic';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePortfolio, useTrades, useAddTrade, useUpdateRow, useDeleteRow } from '@/hooks/useSheets';
-import { clearAllSwrCache } from '@/lib/sheets-api';
+import { clearAllSwrCache, setSwrCachedData } from '@/lib/sheets-api';
 import { 
   convertCurrency, 
   formatAssetCurrency, 
@@ -45,6 +45,24 @@ const TYPE_COLORS: Record<string, string> = {
   'Other': '#6b7280',
 };
 
+interface NormalizedTrade {
+  id: string;
+  date: string;
+  action: string;
+  ticker: string;
+  name: string;
+  quantity: number;
+  price: number;
+  fees: number;
+  netTotal: number;
+  currency: string;
+  rateToMyr: number;
+  costInMyr: number;
+  notes: string;
+  isReinvested: boolean;
+  rowIndex?: number;
+}
+
 export default function InvestmentsPage() {
   const queryClient = useQueryClient();
   const { aiPrefill, setAiPrefill } = useAppStore();
@@ -71,10 +89,19 @@ export default function InvestmentsPage() {
   const deleteTradeMutation = useDeleteRow();
 
   // Normalize Trades
-  const trades = useMemo(() => {
-    const rows = rawTradesData?.rows || [];
-    return rows.map((r: any) => {
-      const qty = Number(r.Quantity || r.quantity || 0);
+  const trades = useMemo<NormalizedTrade[]>(() => {
+    const rawRows = Array.isArray(rawTradesData)
+      ? rawTradesData
+      : Array.isArray(rawTradesData?.rows)
+        ? rawTradesData.rows
+        : Array.isArray((rawTradesData as any)?.data?.rows)
+          ? (rawTradesData as any).data.rows
+          : Array.isArray((rawTradesData as any)?.data)
+            ? (rawTradesData as any).data
+            : [];
+
+    return (rawRows as any[]).map((r: any): NormalizedTrade => {
+      const qty = Number(r.Quantity || r.quantity || r.Qty || r.qty || 0);
       const price = Number(r.Price || r.price || 0);
       const fees = Number(r.Fees || r.fees || 0);
       const netTotal = Number(r.NetTotal || r['Net Total'] || r.net_total || r.total) || (qty * price + fees);
@@ -83,12 +110,15 @@ export default function InvestmentsPage() {
       const rateToMyr = Number(r.RateToMyr || r.rateToMyr || r.rate_to_myr || 0) || (currency === 'MYR' ? 1.0 : currentRate);
       const costInMyr = Number(r.CostInMyr || r.costInMyr || r.cost_in_myr || 0) || (currency === 'MYR' ? netTotal : netTotal * rateToMyr);
 
+      const ticker = String(r.Ticker || r.ticker || r.Symbol || r.symbol || r.code || '').replace(/^(US\.|HK\.|MY\.)/, '').trim().toUpperCase();
+      const date = String(r.Date || r.date || r.create_time || '').trim().split('T')[0].split(' ')[0];
+
       return {
         id: String(r.Id || r.id || `tr_${Math.random()}`),
-        date: String(r.Date || r.date || ''),
-        action: String(r.Action || r.action || 'BUY').toUpperCase(),
-        ticker: String(r.Ticker || r.ticker || '').toUpperCase(),
-        name: String(r.AssetName || r['Asset Name'] || r.name || ''),
+        date,
+        action: String(r.Action || r.action || r.side || 'BUY').toUpperCase(),
+        ticker,
+        name: String(r.AssetName || r['Asset Name'] || r.name || r.stock_name || ticker),
         quantity: qty,
         price: price,
         fees: fees,
@@ -100,7 +130,7 @@ export default function InvestmentsPage() {
         isReinvested: Boolean(r.isReinvested || r.IsReinvested || String(r.Action || r.action || '').toUpperCase() === 'REINVEST' || String(r.Notes || r.notes || '').toLowerCase().includes('reinvest')),
         rowIndex: typeof r._rowIndex === 'number' ? r._rowIndex : undefined,
       };
-    }).filter(t => t.ticker && t.date);
+    }).filter((t: NormalizedTrade) => Boolean(t.ticker && t.date));
   }, [rawTradesData, fxRates]);
 
   // Map historical MYR trade costs by ticker for 100% accurate cost basis
@@ -264,7 +294,7 @@ export default function InvestmentsPage() {
       }
       clearAllSwrCache();
 
-      // Clear any local tombstone entries for trades so applyPendingMutations won't hide freshly synced trades
+      // Clear any local tombstone entries and pending delete mutations for trades
       if (typeof window !== 'undefined') {
         try {
           const raw = localStorage.getItem('cashflow_deleted_tombstones');
@@ -281,32 +311,48 @@ export default function InvestmentsPage() {
               localStorage.setItem('cashflow_deleted_tombstones', JSON.stringify(tombstones));
             }
           }
+          const rawMut = localStorage.getItem('cashflow_pending_mutations');
+          if (rawMut) {
+            const muts = JSON.parse(rawMut);
+            if (Array.isArray(muts)) {
+              const cleaned = muts.filter((m: any) => m.sheetName !== 'Trades' && !String(m.rowId || '').startsWith('moo_'));
+              localStorage.setItem('cashflow_pending_mutations', JSON.stringify(cleaned));
+            }
+          }
         } catch {
           // ignore
         }
       }
 
+      const tradeHeaders = [
+        'Id', 'Date', 'Action', 'Ticker', 'Asset Name',
+        'Quantity', 'Price', 'Fees', 'Net Total', 'Currency', 'Notes'
+      ];
+
       // Immediately seed cache with the freshly returned trades for 0ms instant display
-      if (Array.isArray(data.trades)) {
+      if (Array.isArray(data.trades) && data.trades.length > 0) {
+        setSwrCachedData('getSheetData', { sheetName: 'Trades' }, {
+          success: true,
+          data: {
+            headers: tradeHeaders,
+            rows: data.trades,
+          },
+        });
         queryClient.setQueryData(['sheet', 'Trades', 'active'], {
-          headers: [
-            'Id', 'Date', 'Action', 'Ticker', 'Asset Name',
-            'Quantity', 'Price', 'Fees', 'Net Total', 'Currency', 'Notes'
-          ],
+          headers: tradeHeaders,
           rows: data.trades,
         });
       }
 
-      if (Array.isArray(data.portfolio)) {
+      if (Array.isArray(data.portfolio) && data.portfolio.length > 0) {
+        setSwrCachedData('getPortfolio', {}, data.portfolio);
         queryClient.setQueryData(['portfolio'], data.portfolio);
       }
 
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['sheet'] }),
-        queryClient.invalidateQueries({ queryKey: ['portfolio'] }),
-        queryClient.refetchQueries({ queryKey: ['sheet', 'Trades', 'active'] }),
-        queryClient.refetchQueries({ queryKey: ['portfolio'] }),
+        queryClient.invalidateQueries({ queryKey: ['months'] }),
         queryClient.refetchQueries({ queryKey: ['months'] }),
+        queryClient.invalidateQueries({ queryKey: ['overview'] }),
       ]);
 
       // Switch to Trade History tab so the user immediately sees the trades table
@@ -721,10 +767,23 @@ export default function InvestmentsPage() {
     try {
       await deleteTradeMutation.mutateAsync({ sheetName: 'Trades', id: trade.id, rowIndex: trade.rowIndex });
       clearAllSwrCache();
+
+      // Optimistically remove deleted trade from local cache so it vanishes in 0ms
+      queryClient.setQueryData(['sheet', 'Trades', 'active'], (old: any) => {
+        const oldRows = Array.isArray(old) ? old : old?.rows || [];
+        const nextRows = oldRows.filter((r: any) => {
+          const rId = String(r.Id || r.id || '');
+          if (trade.id && rId) return rId !== trade.id;
+          if (typeof trade.rowIndex === 'number' && typeof r._rowIndex === 'number') {
+            return r._rowIndex !== trade.rowIndex;
+          }
+          return true;
+        });
+        return Array.isArray(old) ? nextRows : { ...old, rows: nextRows };
+      });
+
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['sheet'] }),
         queryClient.invalidateQueries({ queryKey: ['portfolio'] }),
-        queryClient.refetchQueries({ queryKey: ['sheet', 'Trades', 'active'] }),
         queryClient.refetchQueries({ queryKey: ['portfolio'] }),
       ]);
       toast.success('Trade deleted and holdings recalculated');

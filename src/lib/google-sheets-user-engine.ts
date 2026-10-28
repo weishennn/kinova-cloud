@@ -1325,11 +1325,30 @@ export async function executeUserGoogleAction(
         }
       }
 
-      if (headers.includes('Currency') && !rowData.Currency) {
+      if (headers.includes('Currency') && !rowData.Currency && !rowData.currency) {
         rowData.Currency = 'MYR';
       }
 
-      const newRow = headers.map((h) => (rowData[h] !== undefined ? rowData[h] : ''));
+      const newRow = headers.map((h) => {
+        if (rowData[h] !== undefined && rowData[h] !== null) return rowData[h];
+        const lowerH = h.toLowerCase().replace(/[^a-z0-9]/g, '');
+        for (const [k, v] of Object.entries(rowData)) {
+          if (k.toLowerCase().replace(/[^a-z0-9]/g, '') === lowerH && v !== undefined && v !== null) {
+            return v;
+          }
+        }
+        return '';
+      });
+
+      // Compute the exact next contiguous row to prevent 1000-row empty gaps created by Google Sheets defaults
+      let lastDataRow = 0;
+      for (let i = 0; i < values.length; i++) {
+        const row = values[i];
+        if (row && row.some((c) => c !== undefined && c !== null && String(c).trim() !== '')) {
+          lastDataRow = i + 1;
+        }
+      }
+      const targetRowIndex = lastDataRow > 0 ? lastDataRow + 1 : (hasValidHeader ? 2 : 1);
 
       if (!hasValidHeader) {
         const rowsToWrite = values.length > 0 ? [headers, ...values, newRow] : [headers, newRow];
@@ -1357,25 +1376,37 @@ export async function executeUserGoogleAction(
         });
       }
 
-      const appendRes = await googleApiFetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${targetSheetName}'!A1`)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+      // Write directly to contiguous targetRowIndex with PUT
+      const putRes = await googleApiFetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${targetSheetName}'!A${targetRowIndex}`)}?valueInputOption=USER_ENTERED`,
         accessToken,
         {
-          method: 'POST',
+          method: 'PUT',
           body: JSON.stringify({ values: [newRow] }),
         }
       );
 
-      if (!appendRes.ok) {
-        const errText = await appendRes.text();
-        throw new Error(`Google Sheets append failed: ${errText}`);
+      if (!putRes.ok) {
+        // Fallback to append if PUT failed
+        const appendRes = await googleApiFetch(
+          `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${targetSheetName}'!A1`)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+          accessToken,
+          {
+            method: 'POST',
+            body: JSON.stringify({ values: [newRow] }),
+          }
+        );
+        if (!appendRes.ok) {
+          const errText = await appendRes.text();
+          throw new Error(`Google Sheets append failed: ${errText}`);
+        }
       }
 
       return wrap({
         added: true,
         verified: true,
         verifiedId: requestedId,
-        rowIndex: values.length + 1,
+        rowIndex: targetRowIndex,
         sheet: targetSheetName,
         sheetName: targetSheetName,
         id: requestedId,
