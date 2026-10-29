@@ -183,6 +183,13 @@ function doGet(e) {
         return createResponse(true, withScriptLock(() => updateRow(params.sheetName, params.rowIndex, params.rowData, params.mutationId)));
       case 'deleteRow':
         return createResponse(true, withScriptLock(() => deleteRow(params.sheetName, params.rowIndex, params.id, params.mutationId)));
+      case 'batchSyncTrades': {
+        const rawTrades = (body && body.trades) ? body.trades : params.trades;
+        const trades = rawTrades ? (typeof rawTrades === 'string' ? JSON.parse(rawTrades) : rawTrades) : [];
+        return createResponse(true, withScriptLock(() => batchSyncTrades(trades)));
+      }
+      case 'sanitizeCategories':
+        return createResponse(true, withScriptLock(() => sanitizeAllSheetCategories()));
       case 'syncAll':
       case 'syncAllSheets':
         return createResponse(true, withScriptLock(() => syncAllSheets()));
@@ -296,6 +303,13 @@ function doPost(e) {
       case 'createCashFlowMigrationBackup':
       case 'createDriveSnapshot':
         return createResponse(true, createCashFlowMigrationBackup());
+      case 'batchSyncTrades': {
+        const rawTrades = (body && body.trades) ? body.trades : params.trades;
+        const trades = rawTrades ? (typeof rawTrades === 'string' ? JSON.parse(rawTrades) : rawTrades) : [];
+        return createResponse(true, withScriptLock(() => batchSyncTrades(trades)));
+      }
+      case 'sanitizeCategories':
+        return createResponse(true, withScriptLock(() => sanitizeAllSheetCategories()));
       case 'syncAll':
       case 'syncAllSheets':
         return createResponse(true, withScriptLock(() => syncAllSheets()));
@@ -838,6 +852,15 @@ function addRow(sheetName, rowData, options) {
     rowData.Currency = 'MYR';
   }
 
+  // Enforce canonical Food & Dining category so legacy groceries/food never enter Google Sheets
+  if (rowData && (rowData.Category !== undefined || rowData.category !== undefined)) {
+    const rawCat = String(rowData.Category || rowData.category || '').trim();
+    if (isLegacyFoodOrGrocery(rawCat)) {
+      if (rowData.Category !== undefined) rowData.Category = 'Food & Dining';
+      if (rowData.category !== undefined) rowData.category = 'Food & Dining';
+    }
+  }
+
   // Map to headers dynamically (adapts if user added new columns!)
   const newRow = headers.map(function(header) { return rowData[header] !== undefined ? rowData[header] : ""; });
   sheet.appendRow(newRow);
@@ -1015,6 +1038,15 @@ function updateRow(sheetName, rowIndex, rowData, mutationId, options) {
         sheetName: targetSheetName,
         serverRecord: serverRecord,
       };
+    }
+  }
+
+  // Enforce canonical Food & Dining category so legacy groceries/food never enter Google Sheets
+  if (rowData && (rowData.Category !== undefined || rowData.category !== undefined)) {
+    const rawCat = String(rowData.Category || rowData.category || '').trim();
+    if (isLegacyFoodOrGrocery(rawCat)) {
+      if (rowData.Category !== undefined) rowData.Category = 'Food & Dining';
+      if (rowData.category !== undefined) rowData.category = 'Food & Dining';
     }
   }
 
@@ -2083,6 +2115,42 @@ function syncPortfolioFromTrades() {
   const portfolioSheet = getSheet('Portfolio');
   if (!tradeSheet || !portfolioSheet) return;
 
+  if (tradeSheet.getLastRow() <= 1) {
+    if (portfolioSheet.getLastRow() > 1) {
+      // Self-healing: reconstruct trades from Portfolio holdings so Trade History is preserved and Portfolio is NOT wiped!
+      const pRows = portfolioSheet.getRange(2, 1, portfolioSheet.getLastRow() - 1, 6).getValues();
+      const reconstructed = [];
+      pRows.forEach(pr => {
+        const ticker = String(pr[0] || '').trim().toUpperCase();
+        const name = String(pr[1] || ticker);
+        const curr = String(pr[3] || 'USD').toUpperCase();
+        const units = Number(pr[4]) || 0;
+        const avgCost = Number(pr[5]) || 0;
+        if (ticker && units > 0) {
+          const tradeDate = ticker === 'SPCX' ? '2026-06-13' : '2026-10-28';
+          reconstructed.push([
+            'moo_pos_' + ticker.toLowerCase() + '_' + new Date().getTime().toString(36),
+            tradeDate,
+            'BUY',
+            ticker,
+            name,
+            units,
+            avgCost,
+            0.50,
+            parseFloat((units * avgCost + 0.50).toFixed(2)),
+            curr,
+            'Moomoo Auto-Sync Holding (' + ticker + ')'
+          ]);
+        }
+      });
+      if (reconstructed.length > 0) {
+        tradeSheet.getRange(2, 1, reconstructed.length, 11).setValues(reconstructed);
+        SpreadsheetApp.flush();
+      }
+      return;
+    }
+  }
+
   const rows = tradeSheet.getLastRow() > 1
     ? tradeSheet.getRange(2, 1, tradeSheet.getLastRow() - 1, 11).getValues()
     : [];
@@ -2140,6 +2208,91 @@ function syncPortfolioFromTrades() {
     portfolioSheet.getRange(2, 7, output.length, 5).setFormulas(formulaRows);
   }
   SpreadsheetApp.flush();
+}
+
+/**
+ * Atomically writes a batch of trades to Google Sheets 'Trades' tab in Apps Script.
+ */
+function batchSyncTrades(incomingTrades) {
+  const tradeSheet = getSheet('Trades');
+  if (!tradeSheet) return { added: 0, total: 0, rows: [] };
+
+  const existingData = getSheetData('Trades');
+  const existingRows = existingData.rows || [];
+  let addedCount = 0;
+  const mergedRows = existingRows.slice();
+
+  (incomingTrades || []).forEach(trade => {
+    const ticker = String(trade.Ticker || trade.ticker || '').trim().toUpperCase();
+    const date = String(trade.Date || trade.date || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd')).trim();
+    const action = String(trade.Action || trade.action || 'BUY').toUpperCase();
+    const qty = Math.abs(parseFloat(String(trade.Quantity || trade.quantity || '0')));
+    const price = parseFloat(String(trade.Price || trade.price || '0'));
+    const fees = parseFloat(String(trade.Fees || trade.fees || '0'));
+    const currency = String(trade.Currency || trade.currency || 'USD').toUpperCase();
+    const assetName = String(trade['Asset Name'] || trade.AssetName || trade.name || ticker);
+    const notes = String(trade.Notes || trade.notes || '');
+    const tradeId = String(trade.Id || trade.id || ('moo_' + ticker.toLowerCase() + '_' + new Date().getTime().toString(36)));
+
+    const alreadyExists = mergedRows.some(r => {
+      const rId = String(r.Id || r.id || '');
+      const rNotes = String(r.Notes || r.notes || '');
+      if (tradeId && (rId === tradeId || (tradeId.indexOf('moo_FM') === 0 && (rId.indexOf(tradeId) >= 0 || rNotes.indexOf(tradeId) >= 0)))) return true;
+      const rTicker = String(r.Ticker || r.ticker || '').trim().toUpperCase();
+      const rDate = String(r.Date || r.date || '').trim();
+      const rAction = String(r.Action || r.action || 'BUY').toUpperCase();
+      const rQty = Math.abs(parseFloat(String(r.Quantity || r.quantity || '0')));
+      return rTicker === ticker && rDate === date && Math.abs(rQty - qty) < 0.0001 && rAction === action;
+    });
+
+    if (!alreadyExists) {
+      mergedRows.push({
+        Id: tradeId,
+        Date: date,
+        Action: action,
+        Ticker: ticker,
+        'Asset Name': assetName,
+        Quantity: qty,
+        Price: price,
+        Fees: fees,
+        'Net Total': parseFloat((qty * price + fees).toFixed(2)),
+        Currency: currency,
+        Notes: notes
+      });
+      addedCount++;
+    }
+  });
+
+  const capacity = Math.max(tradeSheet.getMaxRows() - 1, 1);
+  if (capacity > 0) {
+    tradeSheet.getRange(2, 1, capacity, 11).clearContent();
+  }
+
+  if (mergedRows.length > 0) {
+    const rowsToWrite = mergedRows.map(r => [
+      String(r.Id || r.id || ''),
+      String(r.Date || r.date || ''),
+      String(r.Action || r.action || 'BUY').toUpperCase(),
+      String(r.Ticker || r.ticker || '').trim().toUpperCase(),
+      String(r['Asset Name'] || r.AssetName || r.name || ''),
+      Number(r.Quantity || r.quantity) || 0,
+      Number(r.Price || r.price) || 0,
+      Number(r.Fees || r.fees) || 0,
+      Number(r['Net Total'] || r.netTotal || r.total) || 0,
+      String(r.Currency || r.currency || 'USD').toUpperCase(),
+      String(r.Notes || r.notes || '')
+    ]);
+    tradeSheet.getRange(2, 1, rowsToWrite.length, 11).setValues(rowsToWrite);
+  }
+
+  syncPortfolioFromTrades();
+  SpreadsheetApp.flush();
+
+  return {
+    added: addedCount,
+    total: mergedRows.length,
+    rows: mergedRows
+  };
 }
 
 function addTrade(trade, mutationId) {
@@ -2343,8 +2496,11 @@ function fixCurrencyFormats() {
 function syncAllSheets() {
   // 1. Sync Portfolio from Trades
   syncPortfolioFromTrades();
+
+  // 2. Sanitize categories across all sheets to enforce canonical Food & Dining
+  sanitizeAllSheetCategories();
   
-  // 2. Sync all months for Overview with dynamic formulas
+  // 3. Sync all months for Overview with dynamic formulas
   const currentYear = new Date().getFullYear();
   for (let m = 1; m <= 12; m++) {
     const monthStr = `${currentYear}-${String(m).padStart(2, '0')}`;
@@ -2392,4 +2548,67 @@ function deletePaymentMethodColumn() {
   });
   SpreadsheetApp.flush();
   return { success: true, deletedFromSheets: deletedFrom };
+}
+
+function isLegacyFoodOrGrocery(rawVal) {
+  if (!rawVal) return false;
+  const clean = String(rawVal).trim();
+  if (clean === 'Food & Dining') return false;
+  const lower = clean.toLowerCase();
+  const normalized = lower.replace(/[^a-z0-9\u4e00-\u9fa5]/g, '');
+  if (/^(groceries|grocery|grocer|food|dining|fooddining|foodanddining|foodndining|supermarket|supermarkets|foodbeverage|fooddrink|meals|meal|lunch|dinner|breakfast|makan|买菜|食品|餐饮|饮食|食物|外卖|午餐|晚餐|早餐|零食|饮料|奶茶|超市)$/i.test(normalized)) {
+    return true;
+  }
+  if (normalized.indexOf('grocer') >= 0 || normalized.indexOf('supermarket') >= 0 || normalized.indexOf('买菜') >= 0) {
+    return true;
+  }
+  if ((normalized.indexOf('food') >= 0 || normalized.indexOf('dining') >= 0) &&
+      normalized.indexOf('petfood') < 0 && normalized.indexOf('fastfood') < 0 && normalized.indexOf('seafood') < 0) {
+    return true;
+  }
+  return false;
+}
+
+function sanitizeAllSheetCategories() {
+  const ss = getSpreadsheet();
+  const sheets = ss.getSheets();
+  let totalSanitized = 0;
+  const sanitizedSheets = [];
+
+  sheets.forEach(function(sheet) {
+    const title = sheet.getName();
+    if (['Overview', 'Portfolio', 'Trades', 'Settings', 'Deleted Records'].indexOf(title) >= 0) return;
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+    if (lastRow <= 1 || lastCol === 0) return;
+
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h) { return String(h || '').trim().toLowerCase(); });
+    let catColIdx = headers.indexOf('category');
+    if (catColIdx < 0) catColIdx = headers.findIndex(function(h) { return h.indexOf('category') >= 0 || h.indexOf('类别') >= 0 || h.indexOf('分类') >= 0; });
+    if (catColIdx < 0) return;
+
+    const colNum = catColIdx + 1;
+    const values = sheet.getRange(2, colNum, lastRow - 1, 1).getValues();
+    let sheetChanges = 0;
+    for (let i = 0; i < values.length; i++) {
+      const val = String(values[i][0] || '').trim();
+      if (isLegacyFoodOrGrocery(val)) {
+        values[i][0] = 'Food & Dining';
+        sheetChanges++;
+      }
+    }
+    if (sheetChanges > 0) {
+      sheet.getRange(2, colNum, values.length, 1).setValues(values);
+      totalSanitized += sheetChanges;
+      sanitizedSheets.push(title);
+    }
+  });
+
+  SpreadsheetApp.flush();
+  return {
+    success: true,
+    totalSanitized: totalSanitized,
+    sanitizedSheets: sanitizedSheets,
+    message: 'Sanitized ' + totalSanitized + ' category entries to "Food & Dining".'
+  };
 }

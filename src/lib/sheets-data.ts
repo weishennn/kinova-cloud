@@ -17,6 +17,7 @@ import {
 import { persistConflictBeforeTombstone, resolveNotFoundUpdatePolicy } from './conflict-policy';
 import { applyPendingTransactionUpdate } from './transaction-cache-merge';
 import { getPendingMutationDisposition, shouldKeepPendingMutationOnStartup } from './pending-mutation-policy';
+import { isLegacyFoodOrGrocery } from './canonical-categories';
 import { toast } from 'sonner';
 
 let flushInFlight: Promise<{ total: number; succeeded: number; failed: number }> | null = null;
@@ -323,6 +324,37 @@ export const sheetsData = {
           }
           keysToPurge.forEach((k) => localStorage.removeItem(k));
         }
+        if (localStorage.getItem('cashflow_cache_heal_v10') !== '1') {
+          localStorage.setItem('cashflow_cache_heal_v10', '1');
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith('cashflow_swr_')) {
+              try {
+                const raw = localStorage.getItem(k);
+                if (raw) {
+                  const parsed = JSON.parse(raw);
+                  const rows = parsed?.data?.data?.rows || parsed?.data?.rows || (Array.isArray(parsed?.data) ? parsed.data : null) || parsed?.rows;
+                  if (Array.isArray(rows)) {
+                    let changed = false;
+                    rows.forEach((r: any) => {
+                      const cat = r?.Category || r?.category;
+                      if (cat && isLegacyFoodOrGrocery(String(cat))) {
+                        if (r.Category) r.Category = 'Food & Dining';
+                        if (r.category) r.category = 'Food & Dining';
+                        changed = true;
+                      }
+                    });
+                    if (changed) {
+                      localStorage.setItem(k, JSON.stringify(parsed));
+                    }
+                  }
+                }
+              } catch {
+                // ignore
+              }
+            }
+          }
+        }
       } catch {
         // Ignore storage errors
       }
@@ -583,13 +615,37 @@ export const sheetsData = {
       const res = await sheetsApi.getSheetData(sheetName);
       if (res.success && res.data) {
         let rawRows = res.data.rows || [];
-        // Guard against empty Trades eviction if local cache already has valid trades
+        // Guard against empty Trades eviction if persistent trades or local cache already has valid trades
         if (sheetName === 'Trades' && rawRows.length === 0) {
-          const cached = this.getInitialSheetData('Trades');
-          if (cached?.data?.rows && cached.data.rows.length > 0) {
-            rawRows = cached.data.rows;
+          if (typeof window !== 'undefined') {
+            try {
+              const stored = localStorage.getItem('cashflow_persistent_trades');
+              if (stored) {
+                const parsed = JSON.parse(stored);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                  rawRows = parsed;
+                }
+              }
+            } catch {
+              // ignore
+            }
+          }
+          if (rawRows.length === 0) {
+            const cached = this.getInitialSheetData('Trades');
+            if (cached?.data?.rows && cached.data.rows.length > 0) {
+              rawRows = cached.data.rows;
+            }
           }
         }
+        // Strict category sanitation: all food and grocery expenses must be Food & Dining
+        rawRows.forEach((r) => {
+          const cat = r.Category || r.category;
+          if (cat && isLegacyFoodOrGrocery(String(cat))) {
+            if (r.Category !== undefined) r.Category = 'Food & Dining';
+            if (r.category !== undefined) r.category = 'Food & Dining';
+            if (r.Category === undefined && r.category === undefined) r.Category = 'Food & Dining';
+          }
+        });
         const mergedRows = applyPendingMutations(rawRows, sheetName);
         setSwrCachedData('getSheetData', { sheetName }, {
           success: true,
@@ -1345,6 +1401,16 @@ function applyPendingMutations(rows: SheetRow[], targetSheet?: string): SheetRow
       }
     }
   }
+
+  // Strict category sanitation across all pending and merged transactions
+  result.forEach((r) => {
+    const cat = r.Category || r.category;
+    if (cat && isLegacyFoodOrGrocery(String(cat))) {
+      if (r.Category !== undefined) r.Category = 'Food & Dining';
+      if (r.category !== undefined) r.category = 'Food & Dining';
+      if (r.Category === undefined && r.category === undefined) r.Category = 'Food & Dining';
+    }
+  });
 
   return result;
 }

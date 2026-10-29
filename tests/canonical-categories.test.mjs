@@ -6,6 +6,7 @@ import {
   CANONICAL_INCOME_CATEGORIES,
   CANONICAL_INVESTMENT_CATEGORIES,
   normalizeToCanonicalCategory,
+  isLegacyFoodOrGrocery,
 } from '../src/lib/canonical-categories.ts';
 
 test('1. Canonical categories include Sport and Gift', () => {
@@ -59,3 +60,27 @@ test('4. Income categories normalization', () => {
   assert.equal(normalizeToCanonicalCategory('Side Gig', 'Income'), 'Freelance');
   assert.equal(normalizeToCanonicalCategory('Unknown Source', 'Income'), 'Other');
 });
+
+test('5. isLegacyFoodOrGrocery strictly detects all grocery and food variations', () => {
+  assert.equal(isLegacyFoodOrGrocery('groceries'), true);
+  assert.equal(isLegacyFoodOrGrocery('Groceries'), true);
+  assert.equal(isLegacyFoodOrGrocery('food'), true);
+  assert.equal(isLegacyFoodOrGrocery('Food'), true);
+  assert.equal(isLegacyFoodOrGrocery('Dining'), true);
+  assert.equal(isLegacyFoodOrGrocery('Food and Dining'), true);
+  assert.equal(isLegacyFoodOrGrocery('groceries / food'), true);
+  assert.equal(isLegacyFoodOrGrocery('Groceries & Food'), true);
+  assert.equal(isLegacyFoodOrGrocery('Supermarket'), true);
+  assert.equal(isLegacyFoodOrGrocery('买菜'), true);
+  assert.equal(isLegacyFoodOrGrocery('食品'), true);
+  assert.equal(isLegacyFoodOrGrocery('餐饮'), true);
+
+  // Already canonical Food & Dining should return false (no conversion needed)
+  assert.equal(isLegacyFoodOrGrocery('Food & Dining'), false);
+
+  // Other categories should return false
+  assert.equal(isLegacyFoodOrGrocery('Transport'), false);
+  assert.equal(isLegacyFoodOrGrocery('Shopping'), false);
+  assert.equal(isLegacyFoodOrGrocery('Housing & Bills'), false);
+});
+

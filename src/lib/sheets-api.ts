@@ -653,6 +653,22 @@ function handleLocalRequest(action: string, params: Record<string, unknown> = {}
     case 'setupRecurringAndInstallments':
       return { success: true, message: 'Local storage configured' };
 
+    case 'batchSyncTrades': {
+      const trades = Array.isArray(params.trades) ? (params.trades as Record<string, unknown>[]) : [];
+      trades.forEach((t) => {
+        const id = String(t.Id || t.id || '');
+        const exists = store.trades.some((existing) => String(existing.Id || existing.id) === id);
+        if (!exists) {
+          store.trades.push(t);
+        }
+      });
+      saveLocalStore(store);
+      return { success: true, data: { added: trades.length, total: store.trades.length, rows: store.trades } };
+    }
+
+    case 'sanitizeCategories':
+      return { success: true, data: { totalSanitized: 0, sanitizedSheets: [] } };
+
     default:
       return { success: true, data: [] };
   }
@@ -1432,6 +1448,27 @@ export const sheetsApi = {
       };
       message?: string;
     }>({ action: 'syncAll', method: 'POST' }),
+
+  batchSyncTrades: (trades: unknown[]) =>
+    apiRequest<{
+      success: boolean;
+      data?: {
+        added: number;
+        total: number;
+        rows: Record<string, unknown>[];
+      };
+      message?: string;
+    }>({ action: 'batchSyncTrades', params: { trades }, method: 'POST' }),
+
+  sanitizeCategories: () =>
+    apiRequest<{
+      success: boolean;
+      data?: {
+        totalSanitized: number;
+        sanitizedSheets: string[];
+      };
+      message?: string;
+    }>({ action: 'sanitizeCategories', method: 'POST' }),
 
   syncPortfolio: () =>
     apiRequest<{ success: boolean; data?: { synced: boolean; sheet: string }; message?: string }>({

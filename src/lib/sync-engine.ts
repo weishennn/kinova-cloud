@@ -55,7 +55,28 @@ export async function syncAllGoogleSheets(): Promise<SyncResult> {
     return { total: 0, succeeded: 0, failed: 0 };
   });
 
-  // 2. Run atomic server-side Portfolio + Overview sync in a single LockService pass
+  // 2. Proactively ensure persistent trades are synced to Google Sheets
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('cashflow_persistent_trades');
+      if (stored) {
+        const trades = JSON.parse(stored);
+        if (Array.isArray(trades) && trades.length > 0) {
+          await sheetsApi.batchSyncTrades(trades).catch(() => null);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 3. Proactively sanitize all categories across Google Sheets so legacy groceries/food are merged into Food & Dining
+  await sheetsApi.sanitizeCategories().catch((err) => {
+    console.warn('Category sanitization notice:', err);
+    return null;
+  });
+
+  // 4. Run atomic server-side Portfolio + Overview sync in a single LockService pass
   try {
     const allRes = await sheetsApi.syncAllSheets();
     if (allRes.success) {

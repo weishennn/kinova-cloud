@@ -2,7 +2,7 @@ import { GoogleUserSession } from './google-auth';
 import { getAdminUserRegistry, updateUserDriveIds } from './admin-registry';
 import { ensureGoogleApiSuccess } from './google-api-result';
 import { detectConcurrentFieldConflict } from './conflict-policy';
-import { normalizeToCanonicalCategory } from './canonical-categories';
+import { normalizeToCanonicalCategory, isLegacyFoodOrGrocery } from './canonical-categories';
 
 export const DEFAULT_MONTHLY_HEADERS = [
   'Id', 'Date', 'Type', 'Category', 'SubCategory', 'Description',
@@ -771,7 +771,7 @@ function parseValuesToRows(sheetName: string, values: unknown[][], fallbackHeade
       let val = rowArr[j] !== undefined && rowArr[j] !== null ? rowArr[j] : '';
       if (effectiveHeaders[j].toLowerCase() === 'category') {
         const catStr = String(val).trim();
-        if (/^(groceries|grocery|food|dining)$/i.test(catStr)) {
+        if (isLegacyFoodOrGrocery(catStr)) {
           val = 'Food & Dining';
         }
       }
@@ -785,8 +785,21 @@ function parseValuesToRows(sheetName: string, values: unknown[][], fallbackHeade
 }
 
 /**
+ * Converts a 0-based column index to spreadsheet column letter (A, B, ..., Z, AA, AB, ...).
+ */
+export function columnIndexToLetter(idx: number): string {
+  let temp = idx;
+  let letter = '';
+  while (temp >= 0) {
+    letter = String.fromCharCode((temp % 26) + 65) + letter;
+    temp = Math.floor(temp / 26) - 1;
+  }
+  return letter;
+}
+
+/**
  * Automatically inspects the 'Category' column in a sheet tab.
- * If any rows contain legacy labels like "Groceries", "Food", or "Dining",
+ * If any rows contain legacy labels like "Groceries", "Food", "Dining", etc.,
  * it immediately batch-updates those cells in Google Sheets to "Food & Dining".
  * This ensures the user's charts and SUMIF formulas in Google Sheets are 100% complete.
  */
@@ -798,15 +811,20 @@ async function autoSanitizeSheetCategories(
   headers: string[]
 ): Promise<number> {
   if (!values || values.length <= 1) return 0;
-  const catColIdx = headers.findIndex((h) => h.toLowerCase() === 'category');
+
+  // Inspect values[0] (actual first row of sheet) to find exact column index of Category
+  const row0 = (values[0] || []).map((h) => String(h ?? '').trim().toLowerCase());
+  let catColIdx = row0.findIndex((h) => h === 'category');
+  if (catColIdx < 0) catColIdx = row0.findIndex((h) => h.includes('category') || h.includes('类别') || h.includes('分类'));
+  if (catColIdx < 0) catColIdx = headers.findIndex((h) => h.toLowerCase() === 'category');
   if (catColIdx < 0) return 0;
 
   const updates: Array<{ range: string; values: string[][] }> = [];
-  const colLetter = String.fromCharCode(65 + catColIdx);
+  const colLetter = columnIndexToLetter(catColIdx);
 
   for (let i = 1; i < values.length; i++) {
     const rawVal = String(values[i]?.[catColIdx] ?? '').trim();
-    if (/^(groceries|grocery|food|dining)$/i.test(rawVal)) {
+    if (isLegacyFoodOrGrocery(rawVal)) {
       const rowIndex = i + 1;
       updates.push({
         range: `'${sheetName}'!${colLetter}${rowIndex}`,
@@ -819,7 +837,7 @@ async function autoSanitizeSheetCategories(
 
   if (updates.length > 0) {
     try {
-      await googleApiFetch(
+      const batchRes = await googleApiFetch(
         `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values:batchUpdate`,
         accessToken,
         {
@@ -830,6 +848,12 @@ async function autoSanitizeSheetCategories(
           }),
         }
       );
+      if (!batchRes.ok) {
+        const errText = await batchRes.text();
+        console.warn(`[CategorySanitizer] Batch-update HTTP failed in ${sheetName}:`, errText);
+      } else {
+        console.info(`[CategorySanitizer] Converted ${updates.length} legacy food/grocery cells in ${sheetName} to 'Food & Dining'`);
+      }
     } catch (err) {
       console.warn(`[CategorySanitizer] Failed to batch-update legacy categories in ${sheetName}:`, err);
     }
@@ -1017,10 +1041,14 @@ async function syncPortfolioFromTradesUser(
   accessToken: string,
   meta: SpreadsheetMetadata
 ): Promise<void> {
-  await ensureSheetExists(spreadsheetId, accessToken, meta, 'Trades');
+  const tradesSheetMeta = meta.sheets.find(
+    (s) => s.properties.title.trim().toLowerCase() === 'trades'
+  );
+  const tradesSheetTitle = tradesSheetMeta ? tradesSheetMeta.properties.title : 'Trades';
+  await ensureSheetExists(spreadsheetId, accessToken, meta, tradesSheetTitle);
   await ensureSheetExists(spreadsheetId, accessToken, meta, 'Portfolio');
 
-  const tradeValues = await readSheetValues(spreadsheetId, accessToken, 'Trades');
+  const tradeValues = await readSheetValues(spreadsheetId, accessToken, tradesSheetTitle);
 
   // Self-Healing Guard: If Trades sheet has 0 data rows, check if Portfolio sheet already has holdings!
   if (tradeValues.length <= 1) {
@@ -1034,18 +1062,34 @@ async function syncPortfolioFromTradesUser(
       avgCost: number;
     }> = [];
 
+    const pHeaders = (portfolioValues[0] || []).map((h) => String(h || '').trim().toLowerCase());
+    const tickerIdx = pHeaders.findIndex((h) => h === 'ticker' || h.includes('symbol') || h.includes('code'));
+    const unitsIdx = pHeaders.findIndex((h) => h.includes('unit') || h.includes('qty') || h.includes('quantity') || h.includes('held') || h.includes('share'));
+    const avgCostIdx = pHeaders.findIndex((h) => h.includes('avg') || h.includes('cost') || h.includes('price'));
+    const nameIdx = pHeaders.findIndex((h) => h.includes('name') || h.includes('asset'));
+    const currIdx = pHeaders.findIndex((h) => h.includes('curr'));
+
+    const tCol = tickerIdx >= 0 ? tickerIdx : 0;
+    const uCol = unitsIdx >= 0 ? unitsIdx : 4;
+    const cCol = avgCostIdx >= 0 ? avgCostIdx : 5;
+    const nCol = nameIdx >= 0 ? nameIdx : 1;
+    const currCol = currIdx >= 0 ? currIdx : 3;
+
     for (let i = 1; i < portfolioValues.length; i++) {
       const r = portfolioValues[i] || [];
-      const ticker = String(r[0] || '').trim().toUpperCase();
-      const units = Number(r[4]) || 0;
+      const ticker = String(r[tCol] || '').trim().toUpperCase();
+      const rawUnits = String(r[uCol] || '0').replace(/[^0-9.-]/g, '');
+      const rawCost = String(r[cCol] || '0').replace(/[^0-9.-]/g, '');
+      const units = parseFloat(rawUnits) || 0;
+      const avgCost = parseFloat(rawCost) || 0;
       if (ticker && units > 0) {
         existingPortfolioHoldings.push({
           ticker,
-          name: String(r[1] || ticker),
+          name: String(r[nCol] || ticker),
           type: String(r[2] || 'Stock'),
-          currency: String(r[3] || 'USD'),
+          currency: String(r[currCol] || 'USD'),
           units,
-          avgCost: Number(r[5]) || 0,
+          avgCost,
         });
       }
     }
@@ -1071,12 +1115,25 @@ async function syncPortfolioFromTradesUser(
         ]);
       });
 
+      const endCol = columnIndexToLetter(TRADES_HEADERS.length - 1);
+      const putRange = `'${tradesSheetTitle}'!A1:${endCol}${reconstructedTrades.length}`;
+
       await googleApiFetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'Trades'!A1`)}?valueInputOption=USER_ENTERED`,
+        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${tradesSheetTitle}'!A1:ZZ5000`)}:clear`,
+        accessToken,
+        { method: 'POST', body: JSON.stringify({}) }
+      );
+
+      await googleApiFetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(putRange)}?valueInputOption=USER_ENTERED`,
         accessToken,
         {
           method: 'PUT',
-          body: JSON.stringify({ values: reconstructedTrades }),
+          body: JSON.stringify({
+            range: putRange,
+            majorDimension: 'ROWS',
+            values: reconstructedTrades,
+          }),
         }
       );
 
@@ -1162,12 +1219,19 @@ async function syncPortfolioFromTradesUser(
     { method: 'POST', body: JSON.stringify({}) }
   );
 
+  const portEndCol = columnIndexToLetter(PORTFOLIO_HEADERS.length - 1);
+  const portPutRange = `'Portfolio'!A1:${portEndCol}${rows.length}`;
+
   await googleApiFetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'Portfolio'!A1`)}?valueInputOption=USER_ENTERED`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(portPutRange)}?valueInputOption=USER_ENTERED`,
     accessToken,
     {
       method: 'PUT',
-      body: JSON.stringify({ values: rows }),
+      body: JSON.stringify({
+        range: portPutRange,
+        majorDimension: 'ROWS',
+        values: rows,
+      }),
     }
   );
 }
@@ -1184,9 +1248,13 @@ async function getTradesWithAutoHeal(
   accessToken: string,
   meta: SpreadsheetMetadata
 ): Promise<{ headers: string[]; rows: Record<string, unknown>[] }> {
-  await ensureSheetExists(spreadsheetId, accessToken, meta, 'Trades');
-  const values = await readSheetValues(spreadsheetId, accessToken, 'Trades');
-  const parsed = parseValuesToRows('Trades', values, TRADES_HEADERS);
+  const tradesSheetMeta = meta.sheets.find(
+    (s) => s.properties.title.trim().toLowerCase() === 'trades'
+  );
+  const tradesSheetTitle = tradesSheetMeta ? tradesSheetMeta.properties.title : 'Trades';
+  await ensureSheetExists(spreadsheetId, accessToken, meta, tradesSheetTitle);
+  const values = await readSheetValues(spreadsheetId, accessToken, tradesSheetTitle);
+  const parsed = parseValuesToRows(tradesSheetTitle, values, TRADES_HEADERS);
 
   if (parsed.rows.length > 0) {
     return parsed;
@@ -1195,16 +1263,35 @@ async function getTradesWithAutoHeal(
   // Self-Healing Guard: If Trades sheet has 0 rows, check if Portfolio sheet has active holdings
   await ensureSheetExists(spreadsheetId, accessToken, meta, 'Portfolio');
   const portfolioValues = await readSheetValues(spreadsheetId, accessToken, 'Portfolio');
+  if (portfolioValues.length <= 1) {
+    return parsed;
+  }
+
+  const pHeaders = (portfolioValues[0] || []).map((h) => String(h || '').trim().toLowerCase());
+  const tickerIdx = pHeaders.findIndex((h) => h === 'ticker' || h.includes('symbol') || h.includes('code'));
+  const unitsIdx = pHeaders.findIndex((h) => h.includes('unit') || h.includes('qty') || h.includes('quantity') || h.includes('held') || h.includes('share'));
+  const avgCostIdx = pHeaders.findIndex((h) => h.includes('avg') || h.includes('cost') || h.includes('price'));
+  const nameIdx = pHeaders.findIndex((h) => h.includes('name') || h.includes('asset'));
+  const currIdx = pHeaders.findIndex((h) => h.includes('curr'));
+
+  const tCol = tickerIdx >= 0 ? tickerIdx : 0;
+  const uCol = unitsIdx >= 0 ? unitsIdx : 4;
+  const cCol = avgCostIdx >= 0 ? avgCostIdx : 5;
+  const nCol = nameIdx >= 0 ? nameIdx : 1;
+  const currCol = currIdx >= 0 ? currIdx : 3;
+
   const holdingsFromPortfolio: Array<Array<string | number>> = [];
 
   for (let i = 1; i < portfolioValues.length; i++) {
     const r = portfolioValues[i] || [];
-    const ticker = String(r[0] || '').trim().toUpperCase();
-    const units = Number(r[4]) || 0;
-    const avgCost = Number(r[5]) || 0;
+    const ticker = String(r[tCol] || '').trim().toUpperCase();
+    const rawUnits = String(r[uCol] || '0').replace(/[^0-9.-]/g, '');
+    const rawCost = String(r[cCol] || '0').replace(/[^0-9.-]/g, '');
+    const units = parseFloat(rawUnits) || 0;
+    const avgCost = parseFloat(rawCost) || 0;
     if (ticker && units > 0) {
-      const name = String(r[1] || ticker);
-      const currency = String(r[3] || 'USD').toUpperCase();
+      const name = String(r[nCol] || ticker);
+      const currency = String(r[currCol] || 'USD').toUpperCase();
       const fees = 0.50;
       const netTotal = parseFloat((units * avgCost + fees).toFixed(2));
       const tradeDate = ticker === 'SPCX' ? '2026-06-13' : '2026-10-28';
@@ -1226,16 +1313,41 @@ async function getTradesWithAutoHeal(
 
   if (holdingsFromPortfolio.length > 0) {
     const rowsToWrite = [TRADES_HEADERS, ...holdingsFromPortfolio];
+    const endCol = columnIndexToLetter(TRADES_HEADERS.length - 1);
+    const putRange = `'${tradesSheetTitle}'!A1:${endCol}${rowsToWrite.length}`;
+
     await googleApiFetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'Trades'!A1`)}?valueInputOption=USER_ENTERED`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${tradesSheetTitle}'!A1:ZZ5000`)}:clear`,
+      accessToken,
+      { method: 'POST', body: JSON.stringify({}) }
+    );
+
+    const putRes = await googleApiFetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(putRange)}?valueInputOption=USER_ENTERED`,
       accessToken,
       {
         method: 'PUT',
-        body: JSON.stringify({ values: rowsToWrite }),
+        body: JSON.stringify({
+          range: putRange,
+          majorDimension: 'ROWS',
+          values: rowsToWrite,
+        }),
       }
     );
-    const freshValues = await readSheetValues(spreadsheetId, accessToken, 'Trades');
-    return parseValuesToRows('Trades', freshValues, TRADES_HEADERS);
+
+    if (!putRes.ok) {
+      await googleApiFetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${tradesSheetTitle}'!A1`)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+        accessToken,
+        {
+          method: 'POST',
+          body: JSON.stringify({ values: rowsToWrite }),
+        }
+      );
+    }
+
+    const freshValues = await readSheetValues(spreadsheetId, accessToken, tradesSheetTitle);
+    return parseValuesToRows(tradesSheetTitle, freshValues, TRADES_HEADERS);
   }
 
   return parsed;
@@ -1252,11 +1364,15 @@ async function batchSyncTradesUser(
   meta: SpreadsheetMetadata,
   incomingTrades: Array<Record<string, unknown>>
 ): Promise<{ added: number; total: number; rows: Record<string, unknown>[] }> {
-  await ensureSheetExists(spreadsheetId, accessToken, meta, 'Trades');
+  const tradesSheetMeta = meta.sheets.find(
+    (s) => s.properties.title.trim().toLowerCase() === 'trades'
+  );
+  const tradesSheetTitle = tradesSheetMeta ? tradesSheetMeta.properties.title : 'Trades';
+  await ensureSheetExists(spreadsheetId, accessToken, meta, tradesSheetTitle);
   await ensureSheetExists(spreadsheetId, accessToken, meta, 'Portfolio');
 
-  const existingValues = await readSheetValues(spreadsheetId, accessToken, 'Trades');
-  const parsedExisting = parseValuesToRows('Trades', existingValues, TRADES_HEADERS);
+  const existingValues = await readSheetValues(spreadsheetId, accessToken, tradesSheetTitle);
+  const parsedExisting = parseValuesToRows(tradesSheetTitle, existingValues, TRADES_HEADERS);
   const existingRows = parsedExisting.rows;
 
   let addedCount = 0;
@@ -1306,6 +1422,13 @@ async function batchSyncTradesUser(
     }
   }
 
+  // Clear existing Trades tab to remove any old orphaned/corrupted rows
+  await googleApiFetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${tradesSheetTitle}'!A1:ZZ5000`)}:clear`,
+    accessToken,
+    { method: 'POST', body: JSON.stringify({}) }
+  );
+
   // Write all rows contiguously to 'Trades'!A1
   const rowsToWrite: Array<Array<string | number>> = [TRADES_HEADERS];
   mergedRows.forEach((r) => {
@@ -1324,19 +1447,55 @@ async function batchSyncTradesUser(
     ]);
   });
 
-  await googleApiFetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'Trades'!A1`)}?valueInputOption=USER_ENTERED`,
+  const endCol = columnIndexToLetter(TRADES_HEADERS.length - 1);
+  const putRange = `'${tradesSheetTitle}'!A1:${endCol}${rowsToWrite.length}`;
+
+  const putRes = await googleApiFetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(putRange)}?valueInputOption=USER_ENTERED`,
     accessToken,
     {
       method: 'PUT',
-      body: JSON.stringify({ values: rowsToWrite }),
+      body: JSON.stringify({
+        range: putRange,
+        majorDimension: 'ROWS',
+        values: rowsToWrite,
+      }),
     }
   );
+
+  if (!putRes.ok) {
+    const errText = await putRes.text();
+    console.warn(`[GoogleSheets] PUT Trades failed, attempting append fallback:`, errText);
+    await googleApiFetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${tradesSheetTitle}'!A1`)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+      accessToken,
+      {
+        method: 'POST',
+        body: JSON.stringify({ values: rowsToWrite }),
+      }
+    );
+  }
+
+  // Remove any tombstones from Deleted Records for all synced trade IDs so they are never suppressed
+  for (const r of mergedRows) {
+    const rId = String(r.Id || r.id || '').trim();
+    if (rId) {
+      await removeDeletedTombstone(spreadsheetId, accessToken, meta, rId).catch(() => null);
+    }
+  }
 
   // Sync Portfolio from the fresh contiguous rows
   await syncPortfolioFromTradesUser(spreadsheetId, accessToken, meta);
 
-  return { added: addedCount, total: mergedRows.length, rows: mergedRows };
+  // Read back to verify
+  const verifiedValues = await readSheetValues(spreadsheetId, accessToken, tradesSheetTitle);
+  const verifiedParsed = parseValuesToRows(tradesSheetTitle, verifiedValues, TRADES_HEADERS);
+
+  return {
+    added: addedCount,
+    total: verifiedParsed.rows.length > 0 ? verifiedParsed.rows.length : mergedRows.length,
+    rows: verifiedParsed.rows.length > 0 ? verifiedParsed.rows : mergedRows,
+  };
 }
 
 /**
@@ -1476,14 +1635,16 @@ export async function executeUserGoogleAction(
       if (batchRes.ok) {
         const batchData = await batchRes.json();
         const valueRanges = Array.isArray(batchData.valueRanges) ? batchData.valueRanges : [];
-        valueRanges.forEach((vr: { values?: unknown[][] }, idx: number) => {
-          const mName = months[idx];
-          const mValues = vr.values || [];
-          void autoSanitizeSheetCategories(spreadsheetId, accessToken, mName, mValues, DEFAULT_MONTHLY_HEADERS);
-          const parsed = parseValuesToRows(mName, mValues, DEFAULT_MONTHLY_HEADERS);
-          if (parsed.headers.length > 0) headers = parsed.headers;
-          allRows = allRows.concat(parsed.rows);
-        });
+        await Promise.all(
+          valueRanges.map(async (vr: { values?: unknown[][] }, idx: number) => {
+            const mName = months[idx];
+            const mValues = vr.values || [];
+            await autoSanitizeSheetCategories(spreadsheetId, accessToken, mName, mValues, DEFAULT_MONTHLY_HEADERS);
+            const parsed = parseValuesToRows(mName, mValues, DEFAULT_MONTHLY_HEADERS);
+            if (parsed.headers.length > 0) headers = parsed.headers;
+            allRows = allRows.concat(parsed.rows);
+          })
+        );
       }
 
       allRows = allRows
@@ -2144,7 +2305,7 @@ export async function executeUserGoogleAction(
           const catUpdates: Array<{ range: string; values: string[][] }> = [];
           for (let i = 1; i < catValues.length; i++) {
             const nameVal = String(catValues[i]?.[1] ?? '').trim();
-            if (/^(groceries|grocery|food|dining)$/i.test(nameVal)) {
+            if (isLegacyFoodOrGrocery(nameVal)) {
               catUpdates.push({
                 range: `'Categories'!B${i + 1}`,
                 values: [['Food & Dining']],
@@ -2169,6 +2330,32 @@ export async function executeUserGoogleAction(
         }
       }
 
+      // Also scan any non-system sheets (e.g. Transactions, Recurring, Installments)
+      const nonSystemSheets = meta.sheets
+        .map((s) => s.properties.title)
+        .filter((t) => !months.includes(t) && !['Overview', 'Portfolio', 'Trades', 'Settings', 'Deleted Records', 'Categories'].includes(t));
+
+      for (const sheetTitle of nonSystemSheets) {
+        const values = await readSheetValues(spreadsheetId, accessToken, sheetTitle);
+        if (values.length > 1) {
+          const count = await autoSanitizeSheetCategories(
+            spreadsheetId,
+            accessToken,
+            sheetTitle,
+            values,
+            getDefaultHeadersForSheet(sheetTitle)
+          );
+          if (count > 0) {
+            totalSanitized += count;
+            sanitizedSheets.push(sheetTitle);
+          }
+        }
+      }
+
+      if (totalSanitized > 0) {
+        await syncOverviewSheetForMeta(spreadsheetId, accessToken, meta);
+      }
+
       return wrap({
         success: true,
         totalSanitized,
@@ -2181,13 +2368,17 @@ export async function executeUserGoogleAction(
     case 'syncAll':
     case 'syncAllSheets': {
       await syncPortfolioFromTradesUser(spreadsheetId, accessToken, meta);
-      await syncOverviewSheetForMeta(spreadsheetId, accessToken, meta);
       // Auto-sanitize all monthly tabs so Google Sheet charts remain 100% complete
       const months = getMonthListFromMeta(meta);
-      for (const mName of months) {
-        const values = await readSheetValues(spreadsheetId, accessToken, mName);
-        void autoSanitizeSheetCategories(spreadsheetId, accessToken, mName, values, getDefaultHeadersForSheet(mName));
-      }
+      await Promise.all(
+        months.map(async (mName) => {
+          const values = await readSheetValues(spreadsheetId, accessToken, mName);
+          if (values.length > 1) {
+            await autoSanitizeSheetCategories(spreadsheetId, accessToken, mName, values, getDefaultHeadersForSheet(mName));
+          }
+        })
+      );
+      await syncOverviewSheetForMeta(spreadsheetId, accessToken, meta);
       return wrap({ success: true, synced: true, message: 'All sheets synchronized successfully' });
     }
 

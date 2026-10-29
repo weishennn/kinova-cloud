@@ -316,6 +316,30 @@ export function useTrades() {
       return query;
     }
 
+    // Defensive check: persistent trades saved from Moomoo sync
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('cashflow_persistent_trades');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return {
+              ...query,
+              data: {
+                headers: [
+                  'Id', 'Date', 'Action', 'Ticker', 'Asset Name',
+                  'Quantity', 'Price', 'Fees', 'Net Total', 'Currency', 'Notes',
+                ],
+                rows: parsed,
+              },
+            };
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     // Defensive fallback: if Trades query returned 0 rows but Portfolio has active holdings
     const holdings = Array.isArray(portfolioQuery.data) ? portfolioQuery.data : [];
     if (holdings.length > 0) {

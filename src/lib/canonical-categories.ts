@@ -365,3 +365,38 @@ function inferExpenseCategoryFromContext(text: string): CanonicalExpenseCategory
   }
   return 'Other';
 }
+
+/**
+ * Detects whether a category string is a legacy food/grocery label that
+ * must be converted to 'Food & Dining'.
+ * Covers English, Malay, Chinese, and mixed forms like "groceries", "food",
+ * "groceries / food", "Food and Dining", "买菜", "食品", "餐饮", etc.
+ */
+export function isLegacyFoodOrGrocery(rawVal: string | null | undefined): boolean {
+  if (!rawVal) return false;
+  const clean = String(rawVal).trim();
+  if (clean === 'Food & Dining') return false;
+  const lower = clean.toLowerCase();
+  const normalized = lower.replace(/[^a-z0-9\u4e00-\u9fa5]/g, '');
+
+  if (
+    /^(groceries|grocery|grocer|food|dining|fooddining|foodanddining|foodndining|supermarket|supermarkets|foodbeverage|fooddrink|meals|meal|lunch|dinner|breakfast|makan|买菜|食品|餐饮|饮食|食物|外卖|午餐|晚餐|早餐|零食|饮料|奶茶|超市)$/i.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+  if (normalized.includes('grocer') || normalized.includes('supermarket') || normalized.includes('买菜')) {
+    return true;
+  }
+  if (
+    (normalized.includes('food') || normalized.includes('dining')) &&
+    !normalized.includes('petfood') &&
+    !normalized.includes('fastfood') &&
+    !normalized.includes('seafood')
+  ) {
+    return true;
+  }
+  return normalizeToCanonicalCategory(clean, 'Expense') === 'Food & Dining';
+}
+

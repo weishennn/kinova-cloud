@@ -90,7 +90,7 @@ export default function InvestmentsPage() {
 
   // Normalize Trades
   const trades = useMemo<NormalizedTrade[]>(() => {
-    const rawRows = Array.isArray(rawTradesData)
+    let rawRows = Array.isArray(rawTradesData)
       ? rawTradesData
       : Array.isArray(rawTradesData?.rows)
         ? rawTradesData.rows
@@ -99,6 +99,20 @@ export default function InvestmentsPage() {
           : Array.isArray((rawTradesData as any)?.data)
             ? (rawTradesData as any).data
             : [];
+
+    if (rawRows.length === 0 && typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('cashflow_persistent_trades');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            rawRows = parsed;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
 
     return (rawRows as any[]).map((r: any): NormalizedTrade => {
       const qty = Number(r.Quantity || r.quantity || r.Qty || r.qty || 0);
@@ -330,6 +344,13 @@ export default function InvestmentsPage() {
 
       // Immediately seed cache with the freshly returned trades for 0ms instant display
       if (Array.isArray(data.trades) && data.trades.length > 0) {
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('cashflow_persistent_trades', JSON.stringify(data.trades));
+          } catch {
+            // ignore
+          }
+        }
         setSwrCachedData('getSheetData', { sheetName: 'Trades' }, {
           success: true,
           data: {
@@ -766,6 +787,21 @@ export default function InvestmentsPage() {
     try {
       await deleteTradeMutation.mutateAsync({ sheetName: 'Trades', id: trade.id, rowIndex: trade.rowIndex });
       clearAllSwrCache();
+
+      if (typeof window !== 'undefined') {
+        try {
+          const rawP = localStorage.getItem('cashflow_persistent_trades');
+          if (rawP) {
+            const pTrades = JSON.parse(rawP);
+            if (Array.isArray(pTrades)) {
+              const updated = pTrades.filter((t: any) => String(t.Id || t.id || '') !== trade.id);
+              localStorage.setItem('cashflow_persistent_trades', JSON.stringify(updated));
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
 
       // Optimistically remove deleted trade from local cache so it vanishes in 0ms
       queryClient.setQueryData(['sheet', 'Trades', 'active'], (old: any) => {
