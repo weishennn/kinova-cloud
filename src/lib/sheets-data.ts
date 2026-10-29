@@ -24,12 +24,34 @@ let flushInFlight: Promise<{ total: number; succeeded: number; failed: number }>
 let flushFollowUpNeeded = false;
 let backgroundPrefetchScheduled = false;
 const activeWritePromises = new Set<Promise<unknown>>();
+const activeWriteTails = new Map<string, Promise<void>>();
 
-function trackActiveWrite<T>(promise: Promise<T>): Promise<T> {
+function enqueueSerializedSheetOperation<T>(key: string, operation: () => Promise<T>): Promise<T> {
+  const previous = activeWriteTails.get(key) || Promise.resolve();
+  const promise = previous.then(operation, operation);
+  const tail = promise.then(() => undefined, () => undefined);
+  activeWriteTails.set(key, tail);
+  void tail.finally(() => {
+    if (activeWriteTails.get(key) === tail) activeWriteTails.delete(key);
+  });
+  return promise;
+}
+
+function trackActivePromise<T>(promise: Promise<T>): Promise<T> {
   activeWritePromises.add(promise);
   return promise.finally(() => {
     activeWritePromises.delete(promise);
   });
+}
+
+export function runSerializedSheetMutation<T>(sheetName: string, operation: () => Promise<T>): Promise<T> {
+  const key = `${getActiveUserCacheScope()}::${String(sheetName || 'default')}`;
+  return trackActivePromise(enqueueSerializedSheetOperation(key, operation));
+}
+
+function trackActiveWrite<T>(sheetName: string, operation: () => Promise<T>): Promise<T> {
+  const key = `${getActiveUserCacheScope()}::${String(sheetName || 'default')}`;
+  return trackActivePromise(enqueueSerializedSheetOperation(key, operation));
 }
 
 type SheetRow = Record<string, unknown>;
@@ -894,14 +916,21 @@ export const sheetsData = {
       rowData: payload,
     });
 
-    return trackActiveWrite(
-      (async () => {
+    return trackActiveWrite(effectiveSheetName, async () => {
         try {
           const res = await sheetsApi.addRow(effectiveSheetName, payload, mutationId);
           // If the user deleted this row while addRow was in flight, immediately clean it up on the server
           // and never re-insert it into the local cache.
           if (isRecordTombstoned(tempId)) {
-            void sheetsApi.deleteRow(res.data?.sheet || effectiveSheetName, res.data?.rowIndex, tempId).catch(() => {});
+            const cleanup = await sheetsApi.deleteRow(
+              res.data?.sheet || effectiveSheetName,
+              res.data?.rowIndex,
+              tempId,
+              `mut_del_cleanup_${tempId}_${Date.now()}`
+            );
+            if (!cleanup.success || cleanup.data?.verified === false) {
+              throw new Error(cleanup.message || 'Could not remove a row deleted while its add was in flight.');
+            }
             removePendingMutation(pendingMutation.id);
             return { success: true, id: tempId, pending: false };
           }
@@ -923,7 +952,15 @@ export const sheetsData = {
           // If the user already deleted this row while addRow was in flight, do not queue a stale add!
           if (isRecordTombstoned(tempId)) {
             removePendingMutation(pendingMutation.id);
-            return { success: true, id: tempId, pending: false };
+            if (!getPendingMutations().some((item) => item.type === 'delete' && item.rowId === tempId)) {
+              enqueuePendingMutation({
+                mutationId: `mut_del_cleanup_${tempId}_${Date.now()}`,
+                type: 'delete',
+                sheetName: effectiveSheetName,
+                rowId: tempId,
+              });
+            }
+            return { success: true, id: tempId, pending: true };
           }
           console.warn(`[SheetsData] Add row failed, enqueuing to offline queue:`, err);
           markPendingMutationFailed(pendingMutation.id, err instanceof Error ? err.message : String(err));
@@ -932,8 +969,7 @@ export const sheetsData = {
           });
           return { success: true, id: tempId, pending: true };
         }
-      })()
-    );
+    });
   },
 
   /**
@@ -959,8 +995,7 @@ export const sheetsData = {
       rowData,
     });
 
-    return trackActiveWrite(
-      (async () => {
+    return trackActiveWrite(sheetName, async () => {
         try {
           const res = await sheetsApi.updateRow(sheetName, rowIndex, rowData, mutationId);
           if (res.data?.conflictDetected) {
@@ -1041,8 +1076,7 @@ export const sheetsData = {
           });
           return { success: true, pending: true };
         }
-      })()
-    );
+    });
   },
 
   /**
@@ -1053,16 +1087,21 @@ export const sheetsData = {
     const pendingForId = id
       ? getPendingMutations().filter((m) => (m.type === 'add' || m.type === 'update') && m.rowId === id)
       : [];
-    const pendingAddItems = pendingForId.filter((m) => m.type === 'add');
     for (const pendingItem of pendingForId) {
       removePendingMutation(pendingItem.id);
     }
 
     // Immediately record tombstone and remove from local SWR cache in 0ms
     this.optimisticDeleteRow(sheetName, rowIndex, id);
+    const pendingMutation = enqueuePendingMutation({
+      mutationId,
+      type: 'delete',
+      sheetName,
+      rowIndex,
+      rowId: id,
+    });
 
-    return trackActiveWrite(
-      (async () => {
+    return trackActiveWrite(sheetName, async () => {
         try {
           const res = await sheetsApi.deleteRow(sheetName, rowIndex, id, mutationId);
           const msg = String(res.message || '');
@@ -1073,29 +1112,19 @@ export const sheetsData = {
             msg.includes('Invalid row index');
           const isVerified = (res.success && res.data?.verified !== false) || isAlreadyAbsent;
           if (isVerified) {
+            removePendingMutation(pendingMutation.id);
             return { success: true, pending: false };
           }
           throw new Error(res.message || 'Google Sheets deleteRow was not verified on read-back');
         } catch (err) {
-          // If the row only existed in the local pending add queue and never reached the server, no delete needs to be queued.
-          if (pendingAddItems.length > 0) {
-            return { success: true, pending: false };
-          }
           console.warn(`[SheetsData] Delete row failed, enqueuing to offline queue:`, err);
-          enqueuePendingMutation({
-            mutationId,
-            type: 'delete',
-            sheetName,
-            rowIndex,
-            rowId: id,
-          });
+          markPendingMutationFailed(pendingMutation.id, err instanceof Error ? err.message : String(err));
           toast.info('Deleted offline. Will sync to Google Sheets when connected.', {
             duration: 4000,
           });
           return { success: true, pending: true };
         }
-      })()
-    );
+    });
   },
 
   /**

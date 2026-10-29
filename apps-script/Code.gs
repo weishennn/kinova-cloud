@@ -1278,6 +1278,10 @@ function deleteRow(sheetName, rowIndex, id, mutationId) {
 
     // Row with this ID is already absent (e.g. retried delete after timeout). Ensure tombstone exists and return verified idempotent success!
     recordTombstone(targetId, sheetName || 'Transactions', mutationId);
+    if (sheetName === 'Trades') {
+      syncPortfolioFromTrades();
+      syncAllSheets();
+    }
     const idempResult = {
       deleted: true,
       verified: true,
@@ -2125,13 +2129,14 @@ function syncPortfolioFromTrades() {
   const portfolioSheet = getSheet('Portfolio');
   if (!tradeSheet || !portfolioSheet) return;
 
-  // Never fabricate trade history from current Portfolio holdings. Preserve
-  // the existing Portfolio until actual trade rows are available.
-  if (tradeSheet.getLastRow() <= 1) return;
-
   const rows = tradeSheet.getLastRow() > 1
     ? tradeSheet.getRange(2, 1, tradeSheet.getLastRow() - 1, 11).getValues()
     : [];
+  rows.sort((a, b) => {
+    const timeA = a[1] instanceof Date ? a[1].getTime() : Date.parse(String(a[1] || ''));
+    const timeB = b[1] instanceof Date ? b[1].getTime() : Date.parse(String(b[1] || ''));
+    return (Number.isFinite(timeA) ? timeA : 0) - (Number.isFinite(timeB) ? timeB : 0);
+  });
   const holdings = {};
 
   rows.forEach(row => {
@@ -2313,8 +2318,8 @@ function batchSyncTrades(incomingTrades) {
 
 /**
  * Incremental Moomoo upsert. Reads only the ID and Notes columns to locate
- * matching orders, appends new orders, and updates Portfolio from the small
- * trade delta instead of rewriting the full Trades history.
+ * matching orders, then rebuilds derived Portfolio state from Trades so a
+ * retry can recover if an earlier request partially completed.
  */
 function syncMoomooTrades(incomingTrades) {
   const tradeSheet = getSheet('Trades');
@@ -2349,11 +2354,10 @@ function syncMoomooTrades(incomingTrades) {
 
   let addedCount = 0;
   let updatedCount = 0;
-  let needsPortfolioRebuild = false;
   const newRows = [];
   const changes = [];
   const removedIds = [];
-  const deltaTrades = [];
+  const seenIncoming = new Set();
 
   (incomingTrades || []).forEach(trade => {
     const ticker = String(trade.Ticker || trade.ticker || '').trim().toUpperCase();
@@ -2369,6 +2373,12 @@ function syncMoomooTrades(incomingTrades) {
     const orderMatch = notes.match(/\bOrder:\s*([^;\s)]+)/i);
     const accountMatch = notes.match(/\bAccount:\s*([^;\s)]+)/i);
     if (!tradeId || !ticker || !date || qty <= 0 || price <= 0) return;
+
+    const incomingIdentity = orderMatch && accountMatch
+      ? `order:${accountMatch[1]}:${orderMatch[1]}`
+      : `id:${tradeId}`;
+    if (seenIncoming.has(incomingIdentity)) return;
+    seenIncoming.add(incomingIdentity);
 
     const rowIndex = rowById[tradeId] ||
       (orderMatch && accountMatch ? rowByAccountOrder[`${accountMatch[1]}:${orderMatch[1]}`] : 0) ||
@@ -2406,11 +2416,9 @@ function syncMoomooTrades(incomingTrades) {
         tradeSheet.getRange(rowIndex, 1, 1, 11).setValues([rowValues]);
         if (oldId && oldId !== tradeId) removedIds.push(oldId);
         updatedCount++;
-        needsPortfolioRebuild = true;
       }
     } else {
       newRows.push(rowValues);
-      deltaTrades.push(normalizedTrade);
       rowById[tradeId] = lastRow + newRows.length;
       addedCount++;
     }
@@ -2421,11 +2429,9 @@ function syncMoomooTrades(incomingTrades) {
     tradeSheet.getRange(appendAt, 1, newRows.length, 11).setValues(newRows);
   }
 
-  if (needsPortfolioRebuild) {
-    syncPortfolioFromTrades();
-  } else if (deltaTrades.length > 0) {
-    applyPortfolioTradeDeltas(deltaTrades);
-  }
+  // Trades are authoritative. A full portfolio rebuild makes retries safe if a
+  // previous write saved Trades but failed partway through updating Portfolio.
+  syncPortfolioFromTrades();
   SpreadsheetApp.flush();
 
   return { added: addedCount, updated: updatedCount, changes, removedIds };

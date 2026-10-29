@@ -145,6 +145,15 @@ async function syncTradesToLedger(
   };
 }
 
+async function rebuildPortfolio(session: GoogleUserSession): Promise<void> {
+  if (session.isAdmin && getAdminAppsScriptEndpoint()) {
+    const response = await fetchAdminAppsScript('POST', 'syncPortfolio') as JsonRecord | null;
+    if (!response?.success) throw new Error(response?.message || 'Could not rebuild Portfolio from trade history.');
+    return;
+  }
+  await executeUserGoogleAction(session, 'syncPortfolio', {});
+}
+
 async function getSettings(session: GoogleUserSession): Promise<Record<string, unknown>> {
   if (session.isAdmin && getAdminAppsScriptEndpoint()) {
     const response = await fetchAdminAppsScript('GET', 'getSettings') as JsonRecord | null;
@@ -432,6 +441,7 @@ export async function POST(req: NextRequest) {
     const ledgerResult = tradesToSync.length > 0
       ? await syncTradesToLedger(session, tradesToSync)
       : { added: 0, updated: 0, rows: rawExistingRows, changes: [], removedIds: [] };
+    if (tradesToSync.length === 0) await rebuildPortfolio(session);
 
     const monthCache = new Map<string, Array<Record<string, unknown>>>();
     let syncedDeposits = 0;

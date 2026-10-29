@@ -47,6 +47,23 @@ export const INVOICES_HEADERS = [
 
 export const DELETED_TOMBSTONE_HEADERS = ['Id', 'DeletedAt', 'SheetName', 'MutationId'];
 
+const userDriveMutationTails = new Map<string, Promise<void>>();
+
+async function withUserDriveMutationLock<T>(spreadsheetId: string, operation: () => Promise<T>): Promise<T> {
+  const previous = userDriveMutationTails.get(spreadsheetId) || Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const tail = previous.then(() => gate);
+  userDriveMutationTails.set(spreadsheetId, tail);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (userDriveMutationTails.get(spreadsheetId) === tail) userDriveMutationTails.delete(spreadsheetId);
+  }
+}
+
 function getCurrentYearMonth(): string {
   const now = new Date();
   const y = now.getFullYear();
@@ -1062,9 +1079,8 @@ async function syncPortfolioFromTradesUser(
 
   const tradeValues = await readSheetValues(spreadsheetId, accessToken, tradesSheetTitle);
 
-  // Portfolio holdings are never converted into fabricated trade history.
-  // Preserve an existing Portfolio until real Trades rows are available.
-  if (tradeValues.length <= 1) return;
+  // Portfolio is derived data: rebuild it even when the trade ledger is empty,
+  // otherwise deleting the final trade leaves a stale holding behind.
 
   const holdings: Record<
     string,
@@ -1072,6 +1088,7 @@ async function syncPortfolioFromTradesUser(
   > = {};
 
   const headerRow = (tradeValues[0] || []).map((h) => String(h || '').trim().toLowerCase());
+  const dateIdx = headerRow.indexOf('date');
   const actionIdx = headerRow.indexOf('action');
   const tickerIdx = headerRow.indexOf('ticker');
   const nameIdx = headerRow.findIndex((h) => h.includes('asset') || h.includes('name'));
@@ -1086,8 +1103,12 @@ async function syncPortfolioFromTradesUser(
     return r[i];
   };
 
-  for (let i = 1; i < tradeValues.length; i++) {
-    const row = tradeValues[i] || [];
+  const tradeTimestamp = (row: unknown[]) => {
+    const parsed = Date.parse(String(getCol(row, dateIdx, 1) || ''));
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const orderedTradeRows = tradeValues.slice(1).sort((a, b) => tradeTimestamp(a || []) - tradeTimestamp(b || []));
+  for (const row of orderedTradeRows) {
     const action = String(getCol(row, actionIdx, 2) || 'BUY').toUpperCase();
     const ticker = String(getCol(row, tickerIdx, 3) || '').trim().toUpperCase();
     const name = String(getCol(row, nameIdx, 4) || ticker);
@@ -1137,16 +1158,17 @@ async function syncPortfolioFromTradesUser(
   });
 
   // Clear Portfolio and rewrite
-  await googleApiFetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'Portfolio'!A1:K200`)}:clear`,
+  const clearRes = await googleApiFetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'Portfolio'!A:K`)}:clear`,
     accessToken,
     { method: 'POST', body: JSON.stringify({}) }
   );
+  await ensureGoogleApiSuccess(clearRes, 'Portfolio clear');
 
   const portEndCol = columnIndexToLetter(PORTFOLIO_HEADERS.length - 1);
   const portPutRange = `'Portfolio'!A1:${portEndCol}${rows.length}`;
 
-  await googleApiFetch(
+  const writeRes = await googleApiFetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(portPutRange)}?valueInputOption=USER_ENTERED`,
     accessToken,
     {
@@ -1158,6 +1180,7 @@ async function syncPortfolioFromTradesUser(
       }),
     }
   );
+  await ensureGoogleApiSuccess(writeRes, 'Portfolio rebuild');
 }
 
 /** Reads Trades from Google Sheets without synthesizing history from holdings. */
@@ -1343,97 +1366,6 @@ function normalizedTradeNetTotal(trade: Record<string, unknown>, action: string,
   return Number.isFinite(provided) ? provided : Number((quantity * price + (action === 'SELL' ? -fees : fees)).toFixed(2));
 }
 
-async function applyPortfolioTradeDeltasUser(
-  spreadsheetId: string,
-  accessToken: string,
-  meta: SpreadsheetMetadata,
-  trades: Array<Record<string, unknown>>
-): Promise<void> {
-  if (trades.length === 0) return;
-  await ensureSheetExists(spreadsheetId, accessToken, meta, 'Portfolio');
-  const values = await readSheetRange(spreadsheetId, accessToken, "'Portfolio'!A1:F200");
-  const holdings: Record<string, { ticker: string; name: string; type: string; currency: string; units: number; cost: number }> = {};
-
-  for (const row of values.slice(1)) {
-    const ticker = String(row[0] || '').trim().toUpperCase();
-    const units = Number(row[4]) || 0;
-    const avgCost = Number(row[5]) || 0;
-    if (!ticker || units <= 0) continue;
-    if (!holdings[ticker]) {
-      holdings[ticker] = {
-        ticker,
-        name: String(row[1] || ticker),
-        type: String(row[2] || 'Stock'),
-        currency: String(row[3] || 'USD'),
-        units: 0,
-        cost: 0,
-      };
-    }
-    holdings[ticker].units += units;
-    holdings[ticker].cost += units * avgCost;
-  }
-
-  for (const trade of trades) {
-    const ticker = String(trade.Ticker || trade.ticker || '').trim().toUpperCase();
-    const action = String(trade.Action || trade.action || 'BUY').toUpperCase();
-    const quantity = Number(trade.Quantity || trade.quantity) || 0;
-    const price = Number(trade.Price || trade.price) || 0;
-    const fees = Math.abs(Number(trade.Fees || trade.fees) || 0);
-    if (!ticker || quantity <= 0) continue;
-    if (!holdings[ticker]) {
-      holdings[ticker] = {
-        ticker,
-        name: String(trade['Asset Name'] || trade.AssetName || trade.name || ticker),
-        type: String(trade.Type || trade.type || 'Stock'),
-        currency: String(trade.Currency || trade.currency || 'USD').toUpperCase(),
-        units: 0,
-        cost: 0,
-      };
-    }
-    const holding = holdings[ticker];
-    if (action === 'BUY' || action === 'REINVEST') {
-      holding.units += quantity;
-      holding.cost += quantity * price + fees;
-    } else if (action === 'SELL') {
-      const averageCost = holding.units > 0 ? holding.cost / holding.units : 0;
-      holding.units = Math.max(0, holding.units - quantity);
-      holding.cost = Math.max(0, holding.cost - quantity * averageCost);
-    }
-  }
-
-  const rows: Array<Array<string | number>> = [PORTFOLIO_HEADERS];
-  for (const holding of Object.values(holdings).filter((item) => item.units > 0)) {
-    const row = rows.length + 1;
-    rows.push([
-      holding.ticker,
-      holding.name,
-      holding.type,
-      holding.currency,
-      holding.units,
-      holding.cost / holding.units,
-      `=IF(E${row}>0, E${row}*F${row}, "")`,
-      `=IF(ISBLANK(A${row}), "", IFERROR(GOOGLEFINANCE(A${row}, "price"), IFERROR(GOOGLEFINANCE("NASDAQ:" & A${row}, "price"), IFERROR(GOOGLEFINANCE("NYSE:" & A${row}, "price"), F${row}))))`,
-      `=IF(AND(E${row}>0, H${row}>0), E${row}*H${row}, "")`,
-      `=IF(AND(G${row}>0, I${row}>0), I${row}-G${row}, "")`,
-      `=IF(AND(G${row}>0, I${row}>0), (I${row}-G${row})/G${row}, "")`,
-    ]);
-  }
-
-  const clearRes = await googleApiFetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent("'Portfolio'!A1:K200")}:clear`,
-    accessToken,
-    { method: 'POST', body: JSON.stringify({}) }
-  );
-  if (!clearRes.ok) throw new Error('Could not update the Portfolio sheet.');
-  const range = `'Portfolio'!A1:K${rows.length}`;
-  const writeRes = await googleApiFetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`,
-    accessToken,
-    { method: 'PUT', body: JSON.stringify({ values: rows }) }
-  );
-  if (!writeRes.ok) throw new Error('Could not update the Portfolio sheet.');
-}
-
 async function syncMoomooTradesUser(
   spreadsheetId: string,
   accessToken: string,
@@ -1469,7 +1401,7 @@ async function syncMoomooTradesUser(
     .map((row) => String(row[0] || '').trim())
     .filter(Boolean));
 
-  const prepared = incomingTrades.map((trade) => {
+  const preparedCandidates = incomingTrades.map((trade) => {
     const ticker = String(trade.Ticker || trade.ticker || '').trim().toUpperCase();
     const date = String(trade.Date || trade.date || '').trim();
     const action = String(trade.Action || trade.action || 'BUY').toUpperCase();
@@ -1502,12 +1434,21 @@ async function syncMoomooTradesUser(
     return {
       id,
       orderId,
+      accountId,
       rowNumber,
       wasDeleted,
       normalized,
       rowValues: [id, date, action, ticker, assetName, quantity, price, fees, netTotal, currency, notes],
     };
   }).filter((trade) => trade.id && trade.normalized.Ticker && trade.normalized.Date && trade.normalized.Quantity > 0 && trade.normalized.Price > 0 && !trade.wasDeleted);
+  const preparedByIdentity = new Map<string, (typeof preparedCandidates)[number]>();
+  for (const trade of preparedCandidates) {
+    const identity = trade.accountId && trade.orderId
+      ? `order:${trade.accountId}:${trade.orderId}`
+      : `id:${trade.id}`;
+    preparedByIdentity.set(identity, trade);
+  }
+  const prepared = [...preparedByIdentity.values()];
 
   const existingRows = await Promise.all(prepared
     .filter((trade) => trade.rowNumber > 0)
@@ -1557,11 +1498,9 @@ async function syncMoomooTradesUser(
     if (!response.ok) throw new Error('Could not append Moomoo trades to Google Sheets.');
   }
 
-  if (updatedCount > 0) {
-    await syncPortfolioFromTradesUser(spreadsheetId, accessToken, meta);
-  } else if (additions.length > 0) {
-    await applyPortfolioTradeDeltasUser(spreadsheetId, accessToken, meta, additions.map((trade) => trade.normalized));
-  }
+  // Trades are authoritative. Rebuild after every upsert, including no-op
+  // retries, so a partial previous write cannot leave Portfolio out of sync.
+  await syncPortfolioFromTradesUser(spreadsheetId, accessToken, meta);
 
   return { added: additions.length, updated: updatedCount, changes, removedIds };
 }
@@ -1775,6 +1714,7 @@ export async function executeUserGoogleAction(
     }
 
     case 'addRow': {
+      return withUserDriveMutationLock(spreadsheetId, async () => {
       const rawSheetName = String(params.sheetName || '');
       const rowData = (params.rowData || {}) as Record<string, unknown>;
       let targetSheetName = rawSheetName;
@@ -1881,16 +1821,6 @@ export async function executeUserGoogleAction(
         return '';
       });
 
-      // Compute the exact next contiguous row to prevent 1000-row empty gaps created by Google Sheets defaults
-      let lastDataRow = 0;
-      for (let i = 0; i < values.length; i++) {
-        const row = values[i];
-        if (row && row.some((c) => c !== undefined && c !== null && String(c).trim() !== '')) {
-          lastDataRow = i + 1;
-        }
-      }
-      const targetRowIndex = lastDataRow > 0 ? lastDataRow + 1 : (hasValidHeader ? 2 : 1);
-
       if (!hasValidHeader) {
         const rowsToWrite = values.length > 0 ? [headers, ...values, newRow] : [headers, newRow];
         const initPutRes = await googleApiFetch(
@@ -1917,29 +1847,30 @@ export async function executeUserGoogleAction(
         });
       }
 
-      // Write directly to contiguous targetRowIndex with PUT
-      const putRes = await googleApiFetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${targetSheetName}'!A${targetRowIndex}`)}?valueInputOption=USER_ENTERED`,
+      // Append is atomic at the Sheets API. Computing a row number from a read
+      // and then PUTting to it lets two fast writes overwrite each other.
+      const appendRes = await googleApiFetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${targetSheetName}'!A:Z`)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
         accessToken,
         {
-          method: 'PUT',
-          body: JSON.stringify({ values: [newRow] }),
+          method: 'POST',
+          body: JSON.stringify({ values: [newRow], majorDimension: 'ROWS' }),
         }
       );
+      await ensureGoogleApiSuccess(appendRes, 'append row');
+      const appendData = await appendRes.json() as { updates?: { updatedRange?: string } };
+      const updatedRange = String(appendData.updates?.updatedRange || '');
+      const rowIndex = Number(updatedRange.match(/![A-Z]+(\d+):/i)?.[1] || 0);
+      if (!rowIndex) throw new Error('Google Sheets appended the row without returning its row number.');
 
-      if (!putRes.ok) {
-        // Fallback to append if PUT failed
-        const appendRes = await googleApiFetch(
-          `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${targetSheetName}'!A1`)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+      if (idIndex >= 0 && requestedId) {
+        const verifyValues = await readSheetRange(
+          spreadsheetId,
           accessToken,
-          {
-            method: 'POST',
-            body: JSON.stringify({ values: [newRow] }),
-          }
+          `'${targetSheetName}'!A${rowIndex}:A${rowIndex}`
         );
-        if (!appendRes.ok) {
-          const errText = await appendRes.text();
-          throw new Error(`Google Sheets append failed: ${errText}`);
+        if (String(verifyValues[0]?.[0] || '').trim() !== requestedId) {
+          throw new Error(`Google Sheets append verification failed for ${requestedId}.`);
         }
       }
 
@@ -1947,11 +1878,12 @@ export async function executeUserGoogleAction(
         added: true,
         verified: true,
         verifiedId: requestedId,
-        rowIndex: targetRowIndex,
+        rowIndex,
         sheet: targetSheetName,
         sheetName: targetSheetName,
         id: requestedId,
         updatedAt: new Date().toISOString(),
+      });
       });
     }
 
@@ -2141,6 +2073,7 @@ export async function executeUserGoogleAction(
     }
 
     case 'deleteRow': {
+      return withUserDriveMutationLock(spreadsheetId, async () => {
       const rawSheetName = String(params.sheetName || '');
       const rowIndex = Number(params.rowIndex) || 0;
       const targetId = params.id !== undefined && params.id !== null ? String(params.id).trim() : '';
@@ -2167,14 +2100,12 @@ export async function executeUserGoogleAction(
           for (let i = 1; i < values.length; i++) {
             const r = values[i] || [];
             const colId = idCol >= 0 ? String(r[idCol] ?? '').trim() : String(r[0] ?? '').trim();
-            const anyColMatch = r.some((c) => String(c ?? '').trim() === targetId);
-
-            if (colId === targetId || anyColMatch) {
+            if (colId === targetId) {
               const matchedRow = i + 1;
               await recordDeletedTombstone(spreadsheetId, accessToken, meta, targetId, sName, mutationId);
               const sheetMeta = meta.sheets.find((s) => s.properties.title === sName);
-              if (sheetMeta) {
-                await googleApiFetch(
+              if (!sheetMeta) throw new Error(`Could not locate the ${sName} sheet to delete the trade.`);
+              const deleteResponse = await googleApiFetch(
                   `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`,
                   accessToken,
                   {
@@ -2195,7 +2126,14 @@ export async function executeUserGoogleAction(
                     }),
                   }
                 );
-              }
+              await ensureGoogleApiSuccess(deleteResponse, 'row delete');
+              const verifiedValues = await readSheetValues(spreadsheetId, accessToken, sName);
+              const verifiedHeaders = (verifiedValues[0] || []).map((header) => String(header || '').trim().toLowerCase());
+              const verifiedIdCol = verifiedHeaders.indexOf('id');
+              const idStillExists = verifiedValues.slice(1).some((row) =>
+                String(row[verifiedIdCol >= 0 ? verifiedIdCol : 0] ?? '').trim() === targetId
+              );
+              if (idStillExists) throw new Error(`Delete verification failed: ${targetId} is still present in ${sName}.`);
               if (sName === 'Trades') {
                 await syncPortfolioFromTradesUser(spreadsheetId, accessToken, meta);
               }
@@ -2213,11 +2151,12 @@ export async function executeUserGoogleAction(
         }
       }
 
-      // If targetId was not matched, but rawSheetName and rowIndex > 1 are provided, delete by rowIndex
-      if (rawSheetName && rowIndex > 1) {
+      // Row numbers can shift while another write is in flight. Only use them
+      // when the caller did not provide a stable record ID.
+      if (!targetId && rawSheetName && rowIndex > 1) {
         const sheetMeta = meta.sheets.find((s) => s.properties.title === rawSheetName);
         if (sheetMeta) {
-          await googleApiFetch(
+          const deleteResponse = await googleApiFetch(
             `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`,
             accessToken,
             {
@@ -2238,6 +2177,7 @@ export async function executeUserGoogleAction(
               }),
             }
           );
+          await ensureGoogleApiSuccess(deleteResponse, 'row delete');
           if (rawSheetName === 'Trades') {
             await syncPortfolioFromTradesUser(spreadsheetId, accessToken, meta);
           }
@@ -2270,6 +2210,7 @@ export async function executeUserGoogleAction(
       }
 
       return wrap({ deleted: false, verified: false, message: 'Record not found for deletion' });
+      });
     }
 
     case 'batchSyncTrades': {
@@ -2280,7 +2221,9 @@ export async function executeUserGoogleAction(
 
     case 'syncMoomooTrades': {
       const trades = Array.isArray(params.trades) ? (params.trades as Record<string, unknown>[]) : [];
-      return wrap(await syncMoomooTradesUser(spreadsheetId, accessToken, meta, trades));
+      return withUserDriveMutationLock(spreadsheetId, async () =>
+        wrap(await syncMoomooTradesUser(spreadsheetId, accessToken, meta, trades))
+      );
     }
 
     case 'addTrade': {
@@ -2346,8 +2289,10 @@ export async function executeUserGoogleAction(
     }
 
     case 'syncPortfolio': {
-      await syncPortfolioFromTradesUser(spreadsheetId, accessToken, meta);
-      return wrap({ synced: true, sheet: 'Portfolio' });
+      return withUserDriveMutationLock(spreadsheetId, async () => {
+        await syncPortfolioFromTradesUser(spreadsheetId, accessToken, meta);
+        return wrap({ synced: true, sheet: 'Portfolio' });
+      });
     }
 
     case 'sanitizeCategories': {

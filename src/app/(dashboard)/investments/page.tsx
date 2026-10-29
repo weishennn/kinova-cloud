@@ -11,6 +11,7 @@ import dynamic from 'next/dynamic';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePortfolio, useTrades, useAddTrade, useUpdateRow, useDeleteRow } from '@/hooks/useSheets';
 import { clearAllSwrCache, setSwrCachedData } from '@/lib/sheets-api';
+import { runSerializedSheetMutation } from '@/lib/sheets-data';
 import { 
   convertCurrency, 
   formatAssetCurrency, 
@@ -315,7 +316,9 @@ export default function InvestmentsPage() {
   const handleSyncMoomoo = async () => {
     setIsSyncingMoomoo(true);
     try {
-      const res = await fetch('/api/moomoo/sync', { method: 'POST' });
+      const res = await runSerializedSheetMutation('Trades', () =>
+        fetch('/api/moomoo/sync', { method: 'POST' })
+      );
       const data = await res.json();
       if (!res.ok || !data.success) {
         toast.error(data.error || 'Failed to sync with Moomoo API');
@@ -832,7 +835,7 @@ export default function InvestmentsPage() {
     if (!ok) return;
 
     try {
-      await deleteTradeMutation.mutateAsync({ sheetName: 'Trades', id: trade.id, rowIndex: trade.rowIndex });
+      const deleteResult = await deleteTradeMutation.mutateAsync({ sheetName: 'Trades', id: trade.id, rowIndex: trade.rowIndex });
       clearAllSwrCache();
 
       if (typeof window !== 'undefined') {
@@ -868,7 +871,11 @@ export default function InvestmentsPage() {
         queryClient.invalidateQueries({ queryKey: ['portfolio'] }),
         queryClient.refetchQueries({ queryKey: ['portfolio'] }),
       ]);
-      toast.success('Trade deleted and holdings recalculated');
+      if (deleteResult.pending) {
+        toast.info('Trade deletion is queued and will finish syncing when Drive is available.');
+      } else {
+        toast.success('Trade deleted and holdings recalculated');
+      }
     } catch (error: any) {
       console.error(error);
       toast.error('Failed to delete trade: ' + (error?.message || 'Unknown error'));
