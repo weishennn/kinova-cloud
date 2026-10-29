@@ -107,15 +107,23 @@ async function getExistingTrades(session: GoogleUserSession): Promise<Array<Reco
 
 async function syncTradesToLedger(
   session: GoogleUserSession,
-  trades: Array<Record<string, unknown>>,
-  fullSync: boolean
+  trades: Array<Record<string, unknown>>
 ): Promise<{ added: number; updated: number; rows?: Array<Record<string, unknown>>; changes: Array<Record<string, unknown>>; removedIds: string[] }> {
-  const action = fullSync ? 'batchSyncTrades' : 'syncMoomooTrades';
+  // The deployed Apps Script may lag the repository and not recognize
+  // batchSyncTrades. Moomoo's purpose-built upsert supports both first and
+  // incremental imports, while the full sheet is read immediately afterward.
+  const action = 'syncMoomooTrades';
   if (session.isAdmin && getAdminAppsScriptEndpoint()) {
     const response = await fetchAdminAppsScript('POST', action, { trades }) as JsonRecord | null;
-    if (!response?.success) throw new Error(response?.message || 'Could not write Moomoo trades to Google Sheets.');
+    if (!response?.success) {
+      const message = response?.message || 'Could not write Moomoo trades to Google Sheets.';
+      if (/unknown action/i.test(message)) {
+        throw new Error('The deployed Google Apps Script does not recognize syncMoomooTrades. Deploy the latest apps-script/Code.gs and retry.');
+      }
+      throw new Error(message);
+    }
     const data = response.data?.result || response.data;
-    if (!data || (fullSync && !Array.isArray(data.rows))) throw new Error('Google Sheets did not confirm the Moomoo trade write.');
+    if (!data) throw new Error('Google Sheets did not confirm the Moomoo trade write.');
     return {
       added: Number(data.added) || 0,
       updated: Number(data.updated) || 0,
@@ -127,7 +135,7 @@ async function syncTradesToLedger(
 
   const { result } = await executeUserGoogleAction(session, action, { trades });
   const data = result as JsonRecord;
-  if (!data || (fullSync && !Array.isArray(data.rows))) throw new Error('Google Sheets did not confirm the Moomoo trade write.');
+  if (!data) throw new Error('Google Sheets did not confirm the Moomoo trade write.');
   return {
     added: Number(data.added) || 0,
     updated: Number(data.updated) || 0,
@@ -422,7 +430,7 @@ export async function POST(req: NextRequest) {
       );
     }
     const ledgerResult = tradesToSync.length > 0
-      ? await syncTradesToLedger(session, tradesToSync, fullSync)
+      ? await syncTradesToLedger(session, tradesToSync)
       : { added: 0, updated: 0, rows: rawExistingRows, changes: [], removedIds: [] };
 
     const monthCache = new Map<string, Array<Record<string, unknown>>>();
@@ -456,10 +464,10 @@ export async function POST(req: NextRequest) {
         const rowData = {
           Id: depositId,
           Date: date,
-          Type: 'Income',
-          Category: 'Investment Deposit',
+          Type: 'Investment',
+          Category: 'Stocks & Crypto',
           SubCategory: 'Moomoo Deposit',
-          Description: 'Moomoo Bank Transfer Deposit',
+          Description: 'Moomoo Investment Account Deposit',
           Amount: amount,
           Currency: getString(log.currency || account.currency || 'MYR').toUpperCase(),
           Notes: `Auto-synced from Moomoo Cloud API (Account: ${account.accountId})`,

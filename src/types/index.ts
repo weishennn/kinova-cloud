@@ -9,7 +9,7 @@ export * from './tax';
 export interface Category {
   id: string;
   name: string;
-  type: 'Income' | 'Expense';
+  type: 'Income' | 'Expense' | 'Investment';
   icon: string;
   color: string;
   parentCategory?: string;

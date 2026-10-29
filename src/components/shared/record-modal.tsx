@@ -109,6 +109,7 @@ const CATEGORIES = {
     { name: 'EPF / KWSP', icon: '🏛️' },
     { name: 'Emergency Savings', icon: '🛡️' },
     { name: 'Other Savings', icon: '📦' },
+    { name: 'Stocks & Crypto', icon: '📈' },
   ]
 };
 

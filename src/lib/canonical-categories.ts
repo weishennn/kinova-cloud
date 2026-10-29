@@ -38,6 +38,7 @@ export const CANONICAL_INVESTMENT_CATEGORIES = [
   'EPF / KWSP',
   'Emergency Savings',
   'Other Savings',
+  'Stocks & Crypto',
 ] as const;
 
 export type CanonicalInvestmentCategory = (typeof CANONICAL_INVESTMENT_CATEGORIES)[number];

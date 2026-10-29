@@ -1,7 +1,7 @@
 /**
  * Transaction types
  */
-export type TransactionType = 'Income' | 'Expense';
+export type TransactionType = 'Income' | 'Expense' | 'Investment';
 
 export interface Transaction {
   id: string; // row index in sheet

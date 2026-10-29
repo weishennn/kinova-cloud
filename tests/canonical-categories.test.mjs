@@ -14,6 +14,8 @@ test('1. Canonical categories include Sport and Gift', () => {
   assert.ok(CANONICAL_EXPENSE_CATEGORIES.includes('Gift'), 'Gift must be in expense categories');
   assert.ok(CANONICAL_INCOME_CATEGORIES.includes('Gift & Bonus'));
   assert.ok(CANONICAL_INVESTMENT_CATEGORIES.includes('Emergency Savings'));
+  assert.ok(CANONICAL_INVESTMENT_CATEGORIES.includes('Stocks & Crypto'));
+  assert.equal(normalizeToCanonicalCategory('Stocks & Crypto', 'Investment'), 'Stocks & Crypto');
 });
 
 test('2. normalizeToCanonicalCategory maps Gemini hallucinations to valid categories', () => {

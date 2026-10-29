@@ -122,7 +122,7 @@ npm run build
 
 ### Moomoo Trade History
 
-- **Moomoo Sync** reads Moomoo's historical orders separately for each trading market enabled on the authorized account, then fetches the fee details for each executed order before writing trades to Google Sheets. If fees cannot be verified, it stops before writing the trades or deposits instead of recording a guessed zero fee.
+- **Moomoo Sync** reads Moomoo's historical orders separately for each trading market enabled on the authorized account, then fetches the fee details for each executed order before writing trades to Google Sheets. If fees cannot be verified, it stops before writing the trades or deposits instead of recording a guessed zero fee. Brokerage cash deposits are recorded as `Investment` (`Stocks & Crypto`), not income.
 - The first successful sync checks the available history. Later syncs use the saved per-account sync time with a 48-hour overlap to catch recent updates. The Investments page shows the last completed sync time. The corrected history request uses a new cursor version, so the next sync performs a one-time full backfill rather than trusting the cursor saved by the old request.
 - Set `MOOMOO_ACCOUNT_ID` only to the full `account_id` from `authorized_trd_accs`. A Universal Account card number (including its last four digits) and a Moomoo user ID are different values. If `MOOMOO_ACCOUNT_ID` is blank, all authorized trading accounts are synced.
 
