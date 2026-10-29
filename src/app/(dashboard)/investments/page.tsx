@@ -296,7 +296,21 @@ export default function InvestmentsPage() {
   const [editingTrade, setEditingTrade] = useState<null | (typeof trades[number])>(null);
   const [isScanningTrade, setIsScanningTrade] = useState(false);
   const [isSyncingMoomoo, setIsSyncingMoomoo] = useState(false);
+  const [lastMoomooSyncAt, setLastMoomooSyncAt] = useState<string | null>(null);
   const tradeFileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/moomoo/sync')
+      .then((res) => res.json())
+      .then((data) => {
+        if (active && data?.success && typeof data.lastSyncAt === 'string') {
+          setLastMoomooSyncAt(data.lastSyncAt);
+        }
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, []);
 
   const handleSyncMoomoo = async () => {
     setIsSyncingMoomoo(true);
@@ -308,46 +322,17 @@ export default function InvestmentsPage() {
         return;
       }
 
-      // Clear any local tombstone entries and pending delete mutations for trades
-      if (typeof window !== 'undefined') {
-        try {
-          const raw = localStorage.getItem('cashflow_deleted_tombstones');
-          if (raw) {
-            const tombstones = JSON.parse(raw);
-            let modified = false;
-            for (const key of Object.keys(tombstones)) {
-              if (key.startsWith('moo_') || tombstones[key]?.sheetName === 'Trades') {
-                delete tombstones[key];
-                modified = true;
-              }
-            }
-            if (modified) {
-              localStorage.setItem('cashflow_deleted_tombstones', JSON.stringify(tombstones));
-            }
-          }
-          const rawMut = localStorage.getItem('cashflow_pending_mutations');
-          if (rawMut) {
-            const muts = JSON.parse(rawMut);
-            if (Array.isArray(muts)) {
-              const cleaned = muts.filter((m: any) => m.sheetName !== 'Trades' && !String(m.rowId || '').startsWith('moo_'));
-              localStorage.setItem('cashflow_pending_mutations', JSON.stringify(cleaned));
-            }
-          }
-        } catch {
-          // ignore
-        }
-      }
-
       const tradeHeaders = [
         'Id', 'Date', 'Action', 'Ticker', 'Asset Name',
         'Quantity', 'Price', 'Fees', 'Net Total', 'Currency', 'Notes'
       ];
 
-      // Immediately seed cache with the freshly returned trades for 0ms instant display
-      if (Array.isArray(data.trades) && data.trades.length > 0) {
+      // Full sync returns the complete sheet; light sync returns only changed orders.
+      if (Array.isArray(data.trades)) {
+        const completeRows = data.trades as Array<Record<string, unknown>>;
         if (typeof window !== 'undefined') {
           try {
-            localStorage.setItem('cashflow_persistent_trades', JSON.stringify(data.trades));
+            localStorage.setItem('cashflow_persistent_trades', JSON.stringify(completeRows));
           } catch {
             // ignore
           }
@@ -356,19 +341,76 @@ export default function InvestmentsPage() {
           success: true,
           data: {
             headers: tradeHeaders,
-            rows: data.trades,
+            rows: completeRows,
           },
         });
         queryClient.setQueryData(['sheet', 'Trades', 'active'], {
           headers: tradeHeaders,
-          rows: data.trades,
+          rows: completeRows,
         });
+      } else if (Array.isArray(data.tradeChanges)) {
+        const getTradeRows = (value: unknown): Array<Record<string, unknown>> | null => {
+          if (Array.isArray(value)) {
+            return value.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === 'object');
+          }
+          if (value && typeof value === 'object' && 'rows' in value && Array.isArray(value.rows)) {
+            return value.rows.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === 'object');
+          }
+          return null;
+        };
+        let existingRows = getTradeRows(queryClient.getQueryData<unknown>(['sheet', 'Trades', 'active']));
+
+        if (!existingRows && typeof window !== 'undefined') {
+          try {
+            const stored = localStorage.getItem('cashflow_persistent_trades');
+            const parsed: unknown = stored ? JSON.parse(stored) : null;
+            existingRows = getTradeRows(parsed);
+          } catch {
+            // ignore corrupt cache and refetch the sheet below
+          }
+        }
+
+        if (existingRows && existingRows.length > 0) {
+          const removedIds = new Set<string>(Array.isArray(data.removedTradeIds) ? data.removedTradeIds.map(String) : []);
+          const mergedById = new Map<string, Record<string, unknown>>();
+          const rowsWithoutStableId: Array<Record<string, unknown>> = [];
+          for (const row of existingRows) {
+            const id = String(row?.Id || row?.id || '').trim();
+            if (id && !removedIds.has(id)) mergedById.set(id, row);
+            else if (!id) rowsWithoutStableId.push(row);
+          }
+          for (const row of data.tradeChanges as Array<Record<string, unknown>>) {
+            const id = String(row?.Id || row?.id || '').trim();
+            if (id) mergedById.set(id, row);
+          }
+          const mergedRows = [...mergedById.values(), ...rowsWithoutStableId];
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem('cashflow_persistent_trades', JSON.stringify(mergedRows));
+            } catch {
+              // ignore
+            }
+          }
+          setSwrCachedData('getSheetData', { sheetName: 'Trades' }, {
+            success: true,
+            data: { headers: tradeHeaders, rows: mergedRows },
+          });
+          queryClient.setQueryData(['sheet', 'Trades', 'active'], {
+            headers: tradeHeaders,
+            rows: mergedRows,
+          });
+        } else {
+          // A delta cannot safely stand in for full Trade History when no base cache exists.
+          await queryClient.invalidateQueries({ queryKey: ['sheet', 'Trades', 'active'] });
+          await queryClient.refetchQueries({ queryKey: ['sheet', 'Trades', 'active'] });
+        }
       }
 
-      if (Array.isArray(data.portfolio) && data.portfolio.length > 0) {
+      if (Array.isArray(data.portfolio)) {
         setSwrCachedData('getPortfolio', {}, data.portfolio);
         queryClient.setQueryData(['portfolio'], data.portfolio);
       }
+      if (typeof data.lastSyncAt === 'string') setLastMoomooSyncAt(data.lastSyncAt);
 
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['months'] }),
@@ -381,14 +423,18 @@ export default function InvestmentsPage() {
 
       const parts = [];
       if (data.syncedTrades > 0) parts.push(`${data.syncedTrades} new trade${data.syncedTrades > 1 ? 's' : ''}`);
+      if (data.updatedTrades > 0) parts.push(`${data.updatedTrades} corrected trade${data.updatedTrades > 1 ? 's' : ''}`);
       if (data.syncedDeposits > 0) parts.push(`${data.syncedDeposits} cash deposit${data.syncedDeposits > 1 ? 's' : ''}`);
 
       if (parts.length === 0) {
         toast.success(
-          `✨ Moomoo is fully up-to-date! Switched to Trade History (${data.trades?.length || trades.length} trades recorded).`
+          `Moomoo is up-to-date. ${data.mode === 'full' ? 'Full history checked' : 'Light sync checked recent activity'}. Switched to Trade History (${data.trades?.length ?? trades.length} trades recorded).`
         );
       } else {
-        toast.success(`✨ Synced from Moomoo: Added ${parts.join(' & ')}! Switched to Trade History.`);
+        toast.success(`Synced from Moomoo: ${parts.join(', ')}. Switched to Trade History.`);
+      }
+      if (data.feeDetailsUnavailable > 0) {
+        toast.warning(`${data.feeDetailsUnavailable} Moomoo order(s) had no fee details available; check their Notes in Trade History.`);
       }
     } catch {
       toast.error('Network error connecting to Moomoo sync API');
@@ -866,12 +912,13 @@ export default function InvestmentsPage() {
         description="Real-time stock & crypto tracker with automated Google Sheets formulas"
         action={(
           <div className="flex items-center gap-2">
+            <div className="flex flex-col items-end gap-0.5">
             <button
               type="button"
               disabled={isSyncingMoomoo}
               onClick={handleSyncMoomoo}
               className="min-h-[40px] px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 active:scale-[0.97] text-white text-xs font-semibold shadow-lg shadow-emerald-500/20 flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation disabled:opacity-50"
-              title="Sync live trades, itemized fees, and cash deposits directly from Moomoo Cloud API"
+              title="First sync imports the available history; later syncs check recent activity and update matching orders with Moomoo fee details."
             >
               {isSyncingMoomoo ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -880,6 +927,12 @@ export default function InvestmentsPage() {
               )}
               <span>{isSyncingMoomoo ? 'Syncing...' : 'Sync Moomoo'}</span>
             </button>
+            <span className="text-[10px] leading-tight text-slate-500 dark:text-zinc-400">
+              {lastMoomooSyncAt
+                ? `Last sync ${new Intl.DateTimeFormat('en-MY', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kuala_Lumpur' }).format(new Date(lastMoomooSyncAt))}`
+                : 'First sync imports history'}
+            </span>
+            </div>
             <button
               type="button"
               disabled={isScanningTrade}

@@ -742,6 +742,18 @@ async function readSheetValues(
   return Array.isArray(data.values) ? data.values : [];
 }
 
+async function readSheetRange(
+  spreadsheetId: string,
+  accessToken: string,
+  range: string
+): Promise<unknown[][]> {
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING`;
+  const response = await googleApiFetch(url, accessToken);
+  if (!response.ok) throw new Error(`Could not read Google Sheets range ${range}.`);
+  const data = await response.json();
+  return Array.isArray(data.values) ? data.values : [];
+}
+
 function parseValuesToRows(sheetName: string, values: unknown[][], fallbackHeaders: string[]) {
   if (!values || values.length === 0) {
     return { headers: fallbackHeaders, rows: [] as Record<string, unknown>[] };
@@ -1050,97 +1062,9 @@ async function syncPortfolioFromTradesUser(
 
   const tradeValues = await readSheetValues(spreadsheetId, accessToken, tradesSheetTitle);
 
-  // Self-Healing Guard: If Trades sheet has 0 data rows, check if Portfolio sheet already has holdings!
-  if (tradeValues.length <= 1) {
-    const portfolioValues = await readSheetValues(spreadsheetId, accessToken, 'Portfolio');
-    const existingPortfolioHoldings: Array<{
-      ticker: string;
-      name: string;
-      type: string;
-      currency: string;
-      units: number;
-      avgCost: number;
-    }> = [];
-
-    const pHeaders = (portfolioValues[0] || []).map((h) => String(h || '').trim().toLowerCase());
-    const tickerIdx = pHeaders.findIndex((h) => h === 'ticker' || h.includes('symbol') || h.includes('code'));
-    const unitsIdx = pHeaders.findIndex((h) => h.includes('unit') || h.includes('qty') || h.includes('quantity') || h.includes('held') || h.includes('share'));
-    const avgCostIdx = pHeaders.findIndex((h) => h.includes('avg') || h.includes('cost') || h.includes('price'));
-    const nameIdx = pHeaders.findIndex((h) => h.includes('name') || h.includes('asset'));
-    const currIdx = pHeaders.findIndex((h) => h.includes('curr'));
-
-    const tCol = tickerIdx >= 0 ? tickerIdx : 0;
-    const uCol = unitsIdx >= 0 ? unitsIdx : 4;
-    const cCol = avgCostIdx >= 0 ? avgCostIdx : 5;
-    const nCol = nameIdx >= 0 ? nameIdx : 1;
-    const currCol = currIdx >= 0 ? currIdx : 3;
-
-    for (let i = 1; i < portfolioValues.length; i++) {
-      const r = portfolioValues[i] || [];
-      const ticker = String(r[tCol] || '').trim().toUpperCase();
-      const rawUnits = String(r[uCol] || '0').replace(/[^0-9.-]/g, '');
-      const rawCost = String(r[cCol] || '0').replace(/[^0-9.-]/g, '');
-      const units = parseFloat(rawUnits) || 0;
-      const avgCost = parseFloat(rawCost) || 0;
-      if (ticker && units > 0) {
-        existingPortfolioHoldings.push({
-          ticker,
-          name: String(r[nCol] || ticker),
-          type: String(r[2] || 'Stock'),
-          currency: String(r[currCol] || 'USD'),
-          units,
-          avgCost,
-        });
-      }
-    }
-
-    if (existingPortfolioHoldings.length > 0) {
-      // Reconstruct trades from known Portfolio holdings and persist them to Trades sheet
-      const reconstructedTrades: Array<Array<string | number>> = [TRADES_HEADERS];
-      existingPortfolioHoldings.forEach((h) => {
-        const netTotal = parseFloat((h.units * h.avgCost + 0.50).toFixed(2));
-        const tradeDate = new Date().toISOString().split('T')[0];
-        reconstructedTrades.push([
-          `moo_pos_${h.ticker.toLowerCase()}_${Date.now().toString(36)}`,
-          tradeDate,
-          'BUY',
-          h.ticker,
-          h.name,
-          h.units,
-          h.avgCost,
-          0.50,
-          netTotal,
-          h.currency,
-          `Moomoo Auto-Sync Holding (${h.ticker})`,
-        ]);
-      });
-
-      const endCol = columnIndexToLetter(TRADES_HEADERS.length - 1);
-      const putRange = `'${tradesSheetTitle}'!A1:${endCol}${reconstructedTrades.length}`;
-
-      await googleApiFetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${tradesSheetTitle}'!A1:ZZ5000`)}:clear`,
-        accessToken,
-        { method: 'POST', body: JSON.stringify({}) }
-      );
-
-      await googleApiFetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(putRange)}?valueInputOption=USER_ENTERED`,
-        accessToken,
-        {
-          method: 'PUT',
-          body: JSON.stringify({
-            range: putRange,
-            majorDimension: 'ROWS',
-            values: reconstructedTrades,
-          }),
-        }
-      );
-
-      // Keep existing Portfolio intact
-      return;
-    }
-  }
+  // Portfolio holdings are never converted into fabricated trade history.
+  // Preserve an existing Portfolio until real Trades rows are available.
+  if (tradeValues.length <= 1) return;
 
   const holdings: Record<
     string,
@@ -1236,13 +1160,7 @@ async function syncPortfolioFromTradesUser(
   );
 }
 
-/**
- * Reads Trades from Google Sheets with automatic self-healing.
- * If the Trades tab has 0 rows (e.g. after sheet sync or accidental wipe)
- * but the Portfolio tab has active holdings, it automatically reconstructs
- * the trade history records from the holdings, persists them to 'Trades'!A1,
- * and returns them contiguously so Trade History is NEVER missing.
- */
+/** Reads Trades from Google Sheets without synthesizing history from holdings. */
 async function getTradesWithAutoHeal(
   spreadsheetId: string,
   accessToken: string,
@@ -1254,103 +1172,7 @@ async function getTradesWithAutoHeal(
   const tradesSheetTitle = tradesSheetMeta ? tradesSheetMeta.properties.title : 'Trades';
   await ensureSheetExists(spreadsheetId, accessToken, meta, tradesSheetTitle);
   const values = await readSheetValues(spreadsheetId, accessToken, tradesSheetTitle);
-  const parsed = parseValuesToRows(tradesSheetTitle, values, TRADES_HEADERS);
-
-  if (parsed.rows.length > 0) {
-    return parsed;
-  }
-
-  // Self-Healing Guard: If Trades sheet has 0 rows, check if Portfolio sheet has active holdings
-  await ensureSheetExists(spreadsheetId, accessToken, meta, 'Portfolio');
-  const portfolioValues = await readSheetValues(spreadsheetId, accessToken, 'Portfolio');
-  if (portfolioValues.length <= 1) {
-    return parsed;
-  }
-
-  const pHeaders = (portfolioValues[0] || []).map((h) => String(h || '').trim().toLowerCase());
-  const tickerIdx = pHeaders.findIndex((h) => h === 'ticker' || h.includes('symbol') || h.includes('code'));
-  const unitsIdx = pHeaders.findIndex((h) => h.includes('unit') || h.includes('qty') || h.includes('quantity') || h.includes('held') || h.includes('share'));
-  const avgCostIdx = pHeaders.findIndex((h) => h.includes('avg') || h.includes('cost') || h.includes('price'));
-  const nameIdx = pHeaders.findIndex((h) => h.includes('name') || h.includes('asset'));
-  const currIdx = pHeaders.findIndex((h) => h.includes('curr'));
-
-  const tCol = tickerIdx >= 0 ? tickerIdx : 0;
-  const uCol = unitsIdx >= 0 ? unitsIdx : 4;
-  const cCol = avgCostIdx >= 0 ? avgCostIdx : 5;
-  const nCol = nameIdx >= 0 ? nameIdx : 1;
-  const currCol = currIdx >= 0 ? currIdx : 3;
-
-  const holdingsFromPortfolio: Array<Array<string | number>> = [];
-
-  for (let i = 1; i < portfolioValues.length; i++) {
-    const r = portfolioValues[i] || [];
-    const ticker = String(r[tCol] || '').trim().toUpperCase();
-    const rawUnits = String(r[uCol] || '0').replace(/[^0-9.-]/g, '');
-    const rawCost = String(r[cCol] || '0').replace(/[^0-9.-]/g, '');
-    const units = parseFloat(rawUnits) || 0;
-    const avgCost = parseFloat(rawCost) || 0;
-    if (ticker && units > 0) {
-      const name = String(r[nCol] || ticker);
-      const currency = String(r[currCol] || 'USD').toUpperCase();
-      const fees = 0.50;
-      const netTotal = parseFloat((units * avgCost + fees).toFixed(2));
-      const tradeDate = new Date().toISOString().split('T')[0];
-      holdingsFromPortfolio.push([
-        `moo_pos_${ticker.toLowerCase()}_${Date.now().toString(36)}`,
-        tradeDate,
-        'BUY',
-        ticker,
-        name,
-        units,
-        avgCost,
-        fees,
-        netTotal,
-        currency,
-        `Moomoo Auto-Sync Holding (${ticker})`,
-      ]);
-    }
-  }
-
-  if (holdingsFromPortfolio.length > 0) {
-    const rowsToWrite = [TRADES_HEADERS, ...holdingsFromPortfolio];
-    const endCol = columnIndexToLetter(TRADES_HEADERS.length - 1);
-    const putRange = `'${tradesSheetTitle}'!A1:${endCol}${rowsToWrite.length}`;
-
-    await googleApiFetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${tradesSheetTitle}'!A1:ZZ5000`)}:clear`,
-      accessToken,
-      { method: 'POST', body: JSON.stringify({}) }
-    );
-
-    const putRes = await googleApiFetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(putRange)}?valueInputOption=USER_ENTERED`,
-      accessToken,
-      {
-        method: 'PUT',
-        body: JSON.stringify({
-          range: putRange,
-          majorDimension: 'ROWS',
-          values: rowsToWrite,
-        }),
-      }
-    );
-
-    if (!putRes.ok) {
-      await googleApiFetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${tradesSheetTitle}'!A1`)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
-        accessToken,
-        {
-          method: 'POST',
-          body: JSON.stringify({ values: rowsToWrite }),
-        }
-      );
-    }
-
-    const freshValues = await readSheetValues(spreadsheetId, accessToken, tradesSheetTitle);
-    return parseValuesToRows(tradesSheetTitle, freshValues, TRADES_HEADERS);
-  }
-
-  return parsed;
+  return parseValuesToRows(tradesSheetTitle, values, TRADES_HEADERS);
 }
 
 /**
@@ -1363,7 +1185,7 @@ async function batchSyncTradesUser(
   accessToken: string,
   meta: SpreadsheetMetadata,
   incomingTrades: Array<Record<string, unknown>>
-): Promise<{ added: number; total: number; rows: Record<string, unknown>[] }> {
+): Promise<{ added: number; updated: number; total: number; rows: Record<string, unknown>[] }> {
   const tradesSheetMeta = meta.sheets.find(
     (s) => s.properties.title.trim().toLowerCase() === 'trades'
   );
@@ -1375,7 +1197,21 @@ async function batchSyncTradesUser(
   const parsedExisting = parseValuesToRows(tradesSheetTitle, existingValues, TRADES_HEADERS);
   const existingRows = parsedExisting.rows;
 
+  await ensureSheetExists(spreadsheetId, accessToken, meta, 'Deleted Records');
+  const deletedValues = await readSheetValues(spreadsheetId, accessToken, 'Deleted Records');
+  const deletedHeaders = (deletedValues[0] || []).map((header) => String(header || '').trim().toLowerCase());
+  const deletedIdIdx = deletedHeaders.indexOf('id');
+  const deletedSheetIdx = deletedHeaders.indexOf('sheetname');
+  const tombstonedTradeIds = new Set<string>();
+  for (let i = 1; i < deletedValues.length; i++) {
+    const row = deletedValues[i] || [];
+    if (deletedSheetIdx >= 0 && String(row[deletedSheetIdx] || '') !== 'Trades') continue;
+    const deletedId = String(row[deletedIdIdx >= 0 ? deletedIdIdx : 0] || '').trim();
+    if (deletedId) tombstonedTradeIds.add(deletedId);
+  }
+
   let addedCount = 0;
+  let updatedCount = 0;
   const mergedRows: Array<Record<string, unknown>> = [...existingRows];
 
   for (const trade of incomingTrades) {
@@ -1390,46 +1226,68 @@ async function batchSyncTradesUser(
     const notes = String(trade.Notes || trade.notes || '');
     const tradeId = String(trade.Id || trade.id || `moo_${ticker.toLowerCase()}_${Date.now().toString(36)}`);
 
-    // Check if this trade is already present in mergedRows
-    const alreadyExists = mergedRows.some((r) => {
+    // Moomoo imports are upserted by account plus order ID. Do not deduplicate
+    // unrelated same-day trades by ticker and quantity.
+    const incomingOrderId = notes.match(/\bOrder:\s*([^;\s)]+)/i)?.[1] || '';
+    const incomingAccountId = notes.match(/\bAccount:\s*([^;\s)]+)/i)?.[1] || '';
+    const existingIndex = mergedRows.findIndex((r) => {
       const rId = String(r.Id || r.id || '');
       const rNotes = String(r.Notes || r.notes || '');
-      if (tradeId && (rId === tradeId || (tradeId.startsWith('moo_FM') && (rId.includes(tradeId) || rNotes.includes(tradeId))))) {
-        return true;
-      }
-      const rTicker = String(r.Ticker || r.ticker || '').trim().toUpperCase();
-      const rDate = String(r.Date || r.date || '').trim();
-      const rAction = String(r.Action || r.action || 'BUY').toUpperCase();
-      const rQty = Math.abs(parseFloat(String(r.Quantity || r.quantity || '0')));
-      return rTicker === ticker && rDate === date && Math.abs(rQty - qty) < 0.0001 && rAction === action;
+      const existingOrderId = rNotes.match(/\bOrder:\s*([^;\s)]+)/i)?.[1] || '';
+      const existingAccountId = rNotes.match(/\bAccount:\s*([^;\s)]+)/i)?.[1] || '';
+      return Boolean(tradeId && rId === tradeId) || Boolean(incomingOrderId && (
+        (rId === `moo_${incomingOrderId}` && (!existingAccountId || existingAccountId === incomingAccountId)) ||
+        (existingOrderId === incomingOrderId && incomingAccountId && existingAccountId === incomingAccountId)
+      ));
     });
 
-    if (!alreadyExists) {
-      mergedRows.push({
-        Id: tradeId,
-        Date: date,
-        Action: action,
-        Ticker: ticker,
-        'Asset Name': assetName,
-        Quantity: qty,
-        Price: price,
-        Fees: fees,
-        'Net Total': parseFloat((qty * price + fees).toFixed(2)),
-        Currency: currency,
-        Notes: notes,
-      });
+    const hasMatchingTombstone = Boolean(incomingOrderId && tombstonedTradeIds.has(`moo_${incomingOrderId}`));
+    const wasDeleted = existingIndex < 0 && (tombstonedTradeIds.has(tradeId) || hasMatchingTombstone);
+    if (wasDeleted) continue;
+
+    const providedNetTotal = Number(trade['Net Total'] ?? trade.netTotal ?? trade.total);
+    const netTotal = Number.isFinite(providedNetTotal)
+      ? providedNetTotal
+      : Number((qty * price + (action === 'SELL' ? -fees : fees)).toFixed(2));
+    const normalizedTrade = {
+      Id: tradeId,
+      Date: date,
+      Action: action,
+      Ticker: ticker,
+      'Asset Name': assetName,
+      Quantity: qty,
+      Price: price,
+      Fees: fees,
+      'Net Total': netTotal,
+      Currency: currency,
+      Notes: notes,
+    };
+
+    if (existingIndex >= 0) {
+      const current = mergedRows[existingIndex];
+      const existingValues = [
+        current.Id || current.id || '', current.Date || current.date || '', current.Action || current.action || '',
+        current.Ticker || current.ticker || '', current['Asset Name'] || current.AssetName || current.name || '',
+        current.Quantity || current.quantity || 0, current.Price || current.price || 0,
+        current.Fees || current.fees || 0, current['Net Total'] || current.netTotal || current.total || 0,
+        current.Currency || current.currency || '', current.Notes || current.notes || '',
+      ];
+      const incomingValues = [
+        normalizedTrade.Id, normalizedTrade.Date, normalizedTrade.Action, normalizedTrade.Ticker,
+        normalizedTrade['Asset Name'], normalizedTrade.Quantity, normalizedTrade.Price, normalizedTrade.Fees,
+        normalizedTrade['Net Total'], normalizedTrade.Currency, normalizedTrade.Notes,
+      ];
+      if (existingValues.some((value, index) => String(value) !== String(incomingValues[index]))) {
+        mergedRows[existingIndex] = { ...current, ...normalizedTrade };
+        updatedCount++;
+      }
+    } else {
+      mergedRows.push(normalizedTrade);
       addedCount++;
     }
   }
 
-  // Clear existing Trades tab to remove any old orphaned/corrupted rows
-  await googleApiFetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${tradesSheetTitle}'!A1:ZZ5000`)}:clear`,
-    accessToken,
-    { method: 'POST', body: JSON.stringify({}) }
-  );
-
-  // Write all rows contiguously to 'Trades'!A1
+  // Write merged rows over the existing data without clearing history first.
   const rowsToWrite: Array<Array<string | number>> = [TRADES_HEADERS];
   mergedRows.forEach((r) => {
     rowsToWrite.push([
@@ -1463,26 +1321,7 @@ async function batchSyncTradesUser(
     }
   );
 
-  if (!putRes.ok) {
-    const errText = await putRes.text();
-    console.warn(`[GoogleSheets] PUT Trades failed, attempting append fallback:`, errText);
-    await googleApiFetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${tradesSheetTitle}'!A1`)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
-      accessToken,
-      {
-        method: 'POST',
-        body: JSON.stringify({ values: rowsToWrite }),
-      }
-    );
-  }
-
-  // Remove any tombstones from Deleted Records for all synced trade IDs so they are never suppressed
-  for (const r of mergedRows) {
-    const rId = String(r.Id || r.id || '').trim();
-    if (rId) {
-      await removeDeletedTombstone(spreadsheetId, accessToken, meta, rId).catch(() => null);
-    }
-  }
+  if (!putRes.ok) throw new Error('Could not write the Moomoo trade history to Google Sheets.');
 
   // Sync Portfolio from the fresh contiguous rows
   await syncPortfolioFromTradesUser(spreadsheetId, accessToken, meta);
@@ -1493,9 +1332,238 @@ async function batchSyncTradesUser(
 
   return {
     added: addedCount,
+    updated: updatedCount,
     total: verifiedParsed.rows.length > 0 ? verifiedParsed.rows.length : mergedRows.length,
     rows: verifiedParsed.rows.length > 0 ? verifiedParsed.rows : mergedRows,
   };
+}
+
+function normalizedTradeNetTotal(trade: Record<string, unknown>, action: string, quantity: number, price: number, fees: number): number {
+  const provided = Number(trade['Net Total'] ?? trade.netTotal ?? trade.total);
+  return Number.isFinite(provided) ? provided : Number((quantity * price + (action === 'SELL' ? -fees : fees)).toFixed(2));
+}
+
+async function applyPortfolioTradeDeltasUser(
+  spreadsheetId: string,
+  accessToken: string,
+  meta: SpreadsheetMetadata,
+  trades: Array<Record<string, unknown>>
+): Promise<void> {
+  if (trades.length === 0) return;
+  await ensureSheetExists(spreadsheetId, accessToken, meta, 'Portfolio');
+  const values = await readSheetRange(spreadsheetId, accessToken, "'Portfolio'!A1:F200");
+  const holdings: Record<string, { ticker: string; name: string; type: string; currency: string; units: number; cost: number }> = {};
+
+  for (const row of values.slice(1)) {
+    const ticker = String(row[0] || '').trim().toUpperCase();
+    const units = Number(row[4]) || 0;
+    const avgCost = Number(row[5]) || 0;
+    if (!ticker || units <= 0) continue;
+    if (!holdings[ticker]) {
+      holdings[ticker] = {
+        ticker,
+        name: String(row[1] || ticker),
+        type: String(row[2] || 'Stock'),
+        currency: String(row[3] || 'USD'),
+        units: 0,
+        cost: 0,
+      };
+    }
+    holdings[ticker].units += units;
+    holdings[ticker].cost += units * avgCost;
+  }
+
+  for (const trade of trades) {
+    const ticker = String(trade.Ticker || trade.ticker || '').trim().toUpperCase();
+    const action = String(trade.Action || trade.action || 'BUY').toUpperCase();
+    const quantity = Number(trade.Quantity || trade.quantity) || 0;
+    const price = Number(trade.Price || trade.price) || 0;
+    const fees = Math.abs(Number(trade.Fees || trade.fees) || 0);
+    if (!ticker || quantity <= 0) continue;
+    if (!holdings[ticker]) {
+      holdings[ticker] = {
+        ticker,
+        name: String(trade['Asset Name'] || trade.AssetName || trade.name || ticker),
+        type: String(trade.Type || trade.type || 'Stock'),
+        currency: String(trade.Currency || trade.currency || 'USD').toUpperCase(),
+        units: 0,
+        cost: 0,
+      };
+    }
+    const holding = holdings[ticker];
+    if (action === 'BUY' || action === 'REINVEST') {
+      holding.units += quantity;
+      holding.cost += quantity * price + fees;
+    } else if (action === 'SELL') {
+      const averageCost = holding.units > 0 ? holding.cost / holding.units : 0;
+      holding.units = Math.max(0, holding.units - quantity);
+      holding.cost = Math.max(0, holding.cost - quantity * averageCost);
+    }
+  }
+
+  const rows: Array<Array<string | number>> = [PORTFOLIO_HEADERS];
+  for (const holding of Object.values(holdings).filter((item) => item.units > 0)) {
+    const row = rows.length + 1;
+    rows.push([
+      holding.ticker,
+      holding.name,
+      holding.type,
+      holding.currency,
+      holding.units,
+      holding.cost / holding.units,
+      `=IF(E${row}>0, E${row}*F${row}, "")`,
+      `=IF(ISBLANK(A${row}), "", IFERROR(GOOGLEFINANCE(A${row}, "price"), IFERROR(GOOGLEFINANCE("NASDAQ:" & A${row}, "price"), IFERROR(GOOGLEFINANCE("NYSE:" & A${row}, "price"), F${row}))))`,
+      `=IF(AND(E${row}>0, H${row}>0), E${row}*H${row}, "")`,
+      `=IF(AND(G${row}>0, I${row}>0), I${row}-G${row}, "")`,
+      `=IF(AND(G${row}>0, I${row}>0), (I${row}-G${row})/G${row}, "")`,
+    ]);
+  }
+
+  const clearRes = await googleApiFetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent("'Portfolio'!A1:K200")}:clear`,
+    accessToken,
+    { method: 'POST', body: JSON.stringify({}) }
+  );
+  if (!clearRes.ok) throw new Error('Could not update the Portfolio sheet.');
+  const range = `'Portfolio'!A1:K${rows.length}`;
+  const writeRes = await googleApiFetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`,
+    accessToken,
+    { method: 'PUT', body: JSON.stringify({ values: rows }) }
+  );
+  if (!writeRes.ok) throw new Error('Could not update the Portfolio sheet.');
+}
+
+async function syncMoomooTradesUser(
+  spreadsheetId: string,
+  accessToken: string,
+  meta: SpreadsheetMetadata,
+  incomingTrades: Array<Record<string, unknown>>
+): Promise<{ added: number; updated: number; changes: Array<Record<string, unknown>>; removedIds: string[] }> {
+  const tradesSheetMeta = meta.sheets.find((sheet) => sheet.properties.title.trim().toLowerCase() === 'trades');
+  const sheetTitle = tradesSheetMeta?.properties.title || 'Trades';
+  await ensureSheetExists(spreadsheetId, accessToken, meta, sheetTitle);
+  const [idValues, noteValues] = await Promise.all([
+    readSheetRange(spreadsheetId, accessToken, `'${sheetTitle}'!A:A`),
+    readSheetRange(spreadsheetId, accessToken, `'${sheetTitle}'!K:K`),
+  ]);
+  const rowById = new Map<string, number>();
+  const rowByAccountOrder = new Map<string, number>();
+  const rowByLegacyOrder = new Map<string, number>();
+  for (let i = 1; i < Math.max(idValues.length, noteValues.length); i++) {
+    const rowNumber = i + 1;
+    const id = String(idValues[i]?.[0] || '').trim();
+    const notes = String(noteValues[i]?.[0] || '');
+    if (id) rowById.set(id, rowNumber);
+    const match = notes.match(/\bOrder:\s*([^;\s)]+)/i);
+    const accountMatch = notes.match(/\bAccount:\s*([^;\s)]+)/i);
+    if (/moomoo/i.test(notes) && match) {
+      if (accountMatch) rowByAccountOrder.set(`${accountMatch[1]}:${match[1]}`, rowNumber);
+      else if (id === `moo_${match[1]}`) rowByLegacyOrder.set(match[1], rowNumber);
+    }
+  }
+
+  await ensureSheetExists(spreadsheetId, accessToken, meta, 'Deleted Records');
+  const deletedIds = new Set((await readSheetRange(spreadsheetId, accessToken, "'Deleted Records'!A:A"))
+    .slice(1)
+    .map((row) => String(row[0] || '').trim())
+    .filter(Boolean));
+
+  const prepared = incomingTrades.map((trade) => {
+    const ticker = String(trade.Ticker || trade.ticker || '').trim().toUpperCase();
+    const date = String(trade.Date || trade.date || '').trim();
+    const action = String(trade.Action || trade.action || 'BUY').toUpperCase();
+    const quantity = Math.abs(Number(trade.Quantity || trade.quantity) || 0);
+    const price = Number(trade.Price || trade.price) || 0;
+    const fees = Math.abs(Number(trade.Fees || trade.fees) || 0);
+    const currency = String(trade.Currency || trade.currency || 'USD').toUpperCase();
+    const assetName = String(trade['Asset Name'] || trade.AssetName || trade.name || ticker);
+    const notes = String(trade.Notes || trade.notes || '');
+    const id = String(trade.Id || trade.id || '').trim();
+    const orderId = notes.match(/\bOrder:\s*([^;\s)]+)/i)?.[1] || '';
+    const accountId = notes.match(/\bAccount:\s*([^;\s)]+)/i)?.[1] || '';
+    const rowNumber = rowById.get(id) || (accountId ? rowByAccountOrder.get(`${accountId}:${orderId}`) : undefined) || rowByLegacyOrder.get(orderId) || 0;
+    const hasMatchingTombstone = Boolean(orderId && deletedIds.has(`moo_${orderId}`));
+    const wasDeleted = rowNumber === 0 && (deletedIds.has(id) || hasMatchingTombstone);
+    const netTotal = normalizedTradeNetTotal(trade, action, quantity, price, fees);
+    const normalized = {
+      Id: id,
+      Date: date,
+      Action: action,
+      Ticker: ticker,
+      'Asset Name': assetName,
+      Quantity: quantity,
+      Price: price,
+      Fees: fees,
+      'Net Total': netTotal,
+      Currency: currency,
+      Notes: notes,
+    };
+    return {
+      id,
+      orderId,
+      rowNumber,
+      wasDeleted,
+      normalized,
+      rowValues: [id, date, action, ticker, assetName, quantity, price, fees, netTotal, currency, notes],
+    };
+  }).filter((trade) => trade.id && trade.normalized.Ticker && trade.normalized.Date && trade.normalized.Quantity > 0 && trade.normalized.Price > 0 && !trade.wasDeleted);
+
+  const existingRows = await Promise.all(prepared
+    .filter((trade) => trade.rowNumber > 0)
+    .map(async (trade) => ({
+      ...trade,
+      current: (await readSheetRange(spreadsheetId, accessToken, `'${sheetTitle}'!A${trade.rowNumber}:K${trade.rowNumber}`))[0] || [],
+    })));
+  const currentByRow = new Map(existingRows.map((trade) => [trade.rowNumber, trade.current]));
+  const updates: Array<{ range: string; values: unknown[][] }> = [];
+  const additions: typeof prepared = [];
+  const changes: Array<Record<string, unknown>> = [];
+  const removedIds: string[] = [];
+  let updatedCount = 0;
+
+  for (const trade of prepared) {
+    changes.push(trade.normalized);
+    if (trade.rowNumber === 0) {
+      additions.push(trade);
+      continue;
+    }
+    const current = currentByRow.get(trade.rowNumber) || [];
+    const hasChanged = trade.rowValues.some((value, index) => String(value) !== String(current[index] ?? ''));
+    if (hasChanged) {
+      updates.push({ range: `'${sheetTitle}'!A${trade.rowNumber}:K${trade.rowNumber}`, values: [trade.rowValues] });
+      const oldId = String(current[0] || '').trim();
+      if (oldId && oldId !== trade.id) removedIds.push(oldId);
+      updatedCount++;
+    }
+  }
+
+  if (updates.length > 0) {
+    const response = await googleApiFetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values:batchUpdate`,
+      accessToken,
+      { method: 'POST', body: JSON.stringify({ valueInputOption: 'RAW', data: updates }) }
+    );
+    if (!response.ok) throw new Error('Could not update matching Moomoo trades in Google Sheets.');
+  }
+
+  if (additions.length > 0) {
+    const appendRange = `'${sheetTitle}'!A:K`;
+    const response = await googleApiFetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+      accessToken,
+      { method: 'POST', body: JSON.stringify({ values: additions.map((trade) => trade.rowValues) }) }
+    );
+    if (!response.ok) throw new Error('Could not append Moomoo trades to Google Sheets.');
+  }
+
+  if (updatedCount > 0) {
+    await syncPortfolioFromTradesUser(spreadsheetId, accessToken, meta);
+  } else if (additions.length > 0) {
+    await applyPortfolioTradeDeltasUser(spreadsheetId, accessToken, meta, additions.map((trade) => trade.normalized));
+  }
+
+  return { added: additions.length, updated: updatedCount, changes, removedIds };
 }
 
 /**
@@ -2208,6 +2276,11 @@ export async function executeUserGoogleAction(
       const trades = Array.isArray(params.trades) ? (params.trades as Record<string, unknown>[]) : [];
       const res = await batchSyncTradesUser(spreadsheetId, accessToken, meta, trades);
       return wrap(res);
+    }
+
+    case 'syncMoomooTrades': {
+      const trades = Array.isArray(params.trades) ? (params.trades as Record<string, unknown>[]) : [];
+      return wrap(await syncMoomooTradesUser(spreadsheetId, accessToken, meta, trades));
     }
 
     case 'addTrade': {

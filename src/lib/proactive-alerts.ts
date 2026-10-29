@@ -100,10 +100,26 @@ export function generateProactiveAlerts<T extends MinimalTransaction>(
         id: `alert_budget_pace_${currentMonthStr}`,
         type: 'budget_pace',
         severity: isCritical ? 'critical' : 'warning',
-        title: isCritical ? '月底超支红色预警' : '月底超支偏高预警',
-        message: `按当前日均支出速度，预计本月底将支出 RM ${projectedMonthEnd.toLocaleString('en-MY')}，可能超出预算基准约 ${overspendPercent}%。`,
-        explanation: `依据：本月已过 ${dayOfMonth} 天（共 ${totalDaysInMonth} 天），累计支出 RM ${currentMonthTotal.toFixed(2)}，当前日均 RM ${dailyPace.toFixed(2)}。基准开销为 RM ${baselineThreshold.toFixed(2)}（日均基准 RM ${(baselineThreshold / totalDaysInMonth).toFixed(2)}）。`,
-        actionLabel: `查看本月账目 (${currentMonthExpenses.length}笔)`,
+        title: effectiveLang === 'en'
+          ? (isCritical ? 'Month-end budget warning' : 'Month-end spending pace is high')
+          : effectiveLang === 'ms'
+            ? (isCritical ? 'Amaran bajet hujung bulan' : 'Kadar belanja hujung bulan tinggi')
+            : (isCritical ? '月底超支红色预警' : '月底超支偏高预警'),
+        message: effectiveLang === 'en'
+          ? `At the current daily pace, spending may reach RM ${projectedMonthEnd.toLocaleString('en-MY')} by month-end, about ${overspendPercent}% above the budget baseline.`
+          : effectiveLang === 'ms'
+            ? `Pada kadar harian semasa, perbelanjaan mungkin mencecah RM ${projectedMonthEnd.toLocaleString('en-MY')} menjelang hujung bulan, kira-kira ${overspendPercent}% melebihi asas bajet.`
+            : `按当前日均支出速度，预计本月底将支出 RM ${projectedMonthEnd.toLocaleString('en-MY')}，可能超出预算基准约 ${overspendPercent}%。`,
+        explanation: effectiveLang === 'en'
+          ? `Based on ${dayOfMonth} of ${totalDaysInMonth} days: RM ${currentMonthTotal.toFixed(2)} spent so far, averaging RM ${dailyPace.toFixed(2)}/day. The baseline is RM ${baselineThreshold.toFixed(2)} (RM ${(baselineThreshold / totalDaysInMonth).toFixed(2)}/day).`
+          : effectiveLang === 'ms'
+            ? `Berdasarkan ${dayOfMonth} daripada ${totalDaysInMonth} hari: RM ${currentMonthTotal.toFixed(2)} telah dibelanjakan, purata RM ${dailyPace.toFixed(2)}/hari. Asas bajet ialah RM ${baselineThreshold.toFixed(2)} (RM ${(baselineThreshold / totalDaysInMonth).toFixed(2)}/hari).`
+            : `依据：本月已过 ${dayOfMonth} 天（共 ${totalDaysInMonth} 天），累计支出 RM ${currentMonthTotal.toFixed(2)}，当前日均 RM ${dailyPace.toFixed(2)}。基准开销为 RM ${baselineThreshold.toFixed(2)}（日均基准 RM ${(baselineThreshold / totalDaysInMonth).toFixed(2)}）。`,
+        actionLabel: effectiveLang === 'en'
+          ? `View this month's records (${currentMonthExpenses.length})`
+          : effectiveLang === 'ms'
+            ? `Lihat rekod bulan ini (${currentMonthExpenses.length})`
+            : `查看本月账目 (${currentMonthExpenses.length}笔)`,
         matchingTransactionIds: currentMonthExpenses.map((t) => t.id),
       });
     }
@@ -142,10 +158,26 @@ export function generateProactiveAlerts<T extends MinimalTransaction>(
         id: `alert_sub_price_${key}`,
         type: 'price_increase',
         severity: isIncrease ? 'warning' : 'info',
-        title: isIncrease ? `订阅扣费上涨提醒 (${curr.merchant})` : `订阅费用变动 (${curr.merchant})`,
-        message: `检测到「${curr.merchant}」本月扣款与上月存在金额变动。`,
-        explanation: `依据：上月 (${prevMonthStr}) 扣款 RM ${prev.amount.toFixed(2)}，本月 (${currentMonthStr}) 扣款 RM ${curr.amount.toFixed(2)}，变动 ${isIncrease ? '+' : '-'}RM ${Math.abs(delta).toFixed(2)} (${isIncrease ? '+' : '-'}${pctChange}%)。`,
-        actionLabel: `查看「${curr.merchant}」扣款记录`,
+        title: effectiveLang === 'en'
+          ? (isIncrease ? `Subscription price increased (${curr.merchant})` : `Subscription price changed (${curr.merchant})`)
+          : effectiveLang === 'ms'
+            ? (isIncrease ? `Harga langganan meningkat (${curr.merchant})` : `Harga langganan berubah (${curr.merchant})`)
+            : (isIncrease ? `订阅扣费上涨提醒 (${curr.merchant})` : `订阅费用变动 (${curr.merchant})`),
+        message: effectiveLang === 'en'
+          ? `The ${curr.merchant} charge changed this month compared with last month.`
+          : effectiveLang === 'ms'
+            ? `Caj ${curr.merchant} bulan ini berubah berbanding bulan lepas.`
+            : `检测到「${curr.merchant}」本月扣款与上月存在金额变动。`,
+        explanation: effectiveLang === 'en'
+          ? `Ledger records: RM ${prev.amount.toFixed(2)} in ${prevMonthStr} and RM ${curr.amount.toFixed(2)} in ${currentMonthStr}, a ${isIncrease ? '+' : '-'}RM ${Math.abs(delta).toFixed(2)} (${isIncrease ? '+' : '-'}${pctChange}%) change.`
+          : effectiveLang === 'ms'
+            ? `Rekod lejar: RM ${prev.amount.toFixed(2)} pada ${prevMonthStr} dan RM ${curr.amount.toFixed(2)} pada ${currentMonthStr}, perubahan ${isIncrease ? '+' : '-'}RM ${Math.abs(delta).toFixed(2)} (${isIncrease ? '+' : '-'}${pctChange}%).`
+            : `依据：上月 (${prevMonthStr}) 扣款 RM ${prev.amount.toFixed(2)}，本月 (${currentMonthStr}) 扣款 RM ${curr.amount.toFixed(2)}，变动 ${isIncrease ? '+' : '-'}RM ${Math.abs(delta).toFixed(2)} (${isIncrease ? '+' : '-'}${pctChange}%)。`,
+        actionLabel: effectiveLang === 'en'
+          ? `View ${curr.merchant} charges`
+          : effectiveLang === 'ms'
+            ? `Lihat caj ${curr.merchant}`
+            : `查看「${curr.merchant}」扣款记录`,
         actionSearchTerm: curr.merchant,
         matchingTransactionIds: [curr.tx.id, prev.tx.id],
       });
@@ -240,6 +272,8 @@ export function generateProactiveAlerts<T extends MinimalTransaction>(
       const isDinnerTime = currentHour >= 17 && currentHour < 21;
       if (isLunchTime || isDinnerTime) {
         const slotLabel = isLunchTime ? '午餐' : '晚餐';
+        const slotLabelEn = isLunchTime ? 'lunch' : 'dinner';
+        const slotLabelMs = isLunchTime ? 'makan tengah hari' : 'makan malam';
         const todayTxs = currentMonthExpenses.filter((t) => t.date === todayStr);
         const hasFoodToday = todayTxs.some(
           (t) => (t.category || '').toLowerCase().includes('food') || (t.category || '').toLowerCase().includes('dining')
@@ -255,10 +289,26 @@ export function generateProactiveAlerts<T extends MinimalTransaction>(
                   id: `alert_habit_meal_${todayStr}`,
                   type: 'habit_anticipation',
                   severity: 'info',
-                  title: `🍱 ${slotLabel}时间到了`,
-                  message: `今天${slotLabel}吃了什么？点击即可快速记一笔。`,
-                  explanation: `时段感知：当前是 ${slotLabel} 时段（${isLunchTime ? '11:30~14:30' : '17:30~21:00'}），您今天尚未记录任何餐饮开销。`,
-                  actionLabel: `记一笔${slotLabel}`,
+                  title: effectiveLang === 'en'
+                    ? `🍱 It's ${slotLabelEn} time`
+                    : effectiveLang === 'ms'
+                      ? `🍱 Masa ${slotLabelMs}`
+                      : `🍱 ${slotLabel}时间到了`,
+                  message: effectiveLang === 'en'
+                    ? `Have you had ${slotLabelEn}? Tap to record it.`
+                    : effectiveLang === 'ms'
+                      ? `Sudah makan ${slotLabelMs}? Ketik untuk merekodkannya.`
+                      : `今天${slotLabel}吃了什么？点击即可快速记一笔。`,
+                  explanation: effectiveLang === 'en'
+                    ? `Time check: it is ${isLunchTime ? '11:30–14:30' : '17:30–21:00'} and no food spending has been recorded today.`
+                    : effectiveLang === 'ms'
+                      ? `Semakan masa: sekarang ${isLunchTime ? '11:30–14:30' : '17:30–21:00'} dan tiada belanja makanan direkodkan hari ini.`
+                      : `时段感知：当前是 ${slotLabel} 时段（${isLunchTime ? '11:30~14:30' : '17:30~21:00'}），您今天尚未记录任何餐饮开销。`,
+                  actionLabel: effectiveLang === 'en'
+                    ? `Record ${slotLabelEn}`
+                    : effectiveLang === 'ms'
+                      ? `Rekod ${slotLabelMs}`
+                      : `记一笔${slotLabel}`,
                   actionSearchTerm: ``,
                   matchingTransactionIds: [],
                 });

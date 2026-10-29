@@ -156,6 +156,18 @@ test('4. generateProactiveAlerts detects budget run-rate overspend, subscription
   assert.ok(subAlert.explanation.includes('65.00') && subAlert.explanation.includes('45.00'));
   assert.deepEqual(subAlert.matchingTransactionIds, ['sub-oct', 'sub-sep']);
 
+  const englishAlerts = generateProactiveAlerts(alertLedger, 2000, referenceDate, 'en');
+  const englishSubAlert = englishAlerts.find((a) => a.type === 'price_increase');
+  assert.ok(englishSubAlert?.title.includes('Subscription price increased'));
+  assert.ok(englishSubAlert?.message.includes('charge changed'));
+  assert.ok(englishSubAlert?.explanation.includes('Ledger records'));
+  assert.ok(englishAlerts.find((a) => a.type === 'budget_pace')?.title.includes('Month-end budget warning'));
+
+  const malayAlerts = generateProactiveAlerts(alertLedger, 2000, referenceDate, 'ms');
+  const malaySubAlert = malayAlerts.find((a) => a.type === 'price_increase');
+  assert.ok(malaySubAlert?.title.includes('Harga langganan meningkat'));
+  assert.ok(malaySubAlert?.explanation.includes('Rekod lejar'));
+
   // Verification 3: Category spending spike alert
   const categoryAlert = alerts.find((a) => a.type === 'category_spike');
   assert.ok(categoryAlert, 'Should detect Food & Dining spike');

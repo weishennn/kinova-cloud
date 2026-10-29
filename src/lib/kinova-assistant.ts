@@ -251,6 +251,9 @@ export interface RunKinovaTurnOptions {
   transactions?: Array<any>;
   sessionTurns?: AssistantTurnMessage[];
   forceAssistant?: boolean;
+  factQuery?: string;
+  pendingReceipt?: { amount: number; merchant?: string; date?: string };
+  signal?: AbortSignal;
 }
 
 /**
@@ -281,8 +284,9 @@ export async function runKinovaTurn(
   const deterministicFacts = computeDeterministicLedgerFacts(
     allTx,
     profile,
-    text,
-    today
+    options.factQuery || text,
+    today,
+    options.pendingReceipt
   );
 
   // Take small sample of matching or recent transactions
@@ -303,6 +307,7 @@ export async function runKinovaTurn(
   const res = await fetch('/api/ai/assistant', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal: options.signal,
     body: JSON.stringify({
       text: text || undefined,
       imageBase64: options.imageBase64 || undefined,

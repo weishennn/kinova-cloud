@@ -192,7 +192,9 @@ export async function POST(req: NextRequest) {
     const mode = rawMode === 'apple_pay' || (!hasScreenshot && rawMode !== 'screenshot')
       ? 'apple_pay'
       : 'screenshot';
-    const shouldAutoRecord = body?.autoRecord !== false;
+    // Shortcut payments must stay as drafts until the user reviews the assistant assessment
+    // and taps Save in Kinova. The request body cannot bypass that confirmation.
+    const shouldAutoRecord = false;
 
     // Mode A: Apple Pay (iOS Shortcuts Wallet / Transaction Trigger)
     if (mode === 'apple_pay') {
@@ -508,30 +510,13 @@ Return JSON shape:
       merchantOrDescription: effectiveDescription || 'screenshot_draft',
     });
 
-    // Generate intelligent assistant advice (interpretation of tax relief, category, and proposed action)
-    let taxReliefHint = '';
-    const catLower = effectiveCategory.toLowerCase();
-    const descLower = effectiveDescription.toLowerCase();
-    if (catLower.includes('health') || descLower.includes('clinic') || descLower.includes('doctor') || descLower.includes('pharmacy') || descLower.includes('hospital')) {
-      taxReliefHint = 'LHDN 医疗/体检减免 (最高 RM10,000)';
-    } else if (catLower.includes('education') || descLower.includes('course') || descLower.includes('book') || descLower.includes('tuition')) {
-      taxReliefHint = 'LHDN 进修/书籍减免 (最高 RM7,000)';
-    } else if (catLower.includes('sport') || descLower.includes('gym') || descLower.includes('fitness')) {
-      taxReliefHint = 'LHDN 运动设备/健身减免 (最高 RM1,000)';
-    } else if (catLower.includes('insurance') || descLower.includes('takaful') || descLower.includes('prudential') || descLower.includes('great eastern')) {
-      taxReliefHint = 'LHDN 人寿保险/公积金减免 (最高 RM7,000)';
-    }
-
     const proposedActionLabel = moneyRes.amount != null && moneyRes.amount > 0
       ? `Save ${moneyRes.currency} ${moneyRes.amount.toFixed(2)} (${effectiveCategory})`
       : 'Review and Confirm Draft';
 
-    const assistantAdvice = [
-      `智能分析：识别为「${effectiveCategory}」`,
-      moneyRes.amount ? `实付 ${moneyRes.currency} ${moneyRes.amount.toFixed(2)}` : '',
-      taxReliefHint ? `🇲🇾 建议申报 ${taxReliefHint}` : '',
-      '待用户在账本中一键保存确认',
-    ].filter(Boolean).join(' · ');
+    // The client runs the same thinking-based receipt review as the camera flow
+    // when the user opens this draft; OCR results alone are not an AI assessment.
+    const assistantAdvice = '';
 
     const saved = saveShortcutQuickDraft({
       ownerEmail: userEmail || undefined,

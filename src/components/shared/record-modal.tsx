@@ -63,6 +63,8 @@ import { confirmAction } from '@/stores/confirm-dialog-store';
 import { parseLegacyPaidItemsFromNotes, parseReceiptItemsFromNotes, stripReceiptItemsFromNotes, withReceiptItemsInNotes, type StoredReceiptItem } from '@/lib/receipt-items';
 import { saveMerchantCategoryRule, normalizePattern } from '@/lib/merchant-rules';
 import { matchHabitMemory, learnOrStrengthenHabit } from '@/lib/habit-memory-engine';
+import { runKinovaTurn } from '@/lib/kinova-assistant';
+import { getUserMoneyProfile } from '@/lib/user-money-profile';
 
 const CATEGORIES = {
   Expense: [
@@ -144,6 +146,10 @@ export function RecordPaymentModal() {
   const [transactionCurrency, setTransactionCurrency] = useState('MYR');
   const [manualUntagged, setManualUntagged] = useState(false);
   const [shortcutDraft, setShortcutDraft] = useState<ShortcutQuickDraft | null>(null);
+  const [shortcutReviewStatus, setShortcutReviewStatus] = useState<'idle' | 'ready' | 'error'>('idle');
+  const [shortcutReviewError, setShortcutReviewError] = useState('');
+  const [shortcutReviewRetry, setShortcutReviewRetry] = useState(0);
+  const shortcutReviewRequestRef = useRef<{ key: string; promise: ReturnType<typeof runKinovaTurn> } | null>(null);
   const [shortcutCurrencyConfirmed, setShortcutCurrencyConfirmed] = useState<boolean>(true);
   const [shortcutDuplicateConfirmed, setShortcutDuplicateConfirmed] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -338,7 +344,109 @@ export function RecordPaymentModal() {
     return String(new Date().getFullYear());
   }, [date]);
 
-  const { transactions: yearTransactions = [] } = useTransactions({ period: `year-${assessmentYear}` });
+  const { transactions: yearTransactions = [], isLoading: isYearTransactionsLoading } = useTransactions({ period: `year-${assessmentYear}` });
+  const shortcutReviewDraft = useMemo(() => shortcutDraft ? ({
+    draftId: shortcutDraft.draftId,
+    source: shortcutDraft.source,
+    amount: shortcutDraft.amount,
+    currency: shortcutDraft.currency,
+    category: shortcutDraft.category,
+    date: shortcutDraft.date,
+    taxAmount: shortcutDraft.taxAmount,
+    discountAmount: shortcutDraft.discountAmount,
+    items: shortcutDraft.items,
+    ocrSummary: shortcutDraft.ocrSummary,
+    merchant: shortcutDraft.merchant,
+    description: shortcutDraft.description,
+  }) : null, [
+    shortcutDraft?.draftId,
+    shortcutDraft?.source,
+    shortcutDraft?.amount,
+    shortcutDraft?.currency,
+    shortcutDraft?.category,
+    shortcutDraft?.date,
+    shortcutDraft?.taxAmount,
+    shortcutDraft?.discountAmount,
+    shortcutDraft?.items,
+    shortcutDraft?.ocrSummary,
+    shortcutDraft?.merchant,
+    shortcutDraft?.description,
+  ]);
+
+  useEffect(() => {
+    const draft = shortcutReviewDraft;
+    if (!isQuickAddOpen || !draft || isYearTransactionsLoading) return;
+
+    const requestKey = `${draft.draftId}:${shortcutReviewRetry}:${yearTransactions.length}`;
+    if (shortcutReviewRequestRef.current?.key !== requestKey) {
+      const profile = getUserMoneyProfile(yearTransactions);
+      const amountValue = Number(draft.amount) || 0;
+      const receiptText = [
+        draft.source === 'apple_pay_wallet'
+          ? 'Review this Apple Pay wallet transaction.'
+          : 'Review this payment screenshot after the fast OCR extraction.',
+        'Use only these extracted fields; do not fill in missing information.',
+        `Merchant: ${draft.merchant || draft.description || 'not extracted'}`,
+        `Net amount paid: ${amountValue > 0 ? `${draft.currency} ${amountValue.toFixed(2)}` : 'not extracted'}`,
+        `Category: ${draft.category || 'not certain'}`,
+        `Date: ${draft.date || 'not extracted'}`,
+        `Tax: ${typeof draft.taxAmount === 'number' ? `${draft.currency} ${draft.taxAmount.toFixed(2)}` : 'not extracted'}`,
+        `Discount: ${typeof draft.discountAmount === 'number' ? `${draft.currency} ${draft.discountAmount.toFixed(2)}` : 'none extracted'}`,
+        `Items: ${(draft.items || []).map((item) => `${item.name} ${draft.currency} ${item.amount.toFixed(2)}`).join(', ') || 'none extracted'}`,
+        `OCR note: ${draft.ocrSummary || 'none'}`,
+        'Check for a duplicate in the ledger, compare the amount with usual spending, give a Malaysian tax-relief hint when supported, and suggest one next action. Do not save anything.',
+      ].join('\n');
+
+      shortcutReviewRequestRef.current = {
+        key: requestKey,
+        promise: runKinovaTurn({
+          text: receiptText,
+          today: getLocalDateString(),
+          profile,
+          transactions: yearTransactions,
+          forceAssistant: true,
+          factQuery: draft.merchant || draft.description || draft.category,
+          ...(amountValue > 0 ? {
+            pendingReceipt: {
+              amount: amountValue,
+              merchant: draft.merchant || draft.description,
+              date: draft.date,
+            },
+          } : {}),
+        }),
+      };
+    }
+
+    let active = true;
+    const draftId = draft.draftId;
+    shortcutReviewRequestRef.current.promise.then((turn) => {
+      if (!active) return;
+      if (turn.source !== 'assistant') {
+        setShortcutReviewError('Assistant review returned no result.');
+        setShortcutReviewStatus('error');
+        return;
+      }
+      const result = turn.assistantResult;
+      const advice = [result.answer, result.reasoning]
+        .map((part) => String(part || '').trim())
+        .filter((part, index, parts) => Boolean(part) && parts.indexOf(part) === index)
+        .join(' ');
+      setShortcutDraft((current) => current && current.draftId === draftId
+        ? {
+            ...current,
+            assistantAdvice: advice || 'Kinova could not produce a useful review for this draft.',
+            proposedActionLabel: result.proposedAction?.label || current.proposedActionLabel,
+          }
+        : current);
+      setShortcutReviewStatus('ready');
+    }).catch((error: unknown) => {
+      if (!active) return;
+      setShortcutReviewError(error instanceof Error ? error.message : 'Assistant review failed.');
+      setShortcutReviewStatus('error');
+    });
+
+    return () => { active = false; };
+  }, [isQuickAddOpen, shortcutReviewDraft, shortcutReviewRetry, yearTransactions, isYearTransactionsLoading]);
 
   const yearlyTaxSummary = useMemo(() => {
     const editId = editTransaction ? String(editTransaction.Id || editTransaction.id || '') : '';
@@ -751,6 +859,8 @@ export function RecordPaymentModal() {
     setIsSubmitting(false);
     setEditTransaction(null);
     setShortcutDraft(null);
+    setShortcutReviewStatus('idle');
+    setShortcutReviewError('');
     setShortcutCurrencyConfirmed(true);
     setShortcutDuplicateConfirmed(false);
     setReceiptFile(null);
@@ -1513,8 +1623,46 @@ export function RecordPaymentModal() {
 
                 {shortcutDraft.ocrSummary && (
                   <div className="rounded-xl border border-indigo-500/30 bg-indigo-50/70 dark:bg-zinc-900/80 p-2.5 text-indigo-950 dark:text-indigo-200 text-[11px] flex items-start gap-1.5 leading-snug">
-                    <span className="font-bold shrink-0">📸 画面识别:</span>
+                    <span className="font-bold shrink-0">📸 从画面读取:</span>
                     <span>{shortcutDraft.ocrSummary}</span>
+                  </div>
+                )}
+
+                {shortcutReviewStatus === 'idle' && !shortcutDraft.assistantAdvice && (
+                  <div role="status" aria-live="polite" className="rounded-xl border border-violet-500/30 bg-violet-500/10 p-3 text-[11px] leading-relaxed text-violet-950 dark:text-violet-200 flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                    <span>Kinova 正在分析账本中的重复记录、常见金额和可能的 LHDN 提示…</span>
+                  </div>
+                )}
+
+                {shortcutReviewStatus !== 'error' && shortcutDraft.assistantAdvice && (
+                  <div className="rounded-xl border border-violet-500/35 bg-violet-500/10 p-3 space-y-1.5 text-[11px] leading-relaxed text-violet-950 dark:text-violet-200">
+                    <div className="font-bold flex items-center gap-1.5">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      <span>Kinova 的判断</span>
+                    </div>
+                    <p>{shortcutDraft.assistantAdvice}</p>
+                    {shortcutDraft.proposedActionLabel && (
+                      <p className="font-semibold">建议操作：{shortcutDraft.proposedActionLabel} · 点击下方保存后才会入账</p>
+                    )}
+                  </div>
+                )}
+
+                {shortcutReviewStatus === 'error' && (
+                  <div role="alert" className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 space-y-2 text-[11px] leading-relaxed text-amber-950 dark:text-amber-200">
+                    <p>Kinova 无法完成这次判断。请先核对识别字段；保存仍需你点击下方按钮。</p>
+                    {shortcutReviewError && <p className="break-words">{shortcutReviewError}</p>}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShortcutReviewError('');
+                        setShortcutReviewStatus('idle');
+                        setShortcutReviewRetry((attempt) => attempt + 1);
+                      }}
+                      className="min-h-11 rounded-lg border border-amber-600/40 px-3 font-semibold hover:bg-amber-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600"
+                    >
+                      重试判断
+                    </button>
                   </div>
                 )}
 

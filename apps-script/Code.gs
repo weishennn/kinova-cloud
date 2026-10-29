@@ -188,6 +188,11 @@ function doGet(e) {
         const trades = rawTrades ? (typeof rawTrades === 'string' ? JSON.parse(rawTrades) : rawTrades) : [];
         return createResponse(true, withScriptLock(() => batchSyncTrades(trades)));
       }
+      case 'syncMoomooTrades': {
+        const rawTrades = (body && body.trades) ? body.trades : params.trades;
+        const trades = rawTrades ? (typeof rawTrades === 'string' ? JSON.parse(rawTrades) : rawTrades) : [];
+        return createResponse(true, withScriptLock(() => syncMoomooTrades(trades)));
+      }
       case 'sanitizeCategories':
         return createResponse(true, withScriptLock(() => sanitizeAllSheetCategories()));
       case 'syncAll':
@@ -307,6 +312,11 @@ function doPost(e) {
         const rawTrades = (body && body.trades) ? body.trades : params.trades;
         const trades = rawTrades ? (typeof rawTrades === 'string' ? JSON.parse(rawTrades) : rawTrades) : [];
         return createResponse(true, withScriptLock(() => batchSyncTrades(trades)));
+      }
+      case 'syncMoomooTrades': {
+        const rawTrades = (body && body.trades) ? body.trades : params.trades;
+        const trades = rawTrades ? (typeof rawTrades === 'string' ? JSON.parse(rawTrades) : rawTrades) : [];
+        return createResponse(true, withScriptLock(() => syncMoomooTrades(trades)));
       }
       case 'sanitizeCategories':
         return createResponse(true, withScriptLock(() => sanitizeAllSheetCategories()));
@@ -2115,41 +2125,9 @@ function syncPortfolioFromTrades() {
   const portfolioSheet = getSheet('Portfolio');
   if (!tradeSheet || !portfolioSheet) return;
 
-  if (tradeSheet.getLastRow() <= 1) {
-    if (portfolioSheet.getLastRow() > 1) {
-      // Self-healing: reconstruct trades from Portfolio holdings so Trade History is preserved and Portfolio is NOT wiped!
-      const pRows = portfolioSheet.getRange(2, 1, portfolioSheet.getLastRow() - 1, 6).getValues();
-      const reconstructed = [];
-      pRows.forEach(pr => {
-        const ticker = String(pr[0] || '').trim().toUpperCase();
-        const name = String(pr[1] || ticker);
-        const curr = String(pr[3] || 'USD').toUpperCase();
-        const units = Number(pr[4]) || 0;
-        const avgCost = Number(pr[5]) || 0;
-        if (ticker && units > 0) {
-          const tradeDate = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
-          reconstructed.push([
-            'moo_pos_' + ticker.toLowerCase() + '_' + new Date().getTime().toString(36),
-            tradeDate,
-            'BUY',
-            ticker,
-            name,
-            units,
-            avgCost,
-            0.50,
-            parseFloat((units * avgCost + 0.50).toFixed(2)),
-            curr,
-            'Moomoo Auto-Sync Holding (' + ticker + ')'
-          ]);
-        }
-      });
-      if (reconstructed.length > 0) {
-        tradeSheet.getRange(2, 1, reconstructed.length, 11).setValues(reconstructed);
-        SpreadsheetApp.flush();
-      }
-      return;
-    }
-  }
+  // Never fabricate trade history from current Portfolio holdings. Preserve
+  // the existing Portfolio until actual trade rows are available.
+  if (tradeSheet.getLastRow() <= 1) return;
 
   const rows = tradeSheet.getLastRow() > 1
     ? tradeSheet.getRange(2, 1, tradeSheet.getLastRow() - 1, 11).getValues()
@@ -2219,7 +2197,17 @@ function batchSyncTrades(incomingTrades) {
 
   const existingData = getSheetData('Trades');
   const existingRows = existingData.rows || [];
+  const deletedSheet = getDeletedRecordsSheet();
+  const deletedLastRow = deletedSheet.getLastRow();
+  const deletedRows = deletedLastRow > 1
+    ? deletedSheet.getRange(2, 1, deletedLastRow - 1, DELETED_TOMBSTONE_HEADERS.length).getValues()
+    : [];
+  const tombstonedTradeIds = new Set();
+  deletedRows.forEach(row => {
+    if (String(row[2] || '') === 'Trades' && row[0]) tombstonedTradeIds.add(String(row[0]).trim());
+  });
   let addedCount = 0;
+  let updatedCount = 0;
   const mergedRows = existingRows.slice();
 
   (incomingTrades || []).forEach(trade => {
@@ -2234,39 +2222,66 @@ function batchSyncTrades(incomingTrades) {
     const notes = String(trade.Notes || trade.notes || '');
     const tradeId = String(trade.Id || trade.id || ('moo_' + ticker.toLowerCase() + '_' + new Date().getTime().toString(36)));
 
-    const alreadyExists = mergedRows.some(r => {
+    const incomingOrderId = notes.match(/\bOrder:\s*([^;\s)]+)/i);
+    const incomingAccountId = notes.match(/\bAccount:\s*([^;\s)]+)/i);
+    const existingIndex = mergedRows.findIndex(r => {
       const rId = String(r.Id || r.id || '');
       const rNotes = String(r.Notes || r.notes || '');
-      if (tradeId && (rId === tradeId || (tradeId.indexOf('moo_FM') === 0 && (rId.indexOf(tradeId) >= 0 || rNotes.indexOf(tradeId) >= 0)))) return true;
-      const rTicker = String(r.Ticker || r.ticker || '').trim().toUpperCase();
-      const rDate = String(r.Date || r.date || '').trim();
-      const rAction = String(r.Action || r.action || 'BUY').toUpperCase();
-      const rQty = Math.abs(parseFloat(String(r.Quantity || r.quantity || '0')));
-      return rTicker === ticker && rDate === date && Math.abs(rQty - qty) < 0.0001 && rAction === action;
+      const existingOrderId = rNotes.match(/\bOrder:\s*([^;\s)]+)/i);
+      const existingAccountId = rNotes.match(/\bAccount:\s*([^;\s)]+)/i);
+      return Boolean(tradeId && rId === tradeId) || Boolean(incomingOrderId && (
+        (rId === `moo_${incomingOrderId[1]}` && (!existingAccountId || !incomingAccountId || existingAccountId[1] === incomingAccountId[1])) ||
+        (existingOrderId && existingOrderId[1] === incomingOrderId[1] && incomingAccountId && existingAccountId && incomingAccountId[1] === existingAccountId[1])
+      ));
     });
 
-    if (!alreadyExists) {
-      mergedRows.push({
-        Id: tradeId,
-        Date: date,
-        Action: action,
-        Ticker: ticker,
-        'Asset Name': assetName,
-        Quantity: qty,
-        Price: price,
-        Fees: fees,
-        'Net Total': parseFloat((qty * price + fees).toFixed(2)),
-        Currency: currency,
-        Notes: notes
-      });
+    const wasDeleted = existingIndex < 0 && (
+      tombstonedTradeIds.has(tradeId) ||
+      Boolean(incomingOrderId && tombstonedTradeIds.has(`moo_${incomingOrderId[1]}`))
+    );
+    if (wasDeleted) return;
+
+    const providedNetTotal = Number(trade['Net Total'] !== undefined ? trade['Net Total'] : (trade.netTotal !== undefined ? trade.netTotal : trade.total));
+    const netTotal = Number.isFinite(providedNetTotal)
+      ? providedNetTotal
+      : parseFloat((qty * price + (action === 'SELL' ? -fees : fees)).toFixed(2));
+    const normalizedTrade = {
+      Id: tradeId,
+      Date: date,
+      Action: action,
+      Ticker: ticker,
+      'Asset Name': assetName,
+      Quantity: qty,
+      Price: price,
+      Fees: fees,
+      'Net Total': netTotal,
+      Currency: currency,
+      Notes: notes
+    };
+
+    if (existingIndex >= 0) {
+      const current = mergedRows[existingIndex];
+      const existingValues = [
+        current.Id || current.id || '', current.Date || current.date || '', current.Action || current.action || '',
+        current.Ticker || current.ticker || '', current['Asset Name'] || current.AssetName || current.name || '',
+        current.Quantity || current.quantity || 0, current.Price || current.price || 0,
+        current.Fees || current.fees || 0, current['Net Total'] || current.netTotal || current.total || 0,
+        current.Currency || current.currency || '', current.Notes || current.notes || ''
+      ];
+      const incomingValues = [
+        normalizedTrade.Id, normalizedTrade.Date, normalizedTrade.Action, normalizedTrade.Ticker,
+        normalizedTrade['Asset Name'], normalizedTrade.Quantity, normalizedTrade.Price, normalizedTrade.Fees,
+        normalizedTrade['Net Total'], normalizedTrade.Currency, normalizedTrade.Notes
+      ];
+      if (existingValues.some((value, index) => String(value) !== String(incomingValues[index]))) {
+        mergedRows[existingIndex] = Object.assign({}, current, normalizedTrade);
+        updatedCount++;
+      }
+    } else {
+      mergedRows.push(normalizedTrade);
       addedCount++;
     }
   });
-
-  const capacity = Math.max(tradeSheet.getMaxRows() - 1, 1);
-  if (capacity > 0) {
-    tradeSheet.getRange(2, 1, capacity, 11).clearContent();
-  }
 
   if (mergedRows.length > 0) {
     const rowsToWrite = mergedRows.map(r => [
@@ -2290,9 +2305,195 @@ function batchSyncTrades(incomingTrades) {
 
   return {
     added: addedCount,
+    updated: updatedCount,
     total: mergedRows.length,
     rows: mergedRows
   };
+}
+
+/**
+ * Incremental Moomoo upsert. Reads only the ID and Notes columns to locate
+ * matching orders, appends new orders, and updates Portfolio from the small
+ * trade delta instead of rewriting the full Trades history.
+ */
+function syncMoomooTrades(incomingTrades) {
+  const tradeSheet = getSheet('Trades');
+  const lastRow = tradeSheet.getLastRow();
+  const existingIds = lastRow > 1 ? tradeSheet.getRange(2, 1, lastRow - 1, 1).getValues() : [];
+  const existingNotes = lastRow > 1 ? tradeSheet.getRange(2, 11, lastRow - 1, 1).getValues() : [];
+  const rowById = {};
+  const rowByAccountOrder = {};
+  const rowByLegacyOrder = {};
+  for (let i = 0; i < existingIds.length; i++) {
+    const rowIndex = i + 2;
+    const id = String(existingIds[i][0] || '').trim();
+    const notes = String(existingNotes[i][0] || '');
+    if (id) rowById[id] = rowIndex;
+    const orderMatch = notes.match(/\bOrder:\s*([^;\s)]+)/i);
+    const accountMatch = notes.match(/\bAccount:\s*([^;\s)]+)/i);
+    if (/moomoo/i.test(notes) && orderMatch) {
+      if (accountMatch) rowByAccountOrder[`${accountMatch[1]}:${orderMatch[1]}`] = rowIndex;
+      else if (id === `moo_${orderMatch[1]}`) rowByLegacyOrder[orderMatch[1]] = rowIndex;
+    }
+  }
+
+  const deletedSheet = getDeletedRecordsSheet();
+  const deletedLastRow = deletedSheet.getLastRow();
+  const deletedRows = deletedLastRow > 1
+    ? deletedSheet.getRange(2, 1, deletedLastRow - 1, DELETED_TOMBSTONE_HEADERS.length).getValues()
+    : [];
+  const tombstonedIds = new Set();
+  deletedRows.forEach(row => {
+    if (String(row[2] || '') === 'Trades' && row[0]) tombstonedIds.add(String(row[0]).trim());
+  });
+
+  let addedCount = 0;
+  let updatedCount = 0;
+  let needsPortfolioRebuild = false;
+  const newRows = [];
+  const changes = [];
+  const removedIds = [];
+  const deltaTrades = [];
+
+  (incomingTrades || []).forEach(trade => {
+    const ticker = String(trade.Ticker || trade.ticker || '').trim().toUpperCase();
+    const date = String(trade.Date || trade.date || '').trim();
+    const action = String(trade.Action || trade.action || 'BUY').toUpperCase();
+    const qty = Math.abs(parseFloat(String(trade.Quantity || trade.quantity || '0')));
+    const price = parseFloat(String(trade.Price || trade.price || '0'));
+    const fees = Math.abs(parseFloat(String(trade.Fees || trade.fees || '0')));
+    const currency = String(trade.Currency || trade.currency || 'USD').toUpperCase();
+    const assetName = String(trade['Asset Name'] || trade.AssetName || trade.name || ticker);
+    const notes = String(trade.Notes || trade.notes || '');
+    const tradeId = String(trade.Id || trade.id || '').trim();
+    const orderMatch = notes.match(/\bOrder:\s*([^;\s)]+)/i);
+    const accountMatch = notes.match(/\bAccount:\s*([^;\s)]+)/i);
+    if (!tradeId || !ticker || !date || qty <= 0 || price <= 0) return;
+
+    const rowIndex = rowById[tradeId] ||
+      (orderMatch && accountMatch ? rowByAccountOrder[`${accountMatch[1]}:${orderMatch[1]}`] : 0) ||
+      (orderMatch ? rowByLegacyOrder[orderMatch[1]] : 0) || 0;
+    if (!rowIndex) {
+      const wasDeleted = tombstonedIds.has(tradeId) || Boolean(orderMatch && tombstonedIds.has(`moo_${orderMatch[1]}`));
+      if (wasDeleted) return;
+    }
+
+    const providedNetTotal = Number(trade['Net Total'] !== undefined ? trade['Net Total'] : trade.netTotal);
+    const netTotal = Number.isFinite(providedNetTotal)
+      ? providedNetTotal
+      : parseFloat((qty * price + (action === 'SELL' ? -fees : fees)).toFixed(2));
+    const normalizedTrade = {
+      Id: tradeId,
+      Date: date,
+      Action: action,
+      Ticker: ticker,
+      'Asset Name': assetName,
+      Quantity: qty,
+      Price: price,
+      Fees: fees,
+      'Net Total': netTotal,
+      Currency: currency,
+      Notes: notes,
+    };
+    const rowValues = [tradeId, date, action, ticker, assetName, qty, price, fees, netTotal, currency, notes];
+    changes.push(normalizedTrade);
+
+    if (rowIndex) {
+      const oldValues = tradeSheet.getRange(rowIndex, 1, 1, 11).getValues()[0];
+      const oldId = String(oldValues[0] || '').trim();
+      const hasChanged = rowValues.some((value, idx) => String(value) !== String(oldValues[idx] === null || oldValues[idx] === undefined ? '' : oldValues[idx]));
+      if (hasChanged) {
+        tradeSheet.getRange(rowIndex, 1, 1, 11).setValues([rowValues]);
+        if (oldId && oldId !== tradeId) removedIds.push(oldId);
+        updatedCount++;
+        needsPortfolioRebuild = true;
+      }
+    } else {
+      newRows.push(rowValues);
+      deltaTrades.push(normalizedTrade);
+      rowById[tradeId] = lastRow + newRows.length;
+      if (orderMatch) rowByOrder[orderMatch[1]] = lastRow + newRows.length;
+      addedCount++;
+    }
+  });
+
+  if (newRows.length > 0) {
+    const appendAt = tradeSheet.getLastRow() + 1;
+    tradeSheet.getRange(appendAt, 1, newRows.length, 11).setValues(newRows);
+  }
+
+  if (needsPortfolioRebuild) {
+    syncPortfolioFromTrades();
+  } else if (deltaTrades.length > 0) {
+    applyPortfolioTradeDeltas(deltaTrades);
+  }
+  SpreadsheetApp.flush();
+
+  return { added: addedCount, updated: updatedCount, changes, removedIds };
+}
+
+function applyPortfolioTradeDeltas(trades) {
+  const portfolioSheet = getSheet('Portfolio');
+  const lastRow = portfolioSheet.getLastRow();
+  const currentRows = lastRow > 1 ? portfolioSheet.getRange(2, 1, lastRow - 1, 6).getValues() : [];
+  const holdings = {};
+  currentRows.forEach(row => {
+    const ticker = String(row[0] || '').trim().toUpperCase();
+    const units = Number(row[4]) || 0;
+    const avgCost = Number(row[5]) || 0;
+    if (!ticker || units <= 0) return;
+    if (!holdings[ticker]) {
+      holdings[ticker] = { ticker, name: String(row[1] || ticker), type: String(row[2] || 'Stock'), currency: String(row[3] || 'USD'), units: 0, cost: 0 };
+    }
+    holdings[ticker].units += units;
+    holdings[ticker].cost += units * avgCost;
+  });
+
+  (trades || []).forEach(trade => {
+    const ticker = String(trade.Ticker || '').trim().toUpperCase();
+    const action = String(trade.Action || 'BUY').toUpperCase();
+    const quantity = Number(trade.Quantity) || 0;
+    const price = Number(trade.Price) || 0;
+    const fees = Number(trade.Fees) || 0;
+    if (!ticker || quantity <= 0) return;
+    if (!holdings[ticker]) holdings[ticker] = {
+      ticker,
+      name: String(trade['Asset Name'] || ticker),
+      type: 'Stock',
+      currency: String(trade.Currency || 'USD').toUpperCase(),
+      units: 0,
+      cost: 0,
+    };
+    const holding = holdings[ticker];
+    if (action === 'BUY' || action === 'REINVEST') {
+      holding.units += quantity;
+      holding.cost += quantity * price + fees;
+    } else if (action === 'SELL') {
+      const avgCost = holding.units > 0 ? holding.cost / holding.units : 0;
+      holding.units = Math.max(0, holding.units - quantity);
+      holding.cost = Math.max(0, holding.cost - quantity * avgCost);
+    }
+  });
+
+  const output = Object.values(holdings)
+    .filter(holding => holding.units > 0)
+    .map(holding => [holding.ticker, holding.name, holding.type, holding.currency, holding.units, holding.cost / holding.units]);
+  const capacity = Math.max(portfolioSheet.getMaxRows() - 1, 1);
+  portfolioSheet.getRange(2, 1, capacity, 11).clearContent();
+  if (output.length > 0) {
+    portfolioSheet.getRange(2, 1, output.length, 6).setValues(output);
+    const formulaRows = output.map((_, idx) => {
+      const row = idx + 2;
+      return [
+        `=IF(E${row}>0, E${row}*F${row}, "")`,
+        `=IF(ISBLANK(A${row}), "", IFERROR(GOOGLEFINANCE(A${row}, "price"), IFERROR(GOOGLEFINANCE("NASDAQ:" & A${row}, "price"), IFERROR(GOOGLEFINANCE("NYSE:" & A${row}, "price"), F${row}))))`,
+        `=IF(AND(E${row}>0, H${row}>0), E${row}*H${row}, "")`,
+        `=IF(AND(G${row}>0, I${row}>0), I${row}-G${row}, "")`,
+        `=IF(AND(G${row}>0, I${row}>0), (I${row}-G${row})/G${row}, "")`,
+      ];
+    });
+    portfolioSheet.getRange(2, 7, formulaRows.length, 5).setFormulas(formulaRows);
+  }
 }
 
 function addTrade(trade, mutationId) {

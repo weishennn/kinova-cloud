@@ -46,6 +46,8 @@ import {
   type DeterministicLedgerFacts,
 } from '@/lib/copilot-ledger-facts';
 import { getUserMoneyProfile } from '@/lib/user-money-profile';
+import { getLocalDateString } from '@/lib/date-helper';
+import { runKinovaTurn } from '@/lib/kinova-assistant';
 
 interface ReceiptPriceSearchProps {
   returnTo?: string;
@@ -408,29 +410,37 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
     return allTransactions.filter((t) => idSet.has(t.id));
   }, [allTransactions, copilotState.matchingTransactionIds, copilotState.deterministicFacts]);
 
-  // Fetch Kinova Copilot reasoning
+  // Use the same thinking assistant as the home command bar for open-ended questions.
   const fetchCopilot = async (userQuery: string) => {
     setCopilotState({ status: 'loading' });
     setShowCopilotMatchingTxs(false);
     try {
       const deterministicFacts = computeDeterministicLedgerFacts(userQuery, allTransactions);
-      const res = await fetch('/api/ai/copilot', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: userQuery,
-          deterministicFacts,
-          transactions: deterministicFacts.relevantTransactionsSample,
-        }),
+      const turn = await runKinovaTurn({
+        text: userQuery,
+        today: getLocalDateString(),
+        profile: getUserMoneyProfile(allTransactions),
+        transactions: allTransactions,
+        forceAssistant: true,
+        factQuery: userQuery,
         signal: AbortSignal.timeout(35_000),
       });
-      const data = await res.json();
-      if (!res.ok || !data.success || !data.data) {
-        throw new Error(data.error || 'Kinova Copilot 暂时无法回答，请重试');
+      if (turn.source !== 'assistant') {
+        throw new Error('Kinova Assistant 暂时无法回答，请重试');
       }
+      const result = turn.assistantResult;
       setCopilotState({
         status: 'ready',
-        ...data.data,
+        headline: 'Kinova Assistant',
+        answer: [result.answer, result.reasoning].map((part) => part.trim()).filter(Boolean).join('\n'),
+        type: 'conversational',
+        timeframe: deterministicFacts.timeframeLabel,
+        matchedCount: deterministicFacts.transactionCount,
+        exactTotalSpent: deterministicFacts.exactTotalSpent,
+        isFoundInPersonalLedger: deterministicFacts.isFoundInPersonalLedger,
+        matchingTransactionIds: deterministicFacts.matchingTransactionIds,
+        priceLadder: deterministicFacts.priceLadder,
+        actionTip: result.proposedAction?.label || null,
         deterministicFacts,
       });
     } catch (err) {
@@ -1077,24 +1087,24 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
               </div>
             )}
 
-            {/* 2.5 Kinova Copilot Conversational Reasoning Card */}
+            {/* Kinova Assistant conversational reasoning */}
             {activeIntent === 'copilot' && (
               <div className="rounded-3xl bg-white/[0.07] border border-white/15 backdrop-blur-2xl p-5 sm:p-6 shadow-2xl flex flex-col gap-5">
-                {/* Copilot Header */}
+                {/* Assistant Header */}
                 <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
                   <div className="flex items-center gap-2.5">
                     <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-violet-500 border border-indigo-400/30 flex items-center justify-center text-white shadow-md">
                       <Sparkles size={18} />
                     </div>
                     <div>
-                      <div className="text-xs font-semibold text-indigo-300">Kinova Copilot 智能财务助手</div>
+                      <div className="text-xs font-semibold text-indigo-300">Kinova Assistant · 个性化财务助手</div>
                       <div className="text-sm font-bold text-white tracking-tight">
                         {copilotState.headline || '深度财务与小票推理'}
                       </div>
                     </div>
                   </div>
                   <span className="px-2.5 py-1 rounded-full bg-indigo-500/20 text-indigo-200 border border-indigo-400/30 text-[10px] font-bold uppercase tracking-wider">
-                    Gemini 2.5
+                    Kinova AI
                   </span>
                 </div>
 
@@ -1103,7 +1113,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                   <div className="flex flex-col items-center justify-center py-10 gap-3">
                     <LoaderCircle size={28} className="animate-spin text-indigo-400" />
                     <span className="text-xs text-white/70 font-medium animate-pulse">
-                      Kinova Copilot 正在全面核对历史小票与账目数据...
+                      Kinova 正在结合你的账本和个人设置思考...
                     </span>
                   </div>
                 )}
@@ -1168,7 +1178,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                       </div>
                     )}
 
-                    {/* Copilot Price Ladder */}
+                    {/* Personal ledger price ladder */}
                     {Array.isArray(copilotState.priceLadder) && copilotState.priceLadder.length > 0 && (
                       <div className="p-4 rounded-2xl bg-white/[0.04] border border-white/10 flex flex-col gap-2.5">
                         <div className="text-xs font-bold text-white flex items-center gap-1.5">
@@ -1350,7 +1360,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                   </div>
                 )}
 
-                {/* No Matches Found in Ledger -> Prompt 1-Click Online Price Grounding or Copilot */}
+                {/* No Matches Found in Ledger -> Prompt 1-Click Online Price Grounding or Assistant */}
                 {matches.length === 0 && (
                   <div className="flex flex-col items-center justify-center py-8 px-4 rounded-3xl bg-white/[0.04] border border-white/10 text-center">
                     <PackageSearch size={32} className="text-white/40 mb-3" />
@@ -1358,7 +1368,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                       你的个人账本中暂无「{displayItemName}」的记录
                     </div>
                     <p className="text-xs text-white/60 max-w-sm mb-5 leading-relaxed">
-                      历史账单和小票中未查到此商品。你可以使用 Google 搜索查询当前公开发售参考价，或让 Kinova Copilot 深度推理。
+                      历史账单和小票中未查到此商品。你可以使用 Google 搜索查询当前公开发售参考价，或让 Kinova Assistant 结合你的账本继续分析。
                     </p>
 
                     <div className="flex flex-wrap items-center justify-center gap-2.5">
@@ -1385,7 +1395,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                         className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 active:scale-95 text-indigo-300 font-semibold text-xs flex items-center gap-2 border border-white/15 cursor-pointer transition-all"
                       >
                         <Sparkles size={15} />
-                        <span>✨ Kinova Copilot 深度分析</span>
+                        <span>✨ Ask Kinova Assistant</span>
                       </button>
                     </div>
                   </div>

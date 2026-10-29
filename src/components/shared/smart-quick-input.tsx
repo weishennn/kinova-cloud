@@ -1097,6 +1097,8 @@ export function SmartQuickInput() {
               profile,
               transactions,
               forceAssistant: true,
+              factQuery: tx.description,
+              pendingReceipt: { amount: tx.amount, merchant: tx.description, date: tx.date },
             });
             if (turn.source === 'assistant') {
               setAssistantResult(turn.assistantResult);

@@ -158,14 +158,20 @@ export async function callMoomooApi<T = unknown>(
 
     const res = await fetch(fullUrl, fetchOptions);
     const rawText = await res.text().catch(() => '');
-    let json: any = null;
+    let json: Record<string, unknown> | null = null;
     try {
       // Preserve large 64-bit integer IDs as strings to prevent JS float precision loss
       const safeText = rawText.replace(/"(account_id|order_id|trade_id|pstn_id)":\s*(\d{14,})/g, '"$1": "$2"');
-      json = JSON.parse(safeText);
+      const parsed: unknown = JSON.parse(safeText);
+      json = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : {};
     } catch {
       try {
-        json = JSON.parse(rawText);
+        const parsed: unknown = JSON.parse(rawText);
+        json = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+          ? parsed as Record<string, unknown>
+          : {};
       } catch {}
     }
 
@@ -175,6 +181,16 @@ export async function callMoomooApi<T = unknown>(
       return {
         success: false,
         error: `${errMsg}${wwwAuth ? ` [WWW-Authenticate: ${wwwAuth}]` : ''}`,
+        status: res.status,
+      };
+    }
+
+    const hasApiError = json?.s === 'error' || json?.success === false ||
+      (json?.ret_code !== undefined && Number(json.ret_code) !== 0);
+    if (hasApiError) {
+      return {
+        success: false,
+        error: String(json?.errmsg || json?.message || json?.ret_msg || 'Moomoo API returned an error.'),
         status: res.status,
       };
     }

@@ -562,6 +562,8 @@ export function encodeOpaqueDraftTicket(draft: ShortcutQuickDraft, secret?: stri
       date: draft.date,
       items: draft.items,
       ocrSummary: draft.ocrSummary,
+      assistantAdvice: draft.assistantAdvice,
+      proposedActionLabel: draft.proposedActionLabel,
       notes: draft.notes,
       missingFields: draft.missingFields,
       uncertainFields: draft.uncertainFields,

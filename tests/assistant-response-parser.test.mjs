@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { computeDeterministicLedgerFacts, parseAssistantJsonResponse } from '../src/lib/kinova-assistant.ts';
+import { computeDeterministicLedgerFacts, parseAssistantJsonResponse, runKinovaTurn } from '../src/lib/kinova-assistant.ts';
 
 const mockProfile = {
   language: 'auto',
@@ -65,6 +65,44 @@ test('computeDeterministicLedgerFacts detects potential duplicate against receip
   assert.ok(facts.potentialDuplicate);
   assert.equal(facts.potentialDuplicate.amount, 80);
   assert.equal(facts.potentialDuplicate.description, 'Shell Petrol');
+});
+
+test('runKinovaTurn forwards receipt facts and merchant query to the assistant pass', async () => {
+  const originalFetch = globalThis.fetch;
+  let sentBody;
+  globalThis.fetch = async (_url, init) => {
+    sentBody = JSON.parse(String(init?.body || '{}'));
+    return new Response(JSON.stringify({
+      success: true,
+      model: 'mock-model',
+      data: {
+        mode: 'advise',
+        reasoning: 'There is a matching Shell record for RM 80.00.',
+        answer: 'This may be a duplicate.',
+        proposedAction: null,
+        command: null,
+        clarification: null,
+        receiptAnalysis: { merchant: 'Shell Petrol', netAmount: 80, taxReliefCategory: null, isDuplicate: true, comparisonToMedian: null },
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+
+  try {
+    await runKinovaTurn({
+      text: 'Review this payment screenshot from Shell Petrol for RM 80.00.',
+      today: '2026-10-29',
+      profile: mockProfile,
+      transactions,
+      forceAssistant: true,
+      factQuery: 'Shell Petrol',
+      pendingReceipt: { amount: 80, merchant: 'Shell Petrol', date: '2026-10-04' },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(sentBody.deterministicFacts.potentialDuplicate.amount, 80);
+  assert.equal(sentBody.deterministicFacts.potentialDuplicate.description, 'Shell Petrol');
 });
 
 test('parseAssistantJsonResponse parses plain valid JSON', () => {

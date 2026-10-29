@@ -1,206 +1,270 @@
+import { createHash } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { getMoomooConfig, callMoomooApi } from '@/lib/moomoo-client';
+import { getMoomooConfig, callMoomooApi, type MoomooConfig } from '@/lib/moomoo-client';
 import { getValidGoogleSession, setSessionCookie, type GoogleUserSession } from '@/lib/google-auth';
 import { executeUserGoogleAction } from '@/lib/google-sheets-user-engine';
 import { fetchAdminAppsScript, getAdminAppsScriptEndpoint } from '@/lib/admin-registry';
+import {
+  findMoomooOrderTradeIndex,
+  calculateMoomooNetTotal,
+  getMoomooSyncStartMs,
+  MOOMOO_SYNC_STATE_KEY,
+  normalizeMoomooOrder,
+  parseMoomooDate,
+  parseMoomooSyncState,
+  type MoomooSyncState,
+} from '@/lib/moomoo-sync';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
-function parseMoomooDate(val: any): string {
-  if (!val) return new Date().toISOString().split('T')[0];
-  if (typeof val === 'number' || /^\d+$/.test(String(val).trim())) {
-    const num = Number(val);
-    if (num > 1e14) {
-      // microseconds (16 digits)
-      return new Date(num / 1000).toISOString().split('T')[0];
-    }
-    if (num > 1e11) {
-      // milliseconds (13 digits)
-      return new Date(num).toISOString().split('T')[0];
-    }
-    if (num > 1e8) {
-      // seconds (10 digits)
-      return new Date(num * 1000).toISOString().split('T')[0];
-    }
+// Moomoo's response envelopes differ across endpoints; each field is validated before use.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type JsonRecord = Record<string, any>;
+
+function unwrapData(value: unknown): JsonRecord {
+  let current = value as JsonRecord;
+  if (current?.data && typeof current.data === 'object') current = current.data;
+  if (current?.d && typeof current.d === 'object') current = current.d;
+  return current || {};
+}
+
+function getString(value: unknown): string {
+  return value === null || value === undefined ? '' : String(value).trim();
+}
+
+function parseAmount(value: unknown): number | null {
+  if (value === null || value === undefined || String(value).trim() === '') return null;
+  const amount = Number(String(value).replace(/[,$\s]/g, ''));
+  return Number.isFinite(amount) ? amount : null;
+}
+
+function toMicroseconds(milliseconds: number): number {
+  return Math.floor(milliseconds * 1000);
+}
+
+function recordsFromPage(data: JsonRecord, keys: string[]): JsonRecord[] {
+  for (const key of keys) {
+    if (Array.isArray(data[key])) return data[key];
   }
-  const str = String(val).trim();
-  const firstPart = str.split(' ')[0].split('T')[0];
-  const slashParts = firstPart.split('/');
-  if (slashParts.length === 3) {
-    const month = slashParts[0].padStart(2, '0');
-    const day = slashParts[1].padStart(2, '0');
-    const year = slashParts[2];
-    return `${year}-${month}-${day}`;
+  if (Array.isArray(data.d)) return data.d;
+  return [];
+}
+
+async function fetchAllPages(
+  accountId: string,
+  endpoint: string,
+  params: Record<string, string | number>,
+  recordKeys: string[],
+  pageSize: number,
+  config: MoomooConfig
+): Promise<JsonRecord[]> {
+  const records: JsonRecord[] = [];
+  const seenFlags = new Set<string>();
+  let pageFlag = '';
+
+  for (let page = 0; page < 500; page++) {
+    const query: Record<string, string | number> = { ...params, page_size: pageSize };
+    if (pageFlag) query.page_flag = pageFlag;
+    const result = await callMoomooApi<JsonRecord>(endpoint, { method: 'GET', params: query, config });
+    if (!result.success) throw new Error(`Moomoo ${endpoint} failed for account ${accountId}: ${result.error || 'API request failed'}`);
+
+    const data = unwrapData(result.data);
+    const currentRecords = recordsFromPage(data, recordKeys);
+    records.push(...currentRecords);
+
+    const nextFlag = getString(data.page_flag || data.pagination?.page_flag || (result.data as JsonRecord)?.page_flag);
+    const completed = data.completed === true || data.pagination?.completed === true || (result.data as JsonRecord)?.completed === true;
+    if (completed || !nextFlag) return records;
+    if (seenFlags.has(nextFlag)) {
+      throw new Error(`Moomoo ${endpoint} returned a repeated page cursor for account ${accountId}.`);
+    }
+    seenFlags.add(nextFlag);
+    pageFlag = nextFlag;
   }
-  const dashParts = firstPart.split('-');
-  if (dashParts.length === 3) {
-    return firstPart;
-  }
-  return new Date().toISOString().split('T')[0];
+
+  throw new Error(`Moomoo ${endpoint} exceeded the safe pagination limit for account ${accountId}.`);
 }
 
 async function getExistingTrades(session: GoogleUserSession): Promise<Array<Record<string, unknown>>> {
   if (session.isAdmin && getAdminAppsScriptEndpoint()) {
-    const res = (await fetchAdminAppsScript('GET', 'getTrades')) as any;
-    const rows = res?.data?.rows || res?.rows || (Array.isArray(res?.data) ? res.data : []);
-    return Array.isArray(rows) ? rows : [];
+    const response = await fetchAdminAppsScript('GET', 'getTrades') as JsonRecord | null;
+    if (!response?.success) throw new Error(response?.message || 'Could not read the Trades sheet.');
+    const data = response.data?.data || response.data;
+    const rows = data?.rows || (Array.isArray(data) ? data : null);
+    if (!Array.isArray(rows)) throw new Error('The Trades sheet returned an invalid response.');
+    return rows;
   }
-  const existingTradesRes = await executeUserGoogleAction(session, 'getTrades', {}).catch(() => ({
-    result: { rows: [] },
-  }));
-  return ((existingTradesRes as any)?.result?.rows || []) as Array<Record<string, unknown>>;
+
+  const { result } = await executeUserGoogleAction(session, 'getTrades', {});
+  const data = result as JsonRecord;
+  const rows = data?.rows || (Array.isArray(data) ? data : null);
+  if (!Array.isArray(rows)) throw new Error('The Trades sheet returned an invalid response.');
+  return rows;
 }
 
 async function syncTradesToLedger(
   session: GoogleUserSession,
   trades: Array<Record<string, unknown>>,
-  rawExistingRows: Array<Record<string, unknown>>
-): Promise<{ added: number; rows: Array<Record<string, unknown>> }> {
+  fullSync: boolean
+): Promise<{ added: number; updated: number; rows?: Array<Record<string, unknown>>; changes: Array<Record<string, unknown>>; removedIds: string[] }> {
+  const action = fullSync ? 'batchSyncTrades' : 'syncMoomooTrades';
   if (session.isAdmin && getAdminAppsScriptEndpoint()) {
-    let added = 0;
-    for (const t of trades) {
-      const res = (await fetchAdminAppsScript('POST', 'addTrade', { tradeData: t })) as any;
-      if (res?.success) added++;
-    }
-    await fetchAdminAppsScript('POST', 'syncPortfolio', {});
-    const freshRes = (await fetchAdminAppsScript('GET', 'getTrades')) as any;
-    const freshRows = freshRes?.data?.rows || freshRes?.rows || (Array.isArray(freshRes?.data) ? freshRes.data : []);
+    const response = await fetchAdminAppsScript('POST', action, { trades }) as JsonRecord | null;
+    if (!response?.success) throw new Error(response?.message || 'Could not write Moomoo trades to Google Sheets.');
+    const data = response.data?.result || response.data;
+    if (!data || (fullSync && !Array.isArray(data.rows))) throw new Error('Google Sheets did not confirm the Moomoo trade write.');
     return {
-      added,
-      rows: Array.isArray(freshRows) && freshRows.length > 0 ? freshRows : [...rawExistingRows, ...trades],
+      added: Number(data.added) || 0,
+      updated: Number(data.updated) || 0,
+      rows: Array.isArray(data.rows) ? data.rows : undefined,
+      changes: Array.isArray(data.changes) ? data.changes : trades,
+      removedIds: Array.isArray(data.removedIds) ? data.removedIds.map(String) : [],
     };
   }
-  const batchRes = await executeUserGoogleAction(session, 'batchSyncTrades', {
-    trades,
-  }).catch((e) => {
-    console.error('Batch sync trades error:', e);
-    return null;
-  });
-  const batchData = (batchRes as any)?.result;
+
+  const { result } = await executeUserGoogleAction(session, action, { trades });
+  const data = result as JsonRecord;
+  if (!data || (fullSync && !Array.isArray(data.rows))) throw new Error('Google Sheets did not confirm the Moomoo trade write.');
   return {
-    added: batchData?.added ?? trades.length,
-    rows: batchData?.rows ?? [...rawExistingRows, ...trades],
+    added: Number(data.added) || 0,
+    updated: Number(data.updated) || 0,
+    rows: Array.isArray(data.rows) ? data.rows : undefined,
+    changes: Array.isArray(data.changes) ? data.changes : trades,
+    removedIds: Array.isArray(data.removedIds) ? data.removedIds.map(String) : [],
   };
 }
 
-async function getMonthRows(session: GoogleUserSession, monthStr: string): Promise<Array<Record<string, unknown>>> {
+async function getSettings(session: GoogleUserSession): Promise<Record<string, unknown>> {
   if (session.isAdmin && getAdminAppsScriptEndpoint()) {
-    const res = (await fetchAdminAppsScript('GET', 'getSheetDataIfExists', { sheetName: monthStr })) as any;
-    return (res?.data?.rows || res?.rows || []) as Array<Record<string, unknown>>;
+    const response = await fetchAdminAppsScript('GET', 'getSettings') as JsonRecord | null;
+    if (!response?.success) throw new Error(response?.message || 'Could not read sync status from Google Sheets.');
+    const data = response.data?.data || response.data;
+    return data && typeof data === 'object' ? data : {};
   }
-  const monthDataRes = await executeUserGoogleAction(session, 'getSheetDataIfExists', {
-    sheetName: monthStr,
-  }).catch(() => null);
-  return ((monthDataRes as any)?.result?.rows || []) as Array<Record<string, unknown>>;
+  const { result } = await executeUserGoogleAction(session, 'getSettings', {});
+  return result && typeof result === 'object' ? result as Record<string, unknown> : {};
 }
 
-async function addDepositRow(session: GoogleUserSession, monthStr: string, rowData: Record<string, unknown>): Promise<void> {
+async function saveSyncState(session: GoogleUserSession, state: MoomooSyncState): Promise<void> {
+  const value = JSON.stringify(state);
   if (session.isAdmin && getAdminAppsScriptEndpoint()) {
-    await fetchAdminAppsScript('POST', 'addRow', { sheetName: monthStr, rowData });
+    const response = await fetchAdminAppsScript('POST', 'updateSettings', {
+      key: MOOMOO_SYNC_STATE_KEY,
+      value,
+    }) as JsonRecord | null;
+    if (!response?.success) throw new Error(response?.message || 'Could not save Moomoo sync status to Google Sheets.');
     return;
   }
-  await executeUserGoogleAction(session, 'addRow', { sheetName: monthStr, rowData });
+  await executeUserGoogleAction(session, 'updateSettings', { key: MOOMOO_SYNC_STATE_KEY, value });
 }
 
-async function syncPortfolioLedger(session: GoogleUserSession): Promise<void> {
+async function readMoomooFee(
+  accountId: string,
+  orderId: string,
+  config: MoomooConfig
+): Promise<{ totalFee: number; currency: string; items: Array<{ type: string; amount: number }> } | null> {
+  const result = await callMoomooApi<JsonRecord>(
+    `/api/v1.0/accounts/${encodeURIComponent(accountId)}/orders/${encodeURIComponent(orderId)}/fees`,
+    { method: 'GET', config }
+  );
+  if (!result.success) return null;
+  const data = unwrapData(result.data);
+  const entries = Array.isArray(data.fees) ? data.fees : [];
+  const items = entries
+    .map((fee: JsonRecord) => ({ type: getString(fee.type || fee.name), amount: parseAmount(fee.amount) }))
+    .filter((fee: { type: string; amount: number | null }): fee is { type: string; amount: number } => Boolean(fee.type) && fee.amount !== null);
+  const total = parseAmount(data.total_fee ?? data.totalFee);
+  if (total === null && items.length === 0) return null;
+  return {
+    totalFee: Math.abs(total ?? items.reduce((sum: number, fee: { amount: number }) => sum + fee.amount, 0)),
+    currency: getString(data.currency),
+    items,
+  };
+}
+
+async function mapWithConcurrency<T, R>(items: T[], concurrency: number, mapper: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= items.length) return;
+      results[index] = await mapper(items[index]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+function cashLogFeeByOrderId(logs: JsonRecord[]): Map<string, number> {
+  const fees = new Map<string, number>();
+  for (const log of logs) {
+    const name = getString(log.transaction_name || log.transaction_type);
+    if (!/fee|commission|charge|佣金|费用|收费/i.test(name)) continue;
+    const orderId = getString(log.order_id || log.orderId);
+    const amount = parseAmount(log.cash_change);
+    if (!orderId || amount === null) continue;
+    fees.set(orderId, (fees.get(orderId) || 0) + Math.abs(amount));
+  }
+  return fees;
+}
+
+async function getMonthRows(session: GoogleUserSession, month: string): Promise<Array<Record<string, unknown>>> {
   if (session.isAdmin && getAdminAppsScriptEndpoint()) {
-    await fetchAdminAppsScript('POST', 'syncPortfolio', {});
+    const response = await fetchAdminAppsScript('GET', 'getSheetDataIfExists', { sheetName: month }) as JsonRecord | null;
+    if (!response?.success) throw new Error(`Could not read ${month} from Google Sheets.`);
+    const data = response.data?.data || response.data;
+    return Array.isArray(data?.rows) ? data.rows : [];
+  }
+  const { result } = await executeUserGoogleAction(session, 'getSheetDataIfExists', { sheetName: month });
+  const data = result as JsonRecord;
+  if (!Array.isArray(data?.rows)) throw new Error(`Could not read ${month} from Google Sheets.`);
+  return data.rows;
+}
+
+async function addDepositRow(session: GoogleUserSession, month: string, rowData: Record<string, unknown>): Promise<void> {
+  if (session.isAdmin && getAdminAppsScriptEndpoint()) {
+    const response = await fetchAdminAppsScript('POST', 'addRow', { sheetName: month, rowData }) as JsonRecord | null;
+    if (!response?.success) throw new Error('Could not write a Moomoo deposit to Google Sheets.');
     return;
   }
-  await executeUserGoogleAction(session, 'syncPortfolio', {}).catch(() => null);
+  await executeUserGoogleAction(session, 'addRow', { sheetName: month, rowData });
 }
 
 async function getPortfolioRows(session: GoogleUserSession): Promise<Array<Record<string, unknown>>> {
   if (session.isAdmin && getAdminAppsScriptEndpoint()) {
-    const res = (await fetchAdminAppsScript('GET', 'getPortfolio', {})) as any;
-    const rows = res?.data?.rows || res?.rows || (Array.isArray(res?.data) ? res.data : []);
-    return Array.isArray(rows) ? rows : [];
+    const response = await fetchAdminAppsScript('GET', 'getPortfolio') as JsonRecord | null;
+    if (!response?.success) throw new Error('Could not read the Portfolio sheet after syncing.');
+    const data = response.data?.data || response.data;
+    return Array.isArray(data?.rows) ? data.rows : Array.isArray(data) ? data : [];
   }
-  const freshPortfolioRes = await executeUserGoogleAction(session, 'getPortfolio', {}).catch(() => null);
-  return ((freshPortfolioRes as any)?.result || []) as Array<Record<string, unknown>>;
+  const { result } = await executeUserGoogleAction(session, 'getPortfolio', {});
+  return Array.isArray(result) ? result as Array<Record<string, unknown>> : [];
+}
+
+function getSyncTimestamp(settings: Record<string, unknown>): string | null {
+  const state = parseMoomooSyncState(settings[MOOMOO_SYNC_STATE_KEY]);
+  if (!state) return null;
+  const accountTimes = Object.values(state.accountLastSyncAt).filter((timestamp) => Number.isFinite(Date.parse(timestamp)));
+  return accountTimes.sort((a, b) => Date.parse(b) - Date.parse(a))[0] || state.lastSyncAt || null;
 }
 
 export async function GET(req: NextRequest) {
   try {
-    const config = getMoomooConfig();
-    if (!config) {
-      return NextResponse.json({
-        configured: false,
-        message: 'Moomoo API is not configured yet. Add MOOMOO_API_KEY and MOOMOO_SECRET_KEY to your environment variables.',
-      });
-    }
-
-    // Discover authorized real trading accounts
-    const authAccsRes = await callMoomooApi('/api/v1.0/accounts/authorized_trd_accs', {
-      method: 'GET',
-      config,
-    }).catch((e) => ({ success: false, error: String(e) }));
-
-    const authData = (authAccsRes as any)?.data;
-    const realAccounts = authData?.d?.accounts || authData?.accounts || [];
-    const realResults: Record<string, unknown> = {};
-
-    const nowMs = Date.now();
-    const beginTimeMicroseconds = (nowMs - 365 * 24 * 60 * 60 * 1000) * 1000;
-    const endTimeMicroseconds = (nowMs + 24 * 60 * 60 * 1000) * 1000;
-
-    for (const acc of realAccounts) {
-      const accId = String(acc.account_id || '');
-      if (!accId) continue;
-
-      const [pos, ordersUs, ordersMy, cash, fundsUsd, fundsMyr] = await Promise.all([
-        callMoomooApi(`/api/v1.0/accounts/${accId}/positions`, { method: 'GET', config }).catch(() => null),
-        callMoomooApi(`/api/v1.0/accounts/${accId}/orders_history`, {
-          method: 'GET',
-          params: { trd_market: 'US' },
-          config,
-        }).catch(() => null),
-        callMoomooApi(`/api/v1.0/accounts/${accId}/orders_history`, {
-          method: 'GET',
-          params: { trd_market: 'MY' },
-          config,
-        }).catch(() => null),
-        callMoomooApi(`/api/v1.0/accounts/${accId}/cash_logs`, {
-          method: 'GET',
-          params: {
-            begin_time: beginTimeMicroseconds,
-            end_time: endTimeMicroseconds,
-            page_size: 20,
-          },
-          config,
-        }).catch(() => null),
-        callMoomooApi(`/api/v1.0/accounts/${accId}/funds`, {
-          method: 'GET',
-          params: { currency: 'USD' },
-          config,
-        }).catch(() => null),
-        callMoomooApi(`/api/v1.0/accounts/${accId}/funds`, {
-          method: 'GET',
-          params: { currency: 'MYR' },
-          config,
-        }).catch(() => null),
-      ]);
-
-      realResults[accId] = {
-        positions: pos?.data || pos?.error,
-        ordersUs: ordersUs?.data || ordersUs?.error,
-        ordersMy: ordersMy?.data || ordersMy?.error,
-        cashLogs: cash?.data || cash?.error,
-        fundsUsd: fundsUsd?.data || fundsUsd?.error,
-        fundsMyr: fundsMyr?.data || fundsMyr?.error,
-      };
-    }
-
-    return NextResponse.json({
-      configured: true,
-      apiKeyPrefix: config.apiKey.slice(0, 6) + '***',
-      connectionStatus: 'CONNECTED',
-      authorizedTradingAccounts: (authAccsRes as any)?.data || (authAccsRes as any)?.error,
-      realResults,
+    const { session, refreshed } = await getValidGoogleSession(req);
+    if (!session) return NextResponse.json({ success: false, error: 'Unauthorized.' }, { status: 401 });
+    const settings = await getSettings(session);
+    const response = NextResponse.json({
+      success: true,
+      configured: Boolean(getMoomooConfig()),
+      lastSyncAt: getSyncTimestamp(settings),
     });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Unknown error';
-    return NextResponse.json({ success: false, error: msg }, { status: 500 });
+    if (refreshed) setSessionCookie(response, session);
+    return response;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not read Moomoo sync status.';
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
 
@@ -208,388 +272,196 @@ export async function POST(req: NextRequest) {
   try {
     const { session, refreshed } = await getValidGoogleSession(req);
     if (!session) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized. Please log in to your account first.' },
-        { status: 401 }
-      );
+      return NextResponse.json({ success: false, error: 'Unauthorized. Please log in to your account first.' }, { status: 401 });
     }
 
     const config = getMoomooConfig();
-
     if (!config) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Moomoo API credentials not configured. Please add MOOMOO_API_KEY and MOOMOO_SECRET_KEY in your environment.',
-        },
-        { status: 400 }
-      );
-    }
-
-    // 1. Fetch authorized trading accounts
-    const authAccsRes = await callMoomooApi('/api/v1.0/accounts/authorized_trd_accs', {
-      method: 'GET',
-      config,
-    });
-
-    const authData = (authAccsRes as any)?.data;
-    const realAccounts = authData?.d?.accounts || authData?.accounts || [];
-    if (realAccounts.length === 0) {
       return NextResponse.json({
         success: false,
-        error: 'No authorized Moomoo trading accounts found for this API key.',
-      });
+        error: 'Moomoo API credentials are not configured. Please add MOOMOO_API_KEY and MOOMOO_SECRET_KEY.',
+      }, { status: 400 });
     }
 
-    const nowMs = Date.now();
-    const beginTimeMicroseconds = (nowMs - 365 * 24 * 60 * 60 * 1000) * 1000;
-    const endTimeMicroseconds = (nowMs + 24 * 60 * 60 * 1000) * 1000;
+    const settings = await getSettings(session);
+    const oldState = parseMoomooSyncState(settings[MOOMOO_SYNC_STATE_KEY]);
 
-    // 2. Fetch positions, orders, cash logs, and funds across all authorized accounts
-    const positionsList: any[] = [];
-    const ordersList: any[] = [];
-    const cashLogsList: any[] = [];
-    let fundsUsdRes: any = null;
-    let fundsMyrRes: any = null;
+    const accountsResult = await callMoomooApi<JsonRecord>('/api/v1.0/accounts/authorized_trd_accs', { method: 'GET', config });
+    if (!accountsResult.success) throw new Error(accountsResult.error || 'Could not read authorized Moomoo accounts.');
+    const accountData = unwrapData(accountsResult.data);
+    const authorizedAccounts = recordsFromPage(accountData, ['accounts', 'list']);
+    if (authorizedAccounts.length === 0) throw new Error('No authorized Moomoo trading accounts were returned.');
 
-    for (const acc of realAccounts) {
-      const accId = String(acc.account_id || '');
-      if (!accId) continue;
+    const configuredAccountId = getString(config.accountId);
+    const selectedAccounts = configuredAccountId
+      ? authorizedAccounts.filter((account) => getString(account.account_id || account.acc_id) === configuredAccountId)
+      : authorizedAccounts;
+    if (selectedAccounts.length === 0) {
+      throw new Error(`Configured Moomoo account ${configuredAccountId} is not authorized for this API key.`);
+    }
 
-      const [posRes, ordersUsRes, ordersMyRes, cashLogsRes, fUsd, fMyr] = await Promise.all([
-        callMoomooApi<any>(`/api/v1.0/accounts/${accId}/positions`, { method: 'GET', config }).catch(() => null),
-        callMoomooApi<any>(`/api/v1.0/accounts/${accId}/orders_history`, {
-          method: 'GET',
-          params: { trd_market: 'US', begin_time: beginTimeMicroseconds, end_time: endTimeMicroseconds },
-          config,
-        }).catch(() => null),
-        callMoomooApi<any>(`/api/v1.0/accounts/${accId}/orders_history`, {
-          method: 'GET',
-          params: { trd_market: 'MY', begin_time: beginTimeMicroseconds, end_time: endTimeMicroseconds },
-          config,
-        }).catch(() => null),
-        callMoomooApi<any>(`/api/v1.0/accounts/${accId}/cash_logs`, {
-          method: 'GET',
-          params: {
-            begin_time: beginTimeMicroseconds,
-            end_time: endTimeMicroseconds,
-            page_size: 100,
-          },
-          config,
-        }).catch(() => null),
-        callMoomooApi<any>(`/api/v1.0/accounts/${accId}/funds`, {
-          method: 'GET',
-          params: { currency: 'USD' },
-          config,
-        }).catch(() => null),
-        callMoomooApi<any>(`/api/v1.0/accounts/${accId}/funds`, {
-          method: 'GET',
-          params: { currency: 'MYR' },
-          config,
-        }).catch(() => null),
+    const accountPayloads = await Promise.all(selectedAccounts.map(async (account) => {
+      const accountId = getString(account.account_id || account.acc_id);
+      if (!accountId) return null;
+      const previousAccountSyncAt = oldState?.accountLastSyncAt[accountId];
+      const beginMs = getMoomooSyncStartMs(previousAccountSyncAt);
+      const endMs = Date.now() + 24 * 60 * 60 * 1000;
+      const timeParams = {
+        begin_time: toMicroseconds(beginMs),
+        end_time: toMicroseconds(endMs),
+      };
+
+      const [orders, cashLogs, positions] = await Promise.all([
+        fetchAllPages(accountId, `/api/v1.0/accounts/${encodeURIComponent(accountId)}/orders_history`, timeParams, ['orders', 'list'], 100, config),
+        fetchAllPages(accountId, `/api/v1.0/accounts/${encodeURIComponent(accountId)}/cash_logs`, timeParams, ['cash_logs', 'list'], 20, config),
+        (async () => {
+          const result = await callMoomooApi<JsonRecord>(`/api/v1.0/accounts/${encodeURIComponent(accountId)}/positions`, { method: 'GET', config });
+          if (!result.success) throw new Error(`Moomoo positions failed for account ${accountId}: ${result.error || 'API request failed'}`);
+          return recordsFromPage(unwrapData(result.data), ['positions', 'position_list', 'list']);
+        })(),
       ]);
+      return { accountId, currency: getString(account.currency), orders, cashLogs, positions, previousAccountSyncAt };
+    }));
 
-      if (fUsd?.data?.d) fundsUsdRes = fUsd;
-      if (fMyr?.data?.d) fundsMyrRes = fMyr;
-
-      const rawPos =
-        posRes?.data?.d?.positions ||
-        posRes?.data?.d?.list ||
-        posRes?.data?.positions ||
-        posRes?.data?.list ||
-        posRes?.data?.d ||
-        [];
-      if (Array.isArray(rawPos)) positionsList.push(...rawPos);
-
-      const rawOrdersUs = ordersUsRes?.data?.d?.orders || ordersUsRes?.data?.d?.list || ordersUsRes?.data?.orders || [];
-      if (Array.isArray(rawOrdersUs)) ordersList.push(...rawOrdersUs);
-
-      const rawOrdersMy = ordersMyRes?.data?.d?.orders || ordersMyRes?.data?.d?.list || ordersMyRes?.data?.orders || [];
-      if (Array.isArray(rawOrdersMy)) ordersList.push(...rawOrdersMy);
-
-      const rawCashLogs = cashLogsRes?.data?.d?.list || cashLogsRes?.data?.d?.cash_logs || cashLogsRes?.data?.list || [];
-      if (Array.isArray(rawCashLogs)) cashLogsList.push(...rawCashLogs);
+    const accounts = accountPayloads.filter((account): account is NonNullable<typeof account> => Boolean(account));
+    const fullSync = accounts.some((account) => !account.previousAccountSyncAt);
+    const rawExistingRows = fullSync ? await getExistingTrades(session) : [];
+    const existingRows = [...rawExistingRows];
+    const feeLookupCount = { failed: 0 };
+    const tradeCandidates: Array<{ accountId: string; orderId: string; order: JsonRecord; existingIndex: number }> = [];
+    const seenOrders = new Set<string>();
+    for (const account of accounts) {
+      for (const order of account.orders) {
+        const orderId = getString(order.order_id || order.orderId);
+        if (!orderId) continue;
+        const uniqueKey = `${account.accountId}:${orderId}`;
+        if (seenOrders.has(uniqueKey)) continue;
+        seenOrders.add(uniqueKey);
+        const quantity = parseAmount(order.dealt_qty ?? order.dealtQty ?? order.filled_qty ?? order.filledQty) || 0;
+        if (quantity <= 0) continue;
+        const existingIndex = findMoomooOrderTradeIndex(existingRows, account.accountId, orderId);
+        tradeCandidates.push({ accountId: account.accountId, orderId, order, existingIndex });
+      }
     }
 
-    // 3. Read existing Trades from Google Sheets
-    const rawExistingRows = await getExistingTrades(session);
+    const feeByOrderId = new Map<string, number>();
+    for (const account of accounts) {
+      for (const [orderId, amount] of cashLogFeeByOrderId(account.cashLogs)) {
+        feeByOrderId.set(`${account.accountId}:${orderId}`, amount);
+      }
+    }
 
-    let syncedTrades = 0;
-    let skippedTrades = 0;
-    const allSyncedTrades: Array<Record<string, unknown>> = [...rawExistingRows];
+    const normalizedTrades = await mapWithConcurrency(tradeCandidates, 6, async ({ accountId, orderId, order, existingIndex }) => {
+      const existing = existingIndex >= 0 ? existingRows[existingIndex] : null;
+      const existingNotes = getString(existing?.Notes || existing?.notes);
+      const hasPreviouslyItemizedFees = existingNotes.includes('Fee breakdown:');
+      const feeInfo = hasPreviouslyItemizedFees
+        ? { totalFee: existing?.Fees ?? existing?.fees ?? 0, currency: existing?.Currency || existing?.currency, items: [] }
+        : await readMoomooFee(accountId, orderId, config).catch(() => null);
 
-    // Build fee lookup map from cash logs: by clean symbol & by order_id
-    const feeBySymbol: Record<string, number> = {};
-    const feeByOrderId: Record<string, number> = {};
+      const trade = normalizeMoomooOrder(order, accountId, feeInfo || undefined);
+      if (!trade) return null;
 
-    for (const log of cashLogsList) {
-      const isFee =
-        /fee|commission|charges|佣金|费用|收费/i.test(String(log.transaction_name || '')) ||
-        String(log.transaction_type || '').toLowerCase().includes('fee');
-
-      if (isFee) {
-        const feeAmount = Math.abs(parseFloat(log.cash_change || '0'));
-        if (log.symbol) {
-          const sym = String(log.symbol).replace(/^(US\.|HK\.|MY\.)/, '').trim().toUpperCase();
-          feeBySymbol[sym] = (feeBySymbol[sym] || 0) + feeAmount;
+      if (!feeInfo && !hasPreviouslyItemizedFees) {
+        const exactCashFee = feeByOrderId.get(`${accountId}:${orderId}`);
+        if (exactCashFee !== undefined) {
+          trade.Fees = exactCashFee;
+          trade['Net Total'] = calculateMoomooNetTotal(String(trade.Action), Number(trade.Quantity), Number(trade.Price), exactCashFee);
+        } else if (parseAmount(order.dealt_fee ?? order.fee ?? order.fees ?? order.total_fee ?? order.commission) === null) {
+          feeLookupCount.failed++;
+          trade.Notes = `${trade.Notes}; Fee details unavailable`;
         }
-        if (log.order_id) {
-          const oId = String(log.order_id).trim();
-          feeByOrderId[oId] = (feeByOrderId[oId] || 0) + feeAmount;
-        }
       }
-    }
+      if (existing && hasPreviouslyItemizedFees) trade.Notes = existingNotes;
+      return trade;
+    });
 
-    const tradesToSync: Array<Record<string, unknown>> = [];
+    const tradesToSync = normalizedTrades.filter((trade): trade is Record<string, unknown> => Boolean(trade));
+    const ledgerResult = tradesToSync.length > 0
+      ? await syncTradesToLedger(session, tradesToSync, fullSync)
+      : { added: 0, updated: 0, rows: rawExistingRows, changes: [], removedIds: [] };
 
-    // Sync filled orders to Google Sheet 'Trades'
-    for (const order of ordersList) {
-      if (order.order_status !== 'FILLED_ALL' && order.order_status !== 'FILLED_PART') {
-        continue;
-      }
-
-      const rawCode = String(order.code || order.symbol || '');
-      const ticker = rawCode.replace(/^(US\.|HK\.|MY\.)/, '').trim().toUpperCase();
-      const orderId = String(order.order_id || '');
-      const orderDate = parseMoomooDate(order.create_time || order.updated_time || order.time);
-
-      const qty = parseFloat(order.dealt_qty || order.qty || '0');
-      const price = parseFloat(order.dealt_avg_price || order.price || '0');
-      const action = String(order.side || 'BUY').toUpperCase();
-      const currency = String(order.currency || 'USD').toUpperCase();
-      const stockName = String(order.stock_name || ticker);
-
-      // Check if this specific order is already logged
-      const isAlreadyLogged = rawExistingRows.some((r) => {
-        const notes = String(r.Notes || '');
-        const rId = String(r.Id || '');
-        if (orderId && (notes.includes(orderId) || rId.includes(orderId))) return true;
-        const rTicker = String(r.Ticker || '').toUpperCase();
-        const rDate = String(r.Date || '');
-        const rQty = Math.abs(parseFloat(String(r.Quantity || '0')));
-        const rAction = String(r.Action || 'BUY').toUpperCase();
-        return rTicker === ticker && rDate === orderDate && Math.abs(rQty - qty) < 0.0001 && rAction === action;
-      });
-
-      if (isAlreadyLogged) {
-        skippedTrades++;
-        continue;
-      }
-
-      // Extract accurate fee from order directly or lookup from cash logs
-      const orderFee = Math.abs(
-        parseFloat(order.dealt_fee || order.fee || order.fees || order.total_fee || order.commission || '0')
-      );
-      const logFee = (orderId && feeByOrderId[orderId]) ? feeByOrderId[orderId] : (feeBySymbol[ticker] || 0);
-      const fees = orderFee > 0 ? orderFee : logFee > 0 ? logFee : 0;
-      const netTotal = parseFloat((qty * price + fees).toFixed(2));
-      const tradeId = `moo_${orderId || Date.now().toString(36)}_${Date.now().toString(36)}`;
-
-      const tradeObj = {
-        Id: tradeId,
-        Date: orderDate,
-        Action: action,
-        Ticker: ticker,
-        'Asset Name': stockName,
-        Quantity: qty,
-        Price: price,
-        Fees: fees,
-        'Net Total': netTotal,
-        Currency: currency,
-        Notes: `Moomoo Auto-Sync (Order: ${orderId})`,
-      };
-
-      tradesToSync.push(tradeObj);
-      rawExistingRows.push(tradeObj);
-    }
-
-    // If an older holding exists in positions (e.g. SPCX) that wasn't in the recent orders list:
-    for (const pos of positionsList) {
-      const rawCode = String(pos.code || pos.symbol || '');
-      const ticker = rawCode.replace(/^(US\.|HK\.|MY\.)/, '').trim().toUpperCase();
-      const posQty = parseFloat(pos.qty || pos.can_sell_qty || '0');
-      if (posQty <= 0) continue;
-
-      // Check if this ticker is already covered by ANY trade (either in rawExistingRows or filled ordersList or tradesToSync)
-      const hasExistingTradeForTicker = rawExistingRows.some(
-        (r) => String(r.Ticker || '').toUpperCase() === ticker
-      );
-      const hasOrderForTicker = tradesToSync.some(
-        (t) => String(t.Ticker || '').toUpperCase() === ticker
-      );
-
-      if (hasExistingTradeForTicker || hasOrderForTicker) {
-        continue;
-      }
-
-      // Find execution in cash logs
-      const buyExec = cashLogsList.find((c: any) => {
-        const sym = String(c.symbol || '').replace(/^(US\.|HK\.|MY\.)/, '').trim().toUpperCase();
-        return sym === ticker && /buy|execution|买入/i.test(String(c.transaction_name || ''));
-      });
-      const buyFee = cashLogsList.find((c: any) => {
-        const sym = String(c.symbol || '').replace(/^(US\.|HK\.|MY\.)/, '').trim().toUpperCase();
-        return sym === ticker && /fee|commission|佣金/i.test(String(c.transaction_name || ''));
-      });
-
-      const tradeDate = buyExec
-        ? parseMoomooDate(buyExec.created_time)
-        : (pos.open_date ? parseMoomooDate(pos.open_date) : new Date().toISOString().split('T')[0]);
-      const price = parseFloat(pos.cost_price || pos.nominal_price || '0');
-      const fees = buyFee ? Math.abs(parseFloat(buyFee.cash_change || '0')) : (feeBySymbol[ticker] || 0);
-      const netTotal = parseFloat((posQty * price + fees).toFixed(2));
-      const posTradeId = `moo_pos_${ticker.toLowerCase()}_${Date.now().toString(36)}`;
-
-      const posTradeObj = {
-        Id: posTradeId,
-        Date: tradeDate,
-        Action: 'BUY',
-        Ticker: ticker,
-        'Asset Name': String(pos.stock_name || ticker),
-        Quantity: posQty,
-        Price: price,
-        Fees: fees,
-        'Net Total': netTotal,
-        Currency: String(pos.currency || 'USD').toUpperCase(),
-        Notes: `Moomoo Auto-Sync Holding (${ticker})`,
-      };
-
-      tradesToSync.push(posTradeObj);
-      rawExistingRows.push(posTradeObj);
-    }
-
-    // Atomically sync all trades in a single contiguous batch operation!
-    if (tradesToSync.length > 0) {
-      const batchResult = await syncTradesToLedger(session, tradesToSync, rawExistingRows);
-      syncedTrades = batchResult.added;
-      allSyncedTrades.length = 0;
-      allSyncedTrades.push(...batchResult.rows);
-    }
-
-    // 4. Sync cash top-ups (deposits) from cash logs
+    const monthCache = new Map<string, Array<Record<string, unknown>>>();
     let syncedDeposits = 0;
     let skippedDeposits = 0;
-
-    for (const log of cashLogsList) {
-      if (log.transaction_name === 'Bank Transfer Deposits') {
-        const depositDate = parseMoomooDate(log.created_time);
-        const monthStr = depositDate.substring(0, 7); // YYYY-MM
-        const rawAmount = log.cash_change ? log.cash_change.replace(/[+,\s]/g, '') : '0';
-        const amount = parseFloat(rawAmount) || 0;
-
-        // Check if month already contains this deposit
-        const monthRows = await getMonthRows(session, monthStr);
-        const alreadyLogged = monthRows.some((r) => {
-          const desc = String(r.Description || '').toLowerCase();
-          const rDate = String(r.Date || '');
-          const rAmt = Math.abs(parseFloat(String(r.Amount || '0')));
-          return (
-            (desc.includes('moomoo') || desc.includes('deposit')) &&
-            rDate === depositDate &&
-            Math.abs(rAmt - amount) < 0.01
-          );
+    for (const account of accounts) {
+      for (const log of account.cashLogs) {
+        if (!/bank transfer deposits?/i.test(getString(log.transaction_name || log.transaction_type))) continue;
+        const date = parseMoomooDate(log.created_time || log.create_time || log.time);
+        const amount = parseAmount(log.cash_change);
+        if (!date || amount === null || amount <= 0) continue;
+        const month = date.substring(0, 7);
+        if (!monthCache.has(month)) monthCache.set(month, await getMonthRows(session, month));
+        const rows = monthCache.get(month)!;
+        const sourceId = getString(log.log_id || log.cash_log_id || log.transaction_id || log.id);
+        const fallbackKey = `${account.accountId}|${date}|${amount.toFixed(2)}|${getString(log.currency).toUpperCase()}|${getString(log.transaction_name)}`;
+        const digest = createHash('sha256').update(sourceId || fallbackKey).digest('hex').slice(0, 18);
+        const depositId = `moo_dep_${account.accountId}_${digest}`;
+        const alreadyLogged = rows.some((row) => {
+          if (getString(row.Id || row.id) === depositId) return true;
+          const description = getString(row.Description || row.description).toLowerCase();
+          const rowDate = parseMoomooDate(row.Date || row.date);
+          const rowAmount = Math.abs(parseAmount(row.Amount || row.amount) || 0);
+          return (description.includes('moomoo') || description.includes('deposit')) && rowDate === date && Math.abs(rowAmount - amount) < 0.01;
         });
-
         if (alreadyLogged) {
           skippedDeposits++;
           continue;
         }
 
-        await addDepositRow(session, monthStr, {
-          Id: `moo_dep_${depositDate.replace(/-/g, '')}_${Math.floor(amount)}`,
-          Date: depositDate,
+        const rowData = {
+          Id: depositId,
+          Date: date,
           Type: 'Income',
           Category: 'Investment Deposit',
           SubCategory: 'Moomoo Deposit',
           Description: 'Moomoo Bank Transfer Deposit',
           Amount: amount,
-          Currency: 'MYR',
-          Notes: 'Auto-synced from Moomoo Cloud API',
-        });
-
+          Currency: getString(log.currency || account.currency || 'MYR').toUpperCase(),
+          Notes: `Auto-synced from Moomoo Cloud API (Account: ${account.accountId})`,
+        };
+        await addDepositRow(session, month, rowData);
+        rows.push(rowData);
         syncedDeposits++;
       }
     }
 
-    const fundsUsd = fundsUsdRes?.data?.d;
-    const fundsMyr = fundsMyrRes?.data?.d;
+    const [freshTrades, freshPortfolio] = await Promise.all([
+      fullSync ? getExistingTrades(session) : Promise.resolve(undefined),
+      getPortfolioRows(session),
+    ]);
 
-    // Force synchronize the Portfolio formulas sheet
-    await syncPortfolioLedger(session);
-
-    // Fetch the clean trades and portfolio lists from Google Sheets
-    const freshTrades = await getExistingTrades(session);
-    const freshPortfolio = await getPortfolioRows(session);
-
-    // Defensively ensure trades is NEVER empty when trades were synced or existed
-    const resolvedTrades = freshTrades.length > 0
-      ? freshTrades
-      : allSyncedTrades.length > 0
-        ? allSyncedTrades
-        : rawExistingRows;
-
-    // Defensively ensure portfolio is NEVER empty when positions exist
-    let resolvedPortfolio = freshPortfolio;
-    if (resolvedPortfolio.length === 0 && positionsList.length > 0) {
-      resolvedPortfolio = positionsList
-        .filter((p: any) => parseFloat(p.qty || '0') > 0)
-        .map((p: any) => {
-          const rawCode = String(p.code || p.symbol || '');
-          const ticker = rawCode.replace(/^(US\.|HK\.|MY\.)/, '').trim().toUpperCase();
-          const units = parseFloat(p.qty || p.can_sell_qty || '0');
-          const avgCost = parseFloat(p.cost_price || '0');
-          const livePrice = parseFloat(p.nominal_price || p.cost_price || '0');
-          return {
-            ticker,
-            Ticker: ticker,
-            name: String(p.stock_name || ticker),
-            'Asset Name': String(p.stock_name || ticker),
-            type: 'Stock',
-            Type: 'Stock',
-            currency: String(p.currency || 'USD').toUpperCase(),
-            Currency: String(p.currency || 'USD').toUpperCase(),
-            units,
-            'Units Held': units,
-            avgCost,
-            'Avg Cost': avgCost,
-            totalCost: parseFloat((units * avgCost).toFixed(2)),
-            'Total Cost': parseFloat((units * avgCost).toFixed(2)),
-            livePrice,
-            'Live Price': livePrice,
-            marketValue: parseFloat((units * livePrice).toFixed(2)),
-            'Market Value': parseFloat((units * livePrice).toFixed(2)),
-            pnl: parseFloat(((units * livePrice) - (units * avgCost)).toFixed(2)),
-            'Profit / Loss': parseFloat(((units * livePrice) - (units * avgCost)).toFixed(2)),
-            returnPercent: avgCost > 0 ? parseFloat((((livePrice - avgCost) / avgCost) * 100).toFixed(2)) : 0,
-            'Return %': avgCost > 0 ? parseFloat((((livePrice - avgCost) / avgCost) * 100).toFixed(2)) : 0,
-          };
-        });
-    }
+    const completedAt = new Date().toISOString();
+    const accountLastSyncAt = { ...(oldState?.accountLastSyncAt || {}) };
+    for (const account of accounts) accountLastSyncAt[account.accountId] = completedAt;
+    const newState: MoomooSyncState = {
+      version: 1,
+      lastSyncAt: completedAt,
+      accountLastSyncAt,
+    };
+    await saveSyncState(session, newState);
 
     const response = NextResponse.json({
       success: true,
-      message: `Moomoo sync completed. Synced ${syncedTrades} trades and ${syncedDeposits} cash deposits.`,
-      syncedTrades,
-      skippedTrades,
+      mode: fullSync ? 'full' : 'incremental',
+      message: `Moomoo ${fullSync ? 'history' : 'incremental'} sync completed. Added ${ledgerResult.added} trades, updated ${ledgerResult.updated} trades and synced ${syncedDeposits} cash deposits.`,
+      syncedTrades: ledgerResult.added,
+      updatedTrades: ledgerResult.updated,
+      feeDetailsUnavailable: feeLookupCount.failed,
       syncedDeposits,
       skippedDeposits,
-      trades: resolvedTrades,
-      portfolio: resolvedPortfolio,
+      ...(freshTrades ? { trades: freshTrades } : { tradeChanges: ledgerResult.changes, removedTradeIds: ledgerResult.removedIds }),
+      portfolio: freshPortfolio,
       portfolioSummary: {
-        totalAssetsUsd: fundsUsd?.total_assets || '0.00',
-        totalAssetsMyr: fundsMyr?.total_assets || '0.00',
-        unrealizedPlMyr: fundsMyr?.unrealized_pl || '0.00',
-        positionsCount: positionsList.length,
+        positionsCount: accounts.reduce((sum, account) => sum + account.positions.length, 0),
       },
-      timestamp: new Date().toISOString(),
+      lastSyncAt: completedAt,
+      timestamp: completedAt,
     });
-
-    if (refreshed) {
-      setSessionCookie(response, session);
-    }
+    if (refreshed) setSessionCookie(response, session);
     return response;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Sync failed';
-    return NextResponse.json({ success: false, error: msg }, { status: 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Moomoo sync failed.';
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }

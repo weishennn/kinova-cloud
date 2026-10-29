@@ -36,6 +36,7 @@ import {
   type RecurringCommitment,
 } from '@/lib/recurring-helper';
 import { SETTINGS_UPDATED_EVENT } from '@/lib/cloud-settings-sync';
+import { getUserMoneyProfile } from '@/lib/user-money-profile';
 import { toast } from 'sonner';
 
 interface AiIntelligenceHubProps {
@@ -66,10 +67,12 @@ export function AiIntelligenceHub({
   const [isAddingRecurring, setIsAddingRecurring] = useState<string | null>(null);
   const [configuredIncome, setConfiguredIncome] = useState<number>(0);
   const [configuredReserve, setConfiguredReserve] = useState<number>(0);
+  const [configuredPaydayDay, setConfiguredPaydayDay] = useState<number | null>(null);
 
   const loadCommitmentsAndSettings = () => {
     setCommitments(getSavedCommitments());
     try {
+      setConfiguredPaydayDay(getUserMoneyProfile().paydayDay);
       const inc = localStorage.getItem('cashflow_baseline_income');
       if (inc && parseFloat(inc) > 0) setConfiguredIncome(parseFloat(inc));
       else setConfiguredIncome(0);
@@ -163,10 +166,11 @@ export function AiIntelligenceHub({
       transactions: allTransactions,
       startingCash: realCashStats.startingLiquidCash,
       baselineMonthlyIncome: realIncomeStats.effectiveIncome,
+      paydayDay: configuredPaydayDay,
       commitmentsOverride: commitments,
       isStartingCashConfigured: realCashStats.isConfigured,
     });
-  }, [allTransactions, realCashStats.startingLiquidCash, realIncomeStats.effectiveIncome, commitments, realCashStats.isConfigured]);
+  }, [allTransactions, realCashStats.startingLiquidCash, realIncomeStats.effectiveIncome, configuredPaydayDay, commitments, realCashStats.isConfigured]);
 
   // 5. Discovered Subscriptions from Real Transactions
   const discoveredSubscriptions: DiscoveredRecurringCandidate[] = useMemo(() => {

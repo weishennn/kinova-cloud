@@ -151,6 +151,8 @@ test('5. ShortcutQuickDraft encodes and decodes ocrSummary and effective fields 
     merchant: 'Wh',
     date: '2026-10-10',
     ocrSummary: '识别到应用账单界面，应付给 Wh 金额为 AUD 48.71',
+    assistantAdvice: 'No likely duplicate found in the visible ledger; this payment is above your usual amount.',
+    proposedActionLabel: 'Save AUD 48.71 (Other)',
     notes: '截图中包含应付 AUD 48.71 给 Wh 的记录',
     missingFields: [],
     uncertainFields: [],
@@ -168,6 +170,8 @@ test('5. ShortcutQuickDraft encodes and decodes ocrSummary and effective fields 
   assert.equal(statelessDecoded.amount, 48.71);
   assert.equal(statelessDecoded.description, 'Wh');
   assert.equal(statelessDecoded.ocrSummary, '识别到应用账单界面，应付给 Wh 金额为 AUD 48.71');
+  assert.equal(statelessDecoded.assistantAdvice, 'No likely duplicate found in the visible ledger; this payment is above your usual amount.');
+  assert.equal(statelessDecoded.proposedActionLabel, 'Save AUD 48.71 (Other)');
 
   // Verify 'latest' claim works when iOS resumes backgrounded PWA without URL params
   const latestClaimed = claimShortcutDraft('latest');
