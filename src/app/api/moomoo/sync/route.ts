@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getMoomooConfig, callMoomooApi, type MoomooConfig } from '@/lib/moomoo-client';
 import { getValidGoogleSession, setSessionCookie, type GoogleUserSession } from '@/lib/google-auth';
@@ -11,7 +10,6 @@ import {
   getMoomooTradingMarkets,
   MOOMOO_SYNC_STATE_KEY,
   normalizeMoomooOrder,
-  parseMoomooDate,
   parseMoomooSyncState,
   selectMoomooAuthorizedAccounts,
   type MoomooSyncState,
@@ -108,14 +106,21 @@ async function getExistingTrades(session: GoogleUserSession): Promise<Array<Reco
 async function syncTradesToLedger(
   session: GoogleUserSession,
   trades: Array<Record<string, unknown>>,
-  restoreDeletedMoomooTrades = false
-): Promise<{ added: number; updated: number; rows?: Array<Record<string, unknown>>; changes: Array<Record<string, unknown>>; removedIds: string[]; restoredTombstones: number }> {
+  restoreDeletedMoomooTrades = false,
+  reconcileFlowHistory = false,
+  cleanupLegacyDeposits = false
+): Promise<{ added: number; updated: number; rows?: Array<Record<string, unknown>>; changes: Array<Record<string, unknown>>; removedIds: string[]; restoredTombstones: number; flowAdded: number; flowUpdated: number; duplicateFlowRowsRemoved: number; removedDepositRows: number }> {
   // The deployed Apps Script may lag the repository and not recognize
   // batchSyncTrades. Moomoo's purpose-built upsert supports both first and
   // incremental imports, while the full sheet is read immediately afterward.
   const action = 'syncMoomooTrades';
   if (session.isAdmin && getAdminAppsScriptEndpoint()) {
-    const response = await fetchAdminAppsScript('POST', action, { trades, restoreDeletedMoomooTrades }) as JsonRecord | null;
+    const response = await fetchAdminAppsScript('POST', action, {
+      trades,
+      restoreDeletedMoomooTrades,
+      reconcileFlowHistory,
+      cleanupLegacyDeposits,
+    }) as JsonRecord | null;
     if (!response?.success) {
       const message = response?.message || 'Could not write Moomoo trades to Google Sheets.';
       if (/unknown action/i.test(message)) {
@@ -125,6 +130,9 @@ async function syncTradesToLedger(
     }
     const data = response.data?.result || response.data;
     if (!data) throw new Error('Google Sheets did not confirm the Moomoo trade write.');
+    if (typeof data.flowAdded !== 'number' || typeof data.removedDepositRows !== 'number') {
+      throw new Error('The deployed Google Apps Script is outdated and cannot link Moomoo trades to monthly Flow. Deploy the latest apps-script/Code.gs, then sync again.');
+    }
     return {
       added: Number(data.added) || 0,
       updated: Number(data.updated) || 0,
@@ -132,12 +140,24 @@ async function syncTradesToLedger(
       changes: Array.isArray(data.changes) ? data.changes : trades,
       removedIds: Array.isArray(data.removedIds) ? data.removedIds.map(String) : [],
       restoredTombstones: Number(data.restoredTombstones) || 0,
+      flowAdded: Number(data.flowAdded) || 0,
+      flowUpdated: Number(data.flowUpdated) || 0,
+      duplicateFlowRowsRemoved: Number(data.duplicateFlowRowsRemoved) || 0,
+      removedDepositRows: Number(data.removedDepositRows) || 0,
     };
   }
 
-  const { result } = await executeUserGoogleAction(session, action, { trades, restoreDeletedMoomooTrades });
+  const { result } = await executeUserGoogleAction(session, action, {
+    trades,
+    restoreDeletedMoomooTrades,
+    reconcileFlowHistory,
+    cleanupLegacyDeposits,
+  });
   const data = result as JsonRecord;
   if (!data) throw new Error('Google Sheets did not confirm the Moomoo trade write.');
+  if (typeof data.flowAdded !== 'number' || typeof data.removedDepositRows !== 'number') {
+    throw new Error('The Google Sheets sync engine did not confirm the Moomoo Flow reconciliation. Please retry the sync.');
+  }
   return {
     added: Number(data.added) || 0,
     updated: Number(data.updated) || 0,
@@ -145,6 +165,10 @@ async function syncTradesToLedger(
     changes: Array.isArray(data.changes) ? data.changes : trades,
     removedIds: Array.isArray(data.removedIds) ? data.removedIds.map(String) : [],
     restoredTombstones: Number(data.restoredTombstones) || 0,
+    flowAdded: Number(data.flowAdded) || 0,
+    flowUpdated: Number(data.flowUpdated) || 0,
+    duplicateFlowRowsRemoved: Number(data.duplicateFlowRowsRemoved) || 0,
+    removedDepositRows: Number(data.removedDepositRows) || 0,
   };
 }
 
@@ -230,28 +254,6 @@ function cashLogFeeByOrderId(logs: JsonRecord[]): Map<string, number> {
     fees.set(orderId, (fees.get(orderId) || 0) + Math.abs(amount));
   }
   return fees;
-}
-
-async function getMonthRows(session: GoogleUserSession, month: string): Promise<Array<Record<string, unknown>>> {
-  if (session.isAdmin && getAdminAppsScriptEndpoint()) {
-    const response = await fetchAdminAppsScript('GET', 'getSheetDataIfExists', { sheetName: month }) as JsonRecord | null;
-    if (!response?.success) throw new Error(`Could not read ${month} from Google Sheets.`);
-    const data = response.data?.data || response.data;
-    return Array.isArray(data?.rows) ? data.rows : [];
-  }
-  const { result } = await executeUserGoogleAction(session, 'getSheetDataIfExists', { sheetName: month });
-  const data = result as JsonRecord;
-  if (!Array.isArray(data?.rows)) throw new Error(`Could not read ${month} from Google Sheets.`);
-  return data.rows;
-}
-
-async function addDepositRow(session: GoogleUserSession, month: string, rowData: Record<string, unknown>): Promise<void> {
-  if (session.isAdmin && getAdminAppsScriptEndpoint()) {
-    const response = await fetchAdminAppsScript('POST', 'addRow', { sheetName: month, rowData }) as JsonRecord | null;
-    if (!response?.success) throw new Error('Could not write a Moomoo deposit to Google Sheets.');
-    return;
-  }
-  await executeUserGoogleAction(session, 'addRow', { sheetName: month, rowData });
 }
 
 async function getPortfolioRows(session: GoogleUserSession): Promise<Array<Record<string, unknown>>> {
@@ -375,6 +377,8 @@ export async function POST(req: NextRequest) {
 
     const accounts = accountPayloads.filter((account): account is NonNullable<typeof account> => Boolean(account));
     const fullSync = forceFullSync || accounts.some((account) => !account.previousAccountSyncAt);
+    const reconcileFlowHistory = fullSync || oldState?.flowSyncVersion !== 1;
+    const cleanupLegacyDeposits = reconcileFlowHistory;
     const rawExistingRows = fullSync ? await getExistingTrades(session) : [];
     const existingRows = [...rawExistingRows];
     const feeLookupErrors: Array<{ orderId: string; message: string }> = [];
@@ -450,8 +454,8 @@ export async function POST(req: NextRequest) {
       );
     }
     const ledgerResult = tradesToSync.length > 0
-      ? await syncTradesToLedger(session, tradesToSync, forceFullSync)
-      : { added: 0, updated: 0, rows: rawExistingRows, changes: [], removedIds: [], restoredTombstones: 0 };
+      ? await syncTradesToLedger(session, tradesToSync, forceFullSync, reconcileFlowHistory, cleanupLegacyDeposits)
+      : await syncTradesToLedger(session, [], forceFullSync, reconcileFlowHistory, cleanupLegacyDeposits);
     if (tradesToSync.length === 0) await rebuildPortfolio(session);
 
     let fullTradesAfterSync: Array<Record<string, unknown>> | undefined;
@@ -470,51 +474,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const monthCache = new Map<string, Array<Record<string, unknown>>>();
-    let syncedDeposits = 0;
-    let skippedDeposits = 0;
-    for (const account of accounts) {
-      for (const log of account.cashLogs) {
-        if (!/bank transfer deposits?/i.test(getString(log.transaction_name || log.transaction_type))) continue;
-        const date = parseMoomooDate(log.created_time || log.create_time || log.time);
-        const amount = parseAmount(log.cash_change);
-        if (!date || amount === null || amount <= 0) continue;
-        const month = date.substring(0, 7);
-        if (!monthCache.has(month)) monthCache.set(month, await getMonthRows(session, month));
-        const rows = monthCache.get(month)!;
-        const sourceId = getString(log.log_id || log.cash_log_id || log.transaction_id || log.id);
-        const fallbackKey = `${account.accountId}|${date}|${amount.toFixed(2)}|${getString(log.currency).toUpperCase()}|${getString(log.transaction_name)}`;
-        const digest = createHash('sha256').update(sourceId || fallbackKey).digest('hex').slice(0, 18);
-        const depositId = `moo_dep_${account.accountId}_${digest}`;
-        const alreadyLogged = rows.some((row) => {
-          if (getString(row.Id || row.id) === depositId) return true;
-          const description = getString(row.Description || row.description).toLowerCase();
-          const rowDate = parseMoomooDate(row.Date || row.date);
-          const rowAmount = Math.abs(parseAmount(row.Amount || row.amount) || 0);
-          return (description.includes('moomoo') || description.includes('deposit')) && rowDate === date && Math.abs(rowAmount - amount) < 0.01;
-        });
-        if (alreadyLogged) {
-          skippedDeposits++;
-          continue;
-        }
-
-        const rowData = {
-          Id: depositId,
-          Date: date,
-          Type: 'Investment',
-          Category: 'Stocks & Crypto',
-          SubCategory: 'Moomoo Deposit',
-          Description: 'Moomoo Investment Account Deposit',
-          Amount: amount,
-          Currency: getString(log.currency || account.currency || 'MYR').toUpperCase(),
-          Notes: `Auto-synced from Moomoo Cloud API (Account: ${account.accountId})`,
-        };
-        await addDepositRow(session, month, rowData);
-        rows.push(rowData);
-        syncedDeposits++;
-      }
-    }
-
     const [freshTrades, freshPortfolio] = await Promise.all([
       fullSync ? (fullTradesAfterSync ?? getExistingTrades(session)) : Promise.resolve(undefined),
       getPortfolioRows(session),
@@ -527,18 +486,21 @@ export async function POST(req: NextRequest) {
       version: 2,
       lastSyncAt: completedAt,
       accountLastSyncAt,
+      flowSyncVersion: 1,
     };
     await saveSyncState(session, newState);
 
     const response = NextResponse.json({
       success: true,
       mode: fullSync ? 'full' : 'incremental',
-      message: `Moomoo ${fullSync ? 'history' : 'incremental'} sync completed. Added ${ledgerResult.added} trades, updated ${ledgerResult.updated} trades and synced ${syncedDeposits} cash deposits.`,
+      message: `Moomoo ${fullSync ? 'history' : 'incremental'} sync completed. Added ${ledgerResult.added} trades, updated ${ledgerResult.updated} trades, and linked the trade ledger to monthly Flow.`,
       syncedTrades: ledgerResult.added,
       updatedTrades: ledgerResult.updated,
+      flowAdded: ledgerResult.flowAdded,
+      flowUpdated: ledgerResult.flowUpdated,
+      duplicateFlowRowsRemoved: ledgerResult.duplicateFlowRowsRemoved,
+      removedMoomooDepositRows: ledgerResult.removedDepositRows,
       feeDetailsUnavailable: 0,
-      syncedDeposits,
-      skippedDeposits,
       restoredMoomooTombstones: ledgerResult.restoredTombstones,
       ...(freshTrades ? { trades: freshTrades } : { tradeChanges: ledgerResult.changes, removedTradeIds: ledgerResult.removedIds }),
       portfolio: freshPortfolio,

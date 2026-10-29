@@ -21,6 +21,7 @@ export interface MoomooSyncState {
   version: 2;
   lastSyncAt: string;
   accountLastSyncAt: Record<string, string>;
+  flowSyncVersion?: 1;
 }
 
 /**
@@ -108,7 +109,12 @@ export function parseMoomooSyncState(value: unknown): MoomooSyncState | null {
       )
     : {};
   if (!lastSyncAt && Object.keys(accountLastSyncAt).length === 0) return null;
-  return { version: 2, lastSyncAt, accountLastSyncAt };
+  return {
+    version: 2,
+    lastSyncAt,
+    accountLastSyncAt,
+    ...(Number(state.flowSyncVersion) === 1 ? { flowSyncVersion: 1 as const } : {}),
+  };
 }
 
 export function getMoomooSyncStartMs(lastSyncAt: string | undefined): number {

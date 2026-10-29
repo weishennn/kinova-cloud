@@ -192,7 +192,9 @@ function doGet(e) {
         const rawTrades = params.trades;
         const trades = rawTrades ? (typeof rawTrades === 'string' ? JSON.parse(rawTrades) : rawTrades) : [];
         const restoreDeletedMoomooTrades = String(params.restoreDeletedMoomooTrades || '').toLowerCase() === 'true';
-        return createResponse(true, withScriptLock(() => syncMoomooTrades(trades, restoreDeletedMoomooTrades)));
+        const reconcileFlowHistory = String(params.reconcileFlowHistory || '').toLowerCase() === 'true';
+        const cleanupLegacyDeposits = String(params.cleanupLegacyDeposits || '').toLowerCase() === 'true';
+        return createResponse(true, withScriptLock(() => syncMoomooTrades(trades, restoreDeletedMoomooTrades, reconcileFlowHistory, cleanupLegacyDeposits)));
       }
       case 'sanitizeCategories':
         return createResponse(true, withScriptLock(() => sanitizeAllSheetCategories()));
@@ -317,7 +319,10 @@ function doPost(e) {
       case 'syncMoomooTrades': {
         const rawTrades = (body && body.trades) ? body.trades : params.trades;
         const trades = rawTrades ? (typeof rawTrades === 'string' ? JSON.parse(rawTrades) : rawTrades) : [];
-        return createResponse(true, withScriptLock(() => syncMoomooTrades(trades, body.restoreDeletedMoomooTrades === true)));
+        const restoreDeletedMoomooTrades = body.restoreDeletedMoomooTrades === true || String(params.restoreDeletedMoomooTrades || '').toLowerCase() === 'true';
+        const reconcileFlowHistory = body.reconcileFlowHistory === true || String(params.reconcileFlowHistory || '').toLowerCase() === 'true';
+        const cleanupLegacyDeposits = body.cleanupLegacyDeposits === true || String(params.cleanupLegacyDeposits || '').toLowerCase() === 'true';
+        return createResponse(true, withScriptLock(() => syncMoomooTrades(trades, restoreDeletedMoomooTrades, reconcileFlowHistory, cleanupLegacyDeposits)));
       }
       case 'sanitizeCategories':
         return createResponse(true, withScriptLock(() => sanitizeAllSheetCategories()));
@@ -2409,7 +2414,200 @@ function clearRestoredMoomooTradeTombstones(restoredTrades) {
   return matchingRows.length;
 }
 
-function syncMoomooTrades(incomingTrades, restoreDeletedMoomooTrades) {
+function buildMoomooCashflowRow(trade) {
+  const tradeId = String(trade.Id || trade.id || '').trim();
+  const notes = String(trade.Notes || trade.notes || '');
+  const date = String(trade.Date || trade.date || '').trim().substring(0, 10);
+  const action = String(trade.Action || trade.action || '').trim().toUpperCase();
+  const ticker = String(trade.Ticker || trade.ticker || '').trim().toUpperCase();
+  const quantity = Number(trade.Quantity || trade.quantity) || 0;
+  const price = Number(trade.Price || trade.price) || 0;
+  const fees = Math.abs(Number(trade.Fees || trade.fees) || 0);
+  const currency = String(trade.Currency || trade.currency || 'USD').trim().toUpperCase();
+  if (!tradeId || !/^moo_/i.test(tradeId) || !/Moomoo Auto-Sync/i.test(notes) || !date || !ticker || quantity <= 0 || price <= 0) return null;
+
+  const netTotal = Number(trade['Net Total'] !== undefined ? trade['Net Total'] : trade.netTotal);
+  const amount = isFinite(netTotal) ? netTotal : Number((quantity * price + (action === 'SELL' ? -fees : fees)).toFixed(2));
+  const feeDetails = 'Fees: ' + fees.toFixed(2) + ' ' + currency + '; Net total: ' + amount.toFixed(2) + ' ' + currency;
+  return {
+    Id: 'tx_trade_' + tradeId.replace(/[^A-Za-z0-9_-]/g, '_'),
+    Date: date,
+    Type: action === 'SELL' ? 'Income' : 'Investment',
+    Category: 'Stocks & Crypto',
+    SubCategory: action,
+    Description: action + ' ' + quantity + ' ' + ticker + ' @ ' + price + ' ' + currency,
+    Amount: amount,
+    Currency: currency,
+    Notes: notes + (notes ? '; ' : '') + feeDetails,
+  };
+}
+
+function isLegacyMoomooDepositRow(row, headers) {
+  const index = function(name) { return headers.findIndex(function(header) { return String(header).toLowerCase() === name.toLowerCase(); }); };
+  const idIndex = index('Id');
+  const id = String(row[idIndex >= 0 ? idIndex : 0] || '').trim();
+  const subCategory = String(row[index('SubCategory')] || '').trim().toLowerCase();
+  const description = String(row[index('Description')] || '').trim().toLowerCase();
+  const notes = String(row[index('Notes')] || '').trim();
+  return /^moo_dep_/i.test(id) &&
+    subCategory === 'moomoo deposit' &&
+    description === 'moomoo investment account deposit' &&
+    /^Auto-synced from Moomoo Cloud API \(Account:\s*[^)]+\)$/i.test(notes);
+}
+
+function normalizeMoomooFlowCompareValue(header, value) {
+  if (String(header).toLowerCase() === 'date') {
+    if (value instanceof Date && !isNaN(value.getTime())) {
+      return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    }
+    if (typeof value === 'number' && isFinite(value)) {
+      return Utilities.formatDate(new Date(Date.UTC(1899, 11, 30) + value * 24 * 60 * 60 * 1000), 'UTC', 'yyyy-MM-dd');
+    }
+    const text = String(value === undefined || value === null ? '' : value).trim();
+    const match = text.match(/^\d{4}-\d{2}-\d{2}/);
+    return match ? match[0] : text;
+  }
+  return String(value === undefined || value === null ? '' : value);
+}
+
+function clearMoomooFlowTombstones(flowIds) {
+  if (!flowIds || flowIds.size === 0) return;
+  const deletedSheet = getDeletedRecordsSheet();
+  const lastRow = deletedSheet.getLastRow();
+  if (lastRow <= 1) return;
+  const rows = deletedSheet.getRange(2, 1, lastRow - 1, DELETED_TOMBSTONE_HEADERS.length).getValues();
+  const rowsToDelete = [];
+  rows.forEach(function(row, index) {
+    const id = String(row[0] || '').trim();
+    const sheetName = String(row[2] || '').trim();
+    if (flowIds.has(id) && /^\d{4}-\d{2}$/.test(sheetName)) rowsToDelete.push(index + 2);
+  });
+  rowsToDelete.sort(function(a, b) { return b - a; }).forEach(function(rowNumber) {
+    deletedSheet.deleteRow(rowNumber);
+  });
+  if (rowsToDelete.length > 0) SpreadsheetApp.flush();
+}
+
+function syncMoomooCashflowRows(trades, cleanupLegacyDeposits) {
+  const desiredById = new Map();
+  (trades || []).forEach(function(trade) {
+    const row = buildMoomooCashflowRow(trade);
+    if (row) desiredById.set(row.Id, row);
+  });
+  const desiredIds = new Set(Array.from(desiredById.keys()));
+  const monthForId = new Map();
+  desiredById.forEach(function(row, id) { monthForId.set(id, String(row.Date).substring(0, 7)); });
+  new Set(Array.from(monthForId.values())).forEach(function(month) { getSheet(month); });
+
+  const rowsById = new Map();
+  const deleteRowsByMonth = new Map();
+  const additionsByMonth = new Map();
+  const updates = [];
+  let removedDepositRows = 0;
+  let flowAdded = 0;
+  let flowUpdated = 0;
+  let duplicateFlowRowsRemoved = 0;
+  function markDelete(month, rowNumber, isDeposit) {
+    if (!deleteRowsByMonth.has(month)) deleteRowsByMonth.set(month, new Set());
+    const deletes = deleteRowsByMonth.get(month);
+    if (deletes.has(rowNumber)) return false;
+    deletes.add(rowNumber);
+    if (isDeposit) removedDepositRows++;
+    return true;
+  }
+
+  const months = cleanupLegacyDeposits ? getMonthList() : Array.from(new Set(Array.from(monthForId.values())));
+  months.forEach(function(month) {
+    const sheet = getSheet(month, false);
+    if (!sheet || sheet.getLastRow() <= 1) return;
+    const values = sheet.getDataRange().getValues();
+    const headers = (values[0] || []).map(function(header) { return String(header || '').trim(); }).filter(Boolean);
+    const idIndex = headers.findIndex(function(header) { return header.toLowerCase() === 'id'; });
+    for (let i = 1; i < values.length; i++) {
+      const row = values[i] || [];
+      if (cleanupLegacyDeposits && isLegacyMoomooDepositRow(row, headers)) {
+        markDelete(month, i + 1, true);
+        continue;
+      }
+      const rowId = String(row[idIndex >= 0 ? idIndex : 0] || '').trim();
+      if (!rowId || (!desiredIds.has(rowId) && !/^tx_trade_moo_/i.test(rowId))) continue;
+      if (!rowsById.has(rowId)) rowsById.set(rowId, []);
+      rowsById.get(rowId).push({ month: month, rowNumber: i + 1, values: row });
+    }
+  });
+
+  clearMoomooFlowTombstones(desiredIds);
+
+  desiredById.forEach(function(rowData, flowId) {
+    const targetMonth = monthForId.get(flowId);
+    const matches = rowsById.get(flowId) || [];
+    const targetMatches = matches.filter(function(match) { return match.month === targetMonth; });
+    const keep = targetMatches[0] || null;
+    matches.forEach(function(match) {
+      if (match === keep) return;
+      if (markDelete(match.month, match.rowNumber, false)) duplicateFlowRowsRemoved++;
+    });
+
+    const sheet = getSheet(targetMonth);
+    const headers = getSheetSchema(targetMonth).map(function(header) { return String(header || '').trim(); }).filter(Boolean);
+    const rowValues = headers.map(function(header) { return rowData[header] !== undefined ? rowData[header] : ''; });
+    if (keep) {
+      const updatedValues = headers.map(function(header, index) {
+        return Object.prototype.hasOwnProperty.call(rowData, header) ? rowData[header] : (keep.values[index] === undefined ? '' : keep.values[index]);
+      });
+      const changed = updatedValues.some(function(value, index) { return normalizeMoomooFlowCompareValue(headers[index], value) !== normalizeMoomooFlowCompareValue(headers[index], keep.values[index]); });
+      if (changed) {
+        updates.push({ month: targetMonth, rowNumber: keep.rowNumber, values: updatedValues });
+        flowUpdated++;
+      }
+    } else {
+      if (!additionsByMonth.has(targetMonth)) additionsByMonth.set(targetMonth, []);
+      additionsByMonth.get(targetMonth).push(rowValues);
+      flowAdded++;
+    }
+  });
+
+  updates.forEach(function(update) {
+    const sheet = getSheet(update.month);
+    sheet.getRange(update.rowNumber, 1, 1, update.values.length).setValues([update.values]);
+    const headers = getSheetSchema(update.month);
+    const amountIndex = headers.findIndex(function(header) { return String(header).toLowerCase() === 'amount'; });
+    const currencyIndex = headers.findIndex(function(header) { return String(header).toLowerCase() === 'currency'; });
+    if (amountIndex >= 0) {
+      sheet.getRange(update.rowNumber, amountIndex + 1).setNumberFormat(getCurrencyNumberFormat(String(update.values[currencyIndex] || 'MYR').toUpperCase()));
+    }
+  });
+  additionsByMonth.forEach(function(rows, month) {
+    const sheet = getSheet(month);
+    const headers = getSheetSchema(month);
+    const startRow = sheet.getLastRow() + 1;
+    sheet.getRange(startRow, 1, rows.length, headers.length).setValues(rows);
+    const amountIndex = headers.findIndex(function(header) { return String(header).toLowerCase() === 'amount'; });
+    const currencyIndex = headers.findIndex(function(header) { return String(header).toLowerCase() === 'currency'; });
+    if (amountIndex >= 0) {
+      sheet.getRange(startRow, amountIndex + 1, rows.length, 1).setNumberFormats(rows.map(function(row) {
+        return [getCurrencyNumberFormat(String(row[currencyIndex] || 'MYR').toUpperCase())];
+      }));
+    }
+  });
+
+  const affectedMonths = new Set();
+  deleteRowsByMonth.forEach(function(rowNumbers, month) {
+    const sheet = getSheet(month, false);
+    if (!sheet) return;
+    Array.from(rowNumbers).sort(function(a, b) { return b - a; }).forEach(function(rowNumber) {
+      sheet.deleteRow(rowNumber);
+    });
+    affectedMonths.add(month);
+  });
+  updates.forEach(function(update) { affectedMonths.add(update.month); });
+  additionsByMonth.forEach(function(_, month) { affectedMonths.add(month); });
+  affectedMonths.forEach(function(month) { updateOverviewForMonth(month); });
+  SpreadsheetApp.flush();
+  return { flowAdded: flowAdded, flowUpdated: flowUpdated, duplicateFlowRowsRemoved: duplicateFlowRowsRemoved, removedDepositRows: removedDepositRows };
+}
+
+function syncMoomooTrades(incomingTrades, restoreDeletedMoomooTrades, reconcileFlowHistory, cleanupLegacyDeposits) {
   const tradeSheet = getSheet('Trades');
   const lastRow = tradeSheet.getLastRow();
   const existingIds = lastRow > 1 ? tradeSheet.getRange(2, 1, lastRow - 1, 1).getValues() : [];
@@ -2524,9 +2722,23 @@ function syncMoomooTrades(incomingTrades, restoreDeletedMoomooTrades) {
   // Trades are authoritative. A full portfolio rebuild makes retries safe if a
   // previous write saved Trades but failed partway through updating Portfolio.
   syncPortfolioFromTrades();
+  let flowTrades = changes;
+  if (reconcileFlowHistory) {
+    const finalTradeLastRow = tradeSheet.getLastRow();
+    const finalTradeValues = finalTradeLastRow > 1
+      ? tradeSheet.getRange(2, 1, finalTradeLastRow - 1, 11).getValues()
+      : [];
+    flowTrades = finalTradeValues.map(function(row) {
+      return {
+        Id: row[0], Date: row[1], Action: row[2], Ticker: row[3], 'Asset Name': row[4],
+        Quantity: row[5], Price: row[6], Fees: row[7], 'Net Total': row[8], Currency: row[9], Notes: row[10],
+      };
+    });
+  }
+  const cashflowResult = syncMoomooCashflowRows(flowTrades, cleanupLegacyDeposits);
   SpreadsheetApp.flush();
 
-  return { added: addedCount, updated: updatedCount, changes, removedIds, restoredTombstones };
+  return Object.assign({ added: addedCount, updated: updatedCount, changes: changes, removedIds: removedIds, restoredTombstones: restoredTombstones }, cashflowResult);
 }
 
 function applyPortfolioTradeDeltas(trades) {

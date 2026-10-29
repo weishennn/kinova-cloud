@@ -319,7 +319,7 @@ export default function InvestmentsPage() {
     if (forceFullSync) {
       const confirmed = await confirmAction({
         title: 'Run a full Moomoo re-sync?',
-        description: 'Fetch all available Moomoo order history and fee details for the authorized account(s). Returned Moomoo orders marked as deleted will be restored and Portfolio will be rebuilt. Matching queued deletes for those restored orders will be removed; other trades and pending changes will stay as they are. This may take longer than a light sync.',
+        description: 'Fetch all available Moomoo order history and fee details for the authorized account(s), rebuild Portfolio, and reconcile linked Flow entries. Returned Moomoo orders marked as deleted will be restored. This may take longer than a light sync.',
         confirmText: 'Full re-sync',
         cancelText: 'Cancel',
         variant: 'warning',
@@ -467,7 +467,10 @@ export default function InvestmentsPage() {
       const parts = [];
       if (data.syncedTrades > 0) parts.push(`${data.syncedTrades} new trade${data.syncedTrades > 1 ? 's' : ''}`);
       if (data.updatedTrades > 0) parts.push(`${data.updatedTrades} corrected trade${data.updatedTrades > 1 ? 's' : ''}`);
-      if (data.syncedDeposits > 0) parts.push(`${data.syncedDeposits} cash deposit${data.syncedDeposits > 1 ? 's' : ''}`);
+      if (data.flowAdded > 0) parts.push(`${data.flowAdded} Flow entr${data.flowAdded === 1 ? 'y' : 'ies'} linked`);
+      if (data.flowUpdated > 0) parts.push(`${data.flowUpdated} Flow entr${data.flowUpdated === 1 ? 'y' : 'ies'} corrected`);
+      if (data.duplicateFlowRowsRemoved > 0) parts.push(`${data.duplicateFlowRowsRemoved} duplicate Flow entr${data.duplicateFlowRowsRemoved === 1 ? 'y' : 'ies'} removed`);
+      if (data.removedMoomooDepositRows > 0) parts.push(`${data.removedMoomooDepositRows} old Moomoo deposit entr${data.removedMoomooDepositRows === 1 ? 'y' : 'ies'} removed`);
 
       if (parts.length === 0) {
         const restoredMarkers = Number(data.restoredMoomooTombstones) || 0;
