@@ -37,6 +37,7 @@ const ResponsiveContainer = dynamic(() => import('recharts').then(m => m.Respons
 const Tooltip = dynamic(() => import('recharts').then(m => m.Tooltip), { ssr: false });
 
 const TYPE_COLORS: Record<string, string> = {
+  'Stock': '#3b82f6',
   'US Stock': '#3b82f6',
   'MY Stock': '#10b981',
   'Crypto': '#f59e0b',
@@ -215,7 +216,7 @@ export default function InvestmentsPage() {
       return {
         ticker,
         name: String(item.name || item['Asset Name'] || item.ticker || ''),
-        type: String(item.type || item.Type || 'US Stock'),
+        type: String(item.type || item.Type || 'Stock'),
         currency,
         units,
         avgCost,

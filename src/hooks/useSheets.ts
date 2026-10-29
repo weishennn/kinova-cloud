@@ -157,8 +157,8 @@ export function usePortfolio() {
           ticker,
           'Asset Name': String(row['Asset Name'] || row.AssetName || row.name || ticker),
           name: String(row['Asset Name'] || row.AssetName || row.name || ticker),
-          Type: String(row.Type || row.type || 'US Stock'),
-          type: String(row.Type || row.type || 'US Stock'),
+          Type: String(row.Type || row.type || 'Stock'),
+          type: String(row.Type || row.type || 'Stock'),
           Currency: String(row.Currency || row.currency || 'USD'),
           currency: String(row.Currency || row.currency || 'USD'),
           'Units Held': 0,
@@ -389,7 +389,7 @@ export function useTrades() {
         const name = String(h['Asset Name'] || h.name || ticker);
         const currency = String(h.Currency || h.currency || 'USD');
         const netTotal = Number(h['Total Cost'] || h.totalCost || (units * avgCost));
-        const tradeDate = ticker === 'SPCX' ? '2026-06-13' : '2026-10-28';
+        const tradeDate = String(h.Date || h.date || h.open_date || '').trim().split('T')[0] || new Date().toISOString().split('T')[0];
         return {
           Id: `moo_holding_${ticker.toLowerCase()}_${idx}`,
           Date: tradeDate,

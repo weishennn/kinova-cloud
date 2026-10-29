@@ -15,7 +15,7 @@ test('1. Trade auto-heal reconstructs missing trade history from portfolio holdi
   if (tradesRows.length === 0 && portfolioHoldings.length > 0) {
     const reconstructed = portfolioHoldings.map((h, idx) => ({
       Id: `moo_holding_${h.ticker.toLowerCase()}_${idx}`,
-      Date: h.ticker === 'SPCX' ? '2026-06-13' : '2026-10-28',
+      Date: '2026-10-28',
       Action: 'BUY',
       Ticker: h.ticker,
       'Asset Name': h.name,

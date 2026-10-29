@@ -1099,7 +1099,7 @@ async function syncPortfolioFromTradesUser(
       const reconstructedTrades: Array<Array<string | number>> = [TRADES_HEADERS];
       existingPortfolioHoldings.forEach((h) => {
         const netTotal = parseFloat((h.units * h.avgCost + 0.50).toFixed(2));
-        const tradeDate = h.ticker === 'SPCX' ? '2026-06-13' : '2026-10-28';
+        const tradeDate = new Date().toISOString().split('T')[0];
         reconstructedTrades.push([
           `moo_pos_${h.ticker.toLowerCase()}_${Date.now().toString(36)}`,
           tradeDate,
@@ -1294,7 +1294,7 @@ async function getTradesWithAutoHeal(
       const currency = String(r[currCol] || 'USD').toUpperCase();
       const fees = 0.50;
       const netTotal = parseFloat((units * avgCost + fees).toFixed(2));
-      const tradeDate = ticker === 'SPCX' ? '2026-06-13' : '2026-10-28';
+      const tradeDate = new Date().toISOString().split('T')[0];
       holdingsFromPortfolio.push([
         `moo_pos_${ticker.toLowerCase()}_${Date.now().toString(36)}`,
         tradeDate,

@@ -434,7 +434,7 @@ export async function POST(req: NextRequest) {
 
       const tradeDate = buyExec
         ? parseMoomooDate(buyExec.created_time)
-        : (pos.open_date ? parseMoomooDate(pos.open_date) : '2026-06-13');
+        : (pos.open_date ? parseMoomooDate(pos.open_date) : new Date().toISOString().split('T')[0]);
       const price = parseFloat(pos.cost_price || pos.nominal_price || '0');
       const fees = buyFee ? Math.abs(parseFloat(buyFee.cash_change || '0')) : (feeBySymbol[ticker] || 0);
       const netTotal = parseFloat((posQty * price + fees).toFixed(2));
@@ -576,9 +576,9 @@ export async function POST(req: NextRequest) {
       trades: resolvedTrades,
       portfolio: resolvedPortfolio,
       portfolioSummary: {
-        totalAssetsUsd: fundsUsd?.total_assets || '99.00',
-        totalAssetsMyr: fundsMyr?.total_assets || '403.58',
-        unrealizedPlMyr: fundsMyr?.unrealized_pl || '12.64',
+        totalAssetsUsd: fundsUsd?.total_assets || '0.00',
+        totalAssetsMyr: fundsMyr?.total_assets || '0.00',
+        unrealizedPlMyr: fundsMyr?.unrealized_pl || '0.00',
         positionsCount: positionsList.length,
       },
       timestamp: new Date().toISOString(),

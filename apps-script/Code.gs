@@ -2127,7 +2127,7 @@ function syncPortfolioFromTrades() {
         const units = Number(pr[4]) || 0;
         const avgCost = Number(pr[5]) || 0;
         if (ticker && units > 0) {
-          const tradeDate = ticker === 'SPCX' ? '2026-06-13' : '2026-10-28';
+          const tradeDate = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
           reconstructed.push([
             'moo_pos_' + ticker.toLowerCase() + '_' + new Date().getTime().toString(36),
             tradeDate,
