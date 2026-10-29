@@ -12,6 +12,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { usePortfolio, useTrades, useAddTrade, useUpdateRow, useDeleteRow } from '@/hooks/useSheets';
 import { clearAllSwrCache, setSwrCachedData } from '@/lib/sheets-api';
 import { runSerializedSheetMutation } from '@/lib/sheets-data';
+import { discardPendingMoomooDeletes } from '@/lib/cache-manager';
+import { clearDeletedTombstone } from '@/lib/data-integrity';
 import { 
   convertCurrency, 
   formatAssetCurrency, 
@@ -313,11 +315,29 @@ export default function InvestmentsPage() {
     return () => { active = false; };
   }, []);
 
-  const handleSyncMoomoo = async () => {
+  const handleSyncMoomoo = async (forceFullSync = false) => {
+    if (forceFullSync) {
+      const confirmed = await confirmAction({
+        title: 'Run a full Moomoo re-sync?',
+        description: 'Fetch all available Moomoo order history and fee details for the authorized account(s). Returned Moomoo orders marked as deleted will be restored and Portfolio will be rebuilt. Matching queued deletes for those restored orders will be removed; other trades and pending changes will stay as they are. This may take longer than a light sync.',
+        confirmText: 'Full re-sync',
+        cancelText: 'Cancel',
+        variant: 'warning',
+        icon: 'alert',
+      });
+      if (!confirmed) return;
+    }
+
     setIsSyncingMoomoo(true);
     try {
       const res = await runSerializedSheetMutation('Trades', () =>
-        fetch('/api/moomoo/sync', { method: 'POST' })
+        fetch('/api/moomoo/sync', {
+          method: 'POST',
+          ...(forceFullSync ? {
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fullHistory: true }),
+          } : {}),
+        })
       );
       const data = await res.json();
       if (!res.ok || !data.success) {
@@ -329,6 +349,26 @@ export default function InvestmentsPage() {
         'Id', 'Date', 'Action', 'Ticker', 'Asset Name',
         'Quantity', 'Price', 'Fees', 'Net Total', 'Currency', 'Notes'
       ];
+
+      let clearedMoomooPendingDeletes = 0;
+      if (forceFullSync && Array.isArray(data.trades)) {
+        try {
+          const restoredMoomooIds = new Set<string>();
+          for (const row of data.trades as Array<Record<string, unknown>>) {
+            const id = String(row.Id || row.id || '').trim();
+            const notes = String(row.Notes || row.notes || '');
+            if (!id.startsWith('moo_') || !/Moomoo Auto-Sync/i.test(notes)) continue;
+            restoredMoomooIds.add(id);
+            const orderId = notes.match(/\bOrder:\s*([^;\s)]+)/i)?.[1];
+            if (orderId) restoredMoomooIds.add(`moo_${orderId}`);
+          }
+          for (const id of restoredMoomooIds) clearDeletedTombstone(id);
+          clearedMoomooPendingDeletes = discardPendingMoomooDeletes([...restoredMoomooIds]);
+        } catch (error) {
+          console.warn('[Moomoo Sync] Could not reconcile local pending deletes after the full re-sync:', error);
+          toast.warning('Moomoo history synced, but local pending deletes could not be cleared. Review the pending queue in Settings.');
+        }
+      }
 
       // Full sync returns the complete sheet; light sync returns only changed orders.
       if (Array.isArray(data.trades)) {
@@ -430,11 +470,16 @@ export default function InvestmentsPage() {
       if (data.syncedDeposits > 0) parts.push(`${data.syncedDeposits} cash deposit${data.syncedDeposits > 1 ? 's' : ''}`);
 
       if (parts.length === 0) {
-        toast.success(
-          `Moomoo is up-to-date. ${data.mode === 'full' ? 'Full history checked' : 'Light sync checked recent activity'}. Switched to Trade History (${data.trades?.length ?? trades.length} trades recorded).`
-        );
+        const restoredMarkers = Number(data.restoredMoomooTombstones) || 0;
+        const syncDescription = forceFullSync
+          ? `Full Moomoo history checked${restoredMarkers > 0 ? `; restored ${restoredMarkers} deleted order marker${restoredMarkers === 1 ? '' : 's'}` : ''}`
+          : `${data.mode === 'full' ? 'Full history checked' : 'Light sync checked recent activity'}`;
+        toast.success(`Moomoo is up-to-date. ${syncDescription}. Switched to Trade History (${data.trades?.length ?? trades.length} trades recorded).`);
       } else {
         toast.success(`Synced from Moomoo: ${parts.join(', ')}. Switched to Trade History.`);
+      }
+      if (clearedMoomooPendingDeletes > 0) {
+        toast.info(`Removed ${clearedMoomooPendingDeletes} stale pending delete${clearedMoomooPendingDeletes === 1 ? '' : 's'} for restored Moomoo orders.`);
       }
       if (data.feeDetailsUnavailable > 0) {
         toast.warning(`${data.feeDetailsUnavailable} Moomoo order(s) had no fee details available; check their Notes in Trade History.`);
@@ -918,27 +963,39 @@ export default function InvestmentsPage() {
         title="Investment Portfolio"
         description="Real-time stock & crypto tracker with automated Google Sheets formulas"
         action={(
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <div className="flex flex-col items-end gap-0.5">
-            <button
-              type="button"
-              disabled={isSyncingMoomoo}
-              onClick={handleSyncMoomoo}
-              className="min-h-[40px] px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 active:scale-[0.97] text-white text-xs font-semibold shadow-lg shadow-emerald-500/20 flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation disabled:opacity-50"
-              title="First sync imports the available history; later syncs check recent activity and update matching orders with Moomoo fee details."
-            >
-              {isSyncingMoomoo ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5" />
-              )}
-              <span>{isSyncingMoomoo ? 'Syncing...' : 'Sync Moomoo'}</span>
-            </button>
-            <span className="text-[10px] leading-tight text-slate-500 dark:text-zinc-400">
-              {lastMoomooSyncAt
-                ? `Last sync ${new Intl.DateTimeFormat('en-MY', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kuala_Lumpur' }).format(new Date(lastMoomooSyncAt))}`
-                : 'First sync imports history'}
-            </span>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={isSyncingMoomoo}
+                  onClick={() => handleSyncMoomoo(false)}
+                  className="min-h-[44px] px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 active:scale-[0.97] text-white text-xs font-semibold shadow-lg shadow-emerald-500/20 flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation disabled:opacity-50"
+                  title="Later syncs check recent activity and update matching orders with Moomoo fee details."
+                >
+                  {isSyncingMoomoo ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                  <span>{isSyncingMoomoo ? 'Syncing...' : 'Sync Moomoo'}</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={isSyncingMoomoo}
+                  onClick={() => handleSyncMoomoo(true)}
+                  className="min-h-[44px] px-3 py-2 rounded-xl border border-amber-500/40 bg-white/80 dark:bg-zinc-900/80 hover:bg-amber-50 dark:hover:bg-amber-950/30 active:scale-[0.97] text-amber-800 dark:text-amber-300 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation disabled:opacity-50"
+                  title="Fetch full Moomoo history and restore returned orders that were previously deleted."
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${isSyncingMoomoo ? 'animate-spin' : ''}`} aria-hidden="true" />
+                  <span>Full re-sync</span>
+                </button>
+              </div>
+              <span className="text-[10px] leading-tight text-slate-500 dark:text-zinc-400">
+                {lastMoomooSyncAt
+                  ? `Last sync ${new Intl.DateTimeFormat('en-MY', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kuala_Lumpur' }).format(new Date(lastMoomooSyncAt))}`
+                  : 'First sync imports history'}
+              </span>
             </div>
             <button
               type="button"

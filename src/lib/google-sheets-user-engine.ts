@@ -1366,12 +1366,73 @@ function normalizedTradeNetTotal(trade: Record<string, unknown>, action: string,
   return Number.isFinite(provided) ? provided : Number((quantity * price + (action === 'SELL' ? -fees : fees)).toFixed(2));
 }
 
+async function clearRestoredMoomooTradeTombstones(
+  spreadsheetId: string,
+  accessToken: string,
+  meta: SpreadsheetMetadata,
+  restoredTrades: Array<Record<string, unknown>>
+): Promise<number> {
+  const restoredIds = new Set<string>();
+  for (const trade of restoredTrades) {
+    const id = String(trade.Id || trade.id || '').trim();
+    const notes = String(trade.Notes || trade.notes || '');
+    if (!id || !/^moo_/i.test(id) || !/Moomoo Auto-Sync/i.test(notes)) continue;
+    restoredIds.add(id);
+    const orderId = notes.match(/\bOrder:\s*([^;\s)]+)/i)?.[1];
+    if (orderId) restoredIds.add(`moo_${orderId}`);
+  }
+  if (restoredIds.size === 0) return 0;
+
+  await ensureSheetExists(spreadsheetId, accessToken, meta, 'Deleted Records');
+  const sheetMeta = meta.sheets.find((sheet) => sheet.properties.title === 'Deleted Records');
+  if (!sheetMeta) throw new Error('Could not find the Deleted Records tab to restore Moomoo trades.');
+  const deletedRows = await readSheetRange(spreadsheetId, accessToken, "'Deleted Records'!A:D");
+  const rowsToDelete: number[] = [];
+  for (let i = 1; i < deletedRows.length; i++) {
+    const row = deletedRows[i] || [];
+    if (String(row[2] || '') !== 'Trades') continue;
+    if (restoredIds.has(String(row[0] || '').trim())) rowsToDelete.push(i + 1);
+  }
+  if (rowsToDelete.length === 0) return 0;
+
+  const response = await googleApiFetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`,
+    accessToken,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        requests: rowsToDelete
+          .sort((a, b) => b - a)
+          .map((rowNumber) => ({
+            deleteDimension: {
+              range: {
+                sheetId: sheetMeta.properties.sheetId,
+                dimension: 'ROWS',
+                startIndex: rowNumber - 1,
+                endIndex: rowNumber,
+              },
+            },
+          })),
+      }),
+    }
+  );
+  if (!response.ok) throw new Error('Could not remove the matching Moomoo deletion markers.');
+
+  const verifiedRows = await readSheetRange(spreadsheetId, accessToken, "'Deleted Records'!A:D");
+  const stillBlocked = verifiedRows.slice(1).some((row) =>
+    String(row?.[2] || '') === 'Trades' && restoredIds.has(String(row?.[0] || '').trim())
+  );
+  if (stillBlocked) throw new Error('Moomoo deletion-marker cleanup could not be verified.');
+  return rowsToDelete.length;
+}
+
 async function syncMoomooTradesUser(
   spreadsheetId: string,
   accessToken: string,
   meta: SpreadsheetMetadata,
-  incomingTrades: Array<Record<string, unknown>>
-): Promise<{ added: number; updated: number; changes: Array<Record<string, unknown>>; removedIds: string[] }> {
+  incomingTrades: Array<Record<string, unknown>>,
+  restoreDeletedMoomooTrades = false
+): Promise<{ added: number; updated: number; changes: Array<Record<string, unknown>>; removedIds: string[]; restoredTombstones: number }> {
   const tradesSheetMeta = meta.sheets.find((sheet) => sheet.properties.title.trim().toLowerCase() === 'trades');
   const sheetTitle = tradesSheetMeta?.properties.title || 'Trades';
   await ensureSheetExists(spreadsheetId, accessToken, meta, sheetTitle);
@@ -1396,8 +1457,9 @@ async function syncMoomooTradesUser(
   }
 
   await ensureSheetExists(spreadsheetId, accessToken, meta, 'Deleted Records');
-  const deletedIds = new Set((await readSheetRange(spreadsheetId, accessToken, "'Deleted Records'!A:A"))
+  const deletedIds = new Set((await readSheetRange(spreadsheetId, accessToken, "'Deleted Records'!A:D"))
     .slice(1)
+    .filter((row) => String(row[2] || '') === 'Trades')
     .map((row) => String(row[0] || '').trim())
     .filter(Boolean));
 
@@ -1416,7 +1478,7 @@ async function syncMoomooTradesUser(
     const accountId = notes.match(/\bAccount:\s*([^;\s)]+)/i)?.[1] || '';
     const rowNumber = rowById.get(id) || (accountId ? rowByAccountOrder.get(`${accountId}:${orderId}`) : undefined) || rowByLegacyOrder.get(orderId) || 0;
     const hasMatchingTombstone = Boolean(orderId && deletedIds.has(`moo_${orderId}`));
-    const wasDeleted = rowNumber === 0 && (deletedIds.has(id) || hasMatchingTombstone);
+    const wasDeleted = !restoreDeletedMoomooTrades && rowNumber === 0 && (deletedIds.has(id) || hasMatchingTombstone);
     const netTotal = normalizedTradeNetTotal(trade, action, quantity, price, fees);
     const normalized = {
       Id: id,
@@ -1498,11 +1560,15 @@ async function syncMoomooTradesUser(
     if (!response.ok) throw new Error('Could not append Moomoo trades to Google Sheets.');
   }
 
+  const restoredTombstones = restoreDeletedMoomooTrades
+    ? await clearRestoredMoomooTradeTombstones(spreadsheetId, accessToken, meta, changes)
+    : 0;
+
   // Trades are authoritative. Rebuild after every upsert, including no-op
   // retries, so a partial previous write cannot leave Portfolio out of sync.
   await syncPortfolioFromTradesUser(spreadsheetId, accessToken, meta);
 
-  return { added: additions.length, updated: updatedCount, changes, removedIds };
+  return { added: additions.length, updated: updatedCount, changes, removedIds, restoredTombstones };
 }
 
 /**
@@ -2222,7 +2288,13 @@ export async function executeUserGoogleAction(
     case 'syncMoomooTrades': {
       const trades = Array.isArray(params.trades) ? (params.trades as Record<string, unknown>[]) : [];
       return withUserDriveMutationLock(spreadsheetId, async () =>
-        wrap(await syncMoomooTradesUser(spreadsheetId, accessToken, meta, trades))
+        wrap(await syncMoomooTradesUser(
+          spreadsheetId,
+          accessToken,
+          meta,
+          trades,
+          params.restoreDeletedMoomooTrades === true
+        ))
       );
     }
 

@@ -836,6 +836,27 @@ export function removePendingMutation(id: string): void {
   savePendingMutations(filtered);
 }
 
+/**
+ * A user-confirmed Moomoo full re-sync supersedes queued deletes only for the
+ * Moomoo orders the server actually restored. Other queued edits stay intact.
+ */
+export function discardPendingMoomooDeletes(restoredTradeIds: string[]): number {
+  if (typeof window === 'undefined' || restoredTradeIds.length === 0) return 0;
+  assertQueueReadable(CACHE_KEYS.PENDING_QUEUE, 'Offline transaction');
+  const restoredIds = new Set(restoredTradeIds.map((id) => String(id || '').trim().toLowerCase()).filter(Boolean));
+  if (restoredIds.size === 0) return 0;
+
+  const current = getPendingMutations();
+  const retained = current.filter((mutation) => {
+    if (mutation.type !== 'delete' || mutation.sheetName !== 'Trades') return true;
+    const rowId = String(mutation.rowId || mutation.rowData?.Id || mutation.rowData?.id || '').trim().toLowerCase();
+    return !restoredIds.has(rowId);
+  });
+  const discarded = current.length - retained.length;
+  if (discarded > 0) savePendingMutations(retained);
+  return discarded;
+}
+
 // --- Pending Scalar Settings Outbox ---
 
 

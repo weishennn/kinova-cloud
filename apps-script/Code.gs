@@ -189,9 +189,10 @@ function doGet(e) {
         return createResponse(true, withScriptLock(() => batchSyncTrades(trades)));
       }
       case 'syncMoomooTrades': {
-        const rawTrades = (body && body.trades) ? body.trades : params.trades;
+        const rawTrades = params.trades;
         const trades = rawTrades ? (typeof rawTrades === 'string' ? JSON.parse(rawTrades) : rawTrades) : [];
-        return createResponse(true, withScriptLock(() => syncMoomooTrades(trades)));
+        const restoreDeletedMoomooTrades = String(params.restoreDeletedMoomooTrades || '').toLowerCase() === 'true';
+        return createResponse(true, withScriptLock(() => syncMoomooTrades(trades, restoreDeletedMoomooTrades)));
       }
       case 'sanitizeCategories':
         return createResponse(true, withScriptLock(() => sanitizeAllSheetCategories()));
@@ -316,7 +317,7 @@ function doPost(e) {
       case 'syncMoomooTrades': {
         const rawTrades = (body && body.trades) ? body.trades : params.trades;
         const trades = rawTrades ? (typeof rawTrades === 'string' ? JSON.parse(rawTrades) : rawTrades) : [];
-        return createResponse(true, withScriptLock(() => syncMoomooTrades(trades)));
+        return createResponse(true, withScriptLock(() => syncMoomooTrades(trades, body.restoreDeletedMoomooTrades === true)));
       }
       case 'sanitizeCategories':
         return createResponse(true, withScriptLock(() => sanitizeAllSheetCategories()));
@@ -2321,7 +2322,45 @@ function batchSyncTrades(incomingTrades) {
  * matching orders, then rebuilds derived Portfolio state from Trades so a
  * retry can recover if an earlier request partially completed.
  */
-function syncMoomooTrades(incomingTrades) {
+function clearRestoredMoomooTradeTombstones(restoredTrades) {
+  const restoredIds = new Set();
+  (restoredTrades || []).forEach(trade => {
+    const id = String(trade.Id || trade.id || '').trim();
+    const notes = String(trade.Notes || trade.notes || '');
+    if (!id || !/^moo_/i.test(id) || !/Moomoo Auto-Sync/i.test(notes)) return;
+    restoredIds.add(id);
+    const orderMatch = notes.match(/\bOrder:\s*([^;\s)]+)/i);
+    if (orderMatch) restoredIds.add(`moo_${orderMatch[1]}`);
+  });
+  if (restoredIds.size === 0) return 0;
+
+  const deletedSheet = getDeletedRecordsSheet();
+  const deletedLastRow = deletedSheet.getLastRow();
+  if (deletedLastRow <= 1) return 0;
+  const deletedRows = deletedSheet.getRange(2, 1, deletedLastRow - 1, DELETED_TOMBSTONE_HEADERS.length).getValues();
+  const matchingRows = [];
+  deletedRows.forEach((row, index) => {
+    if (String(row[2] || '') === 'Trades' && restoredIds.has(String(row[0] || '').trim())) {
+      matchingRows.push(index + 2);
+    }
+  });
+
+  // Delete from bottom-up so selected row numbers remain valid as the sheet shrinks.
+  matchingRows.sort((a, b) => b - a).forEach(rowNumber => deletedSheet.deleteRow(rowNumber));
+  SpreadsheetApp.flush();
+
+  const verifyLastRow = deletedSheet.getLastRow();
+  if (verifyLastRow > 1) {
+    const remainingRows = deletedSheet.getRange(2, 1, verifyLastRow - 1, DELETED_TOMBSTONE_HEADERS.length).getValues();
+    const stillBlocked = remainingRows.some(row =>
+      String(row[2] || '') === 'Trades' && restoredIds.has(String(row[0] || '').trim())
+    );
+    if (stillBlocked) throw new Error('Moomoo deletion-marker cleanup could not be verified.');
+  }
+  return matchingRows.length;
+}
+
+function syncMoomooTrades(incomingTrades, restoreDeletedMoomooTrades) {
   const tradeSheet = getSheet('Trades');
   const lastRow = tradeSheet.getLastRow();
   const existingIds = lastRow > 1 ? tradeSheet.getRange(2, 1, lastRow - 1, 1).getValues() : [];
@@ -2385,7 +2424,7 @@ function syncMoomooTrades(incomingTrades) {
       (orderMatch ? rowByLegacyOrder[orderMatch[1]] : 0) || 0;
     if (!rowIndex) {
       const wasDeleted = tombstonedIds.has(tradeId) || Boolean(orderMatch && tombstonedIds.has(`moo_${orderMatch[1]}`));
-      if (wasDeleted) return;
+      if (wasDeleted && !restoreDeletedMoomooTrades) return;
     }
 
     const providedNetTotal = Number(trade['Net Total'] !== undefined ? trade['Net Total'] : trade.netTotal);
@@ -2429,12 +2468,16 @@ function syncMoomooTrades(incomingTrades) {
     tradeSheet.getRange(appendAt, 1, newRows.length, 11).setValues(newRows);
   }
 
+  const restoredTombstones = restoreDeletedMoomooTrades
+    ? clearRestoredMoomooTradeTombstones(changes)
+    : 0;
+
   // Trades are authoritative. A full portfolio rebuild makes retries safe if a
   // previous write saved Trades but failed partway through updating Portfolio.
   syncPortfolioFromTrades();
   SpreadsheetApp.flush();
 
-  return { added: addedCount, updated: updatedCount, changes, removedIds };
+  return { added: addedCount, updated: updatedCount, changes, removedIds, restoredTombstones };
 }
 
 function applyPortfolioTradeDeltas(trades) {

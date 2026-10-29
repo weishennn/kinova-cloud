@@ -107,14 +107,15 @@ async function getExistingTrades(session: GoogleUserSession): Promise<Array<Reco
 
 async function syncTradesToLedger(
   session: GoogleUserSession,
-  trades: Array<Record<string, unknown>>
-): Promise<{ added: number; updated: number; rows?: Array<Record<string, unknown>>; changes: Array<Record<string, unknown>>; removedIds: string[] }> {
+  trades: Array<Record<string, unknown>>,
+  restoreDeletedMoomooTrades = false
+): Promise<{ added: number; updated: number; rows?: Array<Record<string, unknown>>; changes: Array<Record<string, unknown>>; removedIds: string[]; restoredTombstones: number }> {
   // The deployed Apps Script may lag the repository and not recognize
   // batchSyncTrades. Moomoo's purpose-built upsert supports both first and
   // incremental imports, while the full sheet is read immediately afterward.
   const action = 'syncMoomooTrades';
   if (session.isAdmin && getAdminAppsScriptEndpoint()) {
-    const response = await fetchAdminAppsScript('POST', action, { trades }) as JsonRecord | null;
+    const response = await fetchAdminAppsScript('POST', action, { trades, restoreDeletedMoomooTrades }) as JsonRecord | null;
     if (!response?.success) {
       const message = response?.message || 'Could not write Moomoo trades to Google Sheets.';
       if (/unknown action/i.test(message)) {
@@ -130,10 +131,11 @@ async function syncTradesToLedger(
       rows: Array.isArray(data.rows) ? data.rows : undefined,
       changes: Array.isArray(data.changes) ? data.changes : trades,
       removedIds: Array.isArray(data.removedIds) ? data.removedIds.map(String) : [],
+      restoredTombstones: Number(data.restoredTombstones) || 0,
     };
   }
 
-  const { result } = await executeUserGoogleAction(session, action, { trades });
+  const { result } = await executeUserGoogleAction(session, action, { trades, restoreDeletedMoomooTrades });
   const data = result as JsonRecord;
   if (!data) throw new Error('Google Sheets did not confirm the Moomoo trade write.');
   return {
@@ -142,6 +144,7 @@ async function syncTradesToLedger(
     rows: Array.isArray(data.rows) ? data.rows : undefined,
     changes: Array.isArray(data.changes) ? data.changes : trades,
     removedIds: Array.isArray(data.removedIds) ? data.removedIds.map(String) : [],
+    restoredTombstones: Number(data.restoredTombstones) || 0,
   };
 }
 
@@ -302,6 +305,14 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
+    let forceFullSync = false;
+    try {
+      const requestBody = await req.json() as JsonRecord;
+      forceFullSync = requestBody?.fullHistory === true;
+    } catch {
+      // Empty bodies remain the normal light/full-by-checkpoint sync request.
+    }
+
     const settings = await getSettings(session);
     const oldState = parseMoomooSyncState(settings[MOOMOO_SYNC_STATE_KEY]);
 
@@ -322,7 +333,7 @@ export async function POST(req: NextRequest) {
       if (markets.length === 0) {
         throw new Error(`Moomoo account ${accountId} did not return any supported enable_market values; refusing to mark an empty sync as complete.`);
       }
-      const previousAccountSyncAt = oldState?.accountLastSyncAt[accountId];
+      const previousAccountSyncAt = forceFullSync ? undefined : oldState?.accountLastSyncAt[accountId];
       const beginMs = getMoomooSyncStartMs(previousAccountSyncAt);
       const endMs = Date.now() + 24 * 60 * 60 * 1000;
       const start = toMicroseconds(beginMs);
@@ -363,7 +374,7 @@ export async function POST(req: NextRequest) {
     }));
 
     const accounts = accountPayloads.filter((account): account is NonNullable<typeof account> => Boolean(account));
-    const fullSync = accounts.some((account) => !account.previousAccountSyncAt);
+    const fullSync = forceFullSync || accounts.some((account) => !account.previousAccountSyncAt);
     const rawExistingRows = fullSync ? await getExistingTrades(session) : [];
     const existingRows = [...rawExistingRows];
     const feeLookupErrors: Array<{ orderId: string; message: string }> = [];
@@ -439,9 +450,25 @@ export async function POST(req: NextRequest) {
       );
     }
     const ledgerResult = tradesToSync.length > 0
-      ? await syncTradesToLedger(session, tradesToSync)
-      : { added: 0, updated: 0, rows: rawExistingRows, changes: [], removedIds: [] };
+      ? await syncTradesToLedger(session, tradesToSync, forceFullSync)
+      : { added: 0, updated: 0, rows: rawExistingRows, changes: [], removedIds: [], restoredTombstones: 0 };
     if (tradesToSync.length === 0) await rebuildPortfolio(session);
+
+    let fullTradesAfterSync: Array<Record<string, unknown>> | undefined;
+    if (forceFullSync) {
+      fullTradesAfterSync = await getExistingTrades(session);
+      const missingRestoredTrades = tradesToSync.filter((trade) => {
+        const notes = getString(trade.Notes || trade.notes);
+        const accountId = notes.match(/\bAccount:\s*([^;\s)]+)/i)?.[1] || '';
+        const orderId = notes.match(/\bOrder:\s*([^;\s)]+)/i)?.[1] || '';
+        return !accountId || !orderId || findMoomooOrderTradeIndex(fullTradesAfterSync!, accountId, orderId) < 0;
+      });
+      if (missingRestoredTrades.length > 0) {
+        throw new Error(
+          `Full Moomoo sync found ${missingRestoredTrades.length} executed order(s) that Google Sheets did not restore. Deploy the latest Sheets sync code, then retry the full re-sync.`
+        );
+      }
+    }
 
     const monthCache = new Map<string, Array<Record<string, unknown>>>();
     let syncedDeposits = 0;
@@ -489,7 +516,7 @@ export async function POST(req: NextRequest) {
     }
 
     const [freshTrades, freshPortfolio] = await Promise.all([
-      fullSync ? getExistingTrades(session) : Promise.resolve(undefined),
+      fullSync ? (fullTradesAfterSync ?? getExistingTrades(session)) : Promise.resolve(undefined),
       getPortfolioRows(session),
     ]);
 
@@ -512,6 +539,7 @@ export async function POST(req: NextRequest) {
       feeDetailsUnavailable: 0,
       syncedDeposits,
       skippedDeposits,
+      restoredMoomooTombstones: ledgerResult.restoredTombstones,
       ...(freshTrades ? { trades: freshTrades } : { tradeChanges: ledgerResult.changes, removedTradeIds: ledgerResult.removedIds }),
       portfolio: freshPortfolio,
       portfolioSummary: {
