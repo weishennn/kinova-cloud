@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getValidGoogleSession, setSessionCookie } from '@/lib/google-auth';
-import { getAdminAppsScriptEndpoint, isUserBlocked, setActiveShortcutOwner, resolveAdminSpreadsheetId } from '@/lib/admin-registry';
+import { getAdminAppsScriptEndpoint, isUserBlocked, setActiveShortcutOwner } from '@/lib/admin-registry';
 import { executeUserGoogleAction } from '@/lib/google-sheets-user-engine';
 
 const SERVER_TIMEOUT_MS = 25000;
@@ -39,39 +39,38 @@ export async function GET(req: NextRequest) {
 
     void setActiveShortcutOwner(session.email, req.headers.get('user-agent'));
 
-    // Authenticated Google OAuth users (both admin and personal) execute via Google Sheets User Engine
-    try {
-      const cookieHadSheetId = Boolean(session.spreadsheetId);
-      const headerSheetId = (req.headers.get('x-kinova-spreadsheet-id') || '').trim();
-      if (!session.spreadsheetId && headerSheetId) {
-        session.spreadsheetId = headerSheetId;
+    // Non-admin Google users always read/write their own personal Google Drive
+    if (!session.isAdmin) {
+      try {
+        const cookieHadSheetId = Boolean(session.spreadsheetId);
+        const headerSheetId = (req.headers.get('x-kinova-spreadsheet-id') || '').trim();
+        if (!session.spreadsheetId && headerSheetId) {
+          session.spreadsheetId = headerSheetId;
+        }
+        const action = req.nextUrl.searchParams.get('action') || 'ping';
+        const params: Record<string, unknown> = {};
+        req.nextUrl.searchParams.forEach((val, key) => {
+          params[key] = val;
+        });
+        const { result, sessionChanged } = await executeUserGoogleAction(session, action, params);
+        const res = NextResponse.json({
+          success: true,
+          data: result,
+          _proxy: {
+            proxied: true,
+            mode: 'google_oauth_user_drive',
+            userEmail: session.email,
+            spreadsheetId: session.spreadsheetId,
+          },
+        });
+        if (!cookieHadSheetId || refreshed || sessionChanged || (headerSheetId && session.spreadsheetId !== headerSheetId)) {
+          setSessionCookie(res, session);
+        }
+        return res;
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return NextResponse.json({ success: false, message }, { status: 500 });
       }
-      if (!session.spreadsheetId && session.isAdmin) {
-        session.spreadsheetId = resolveAdminSpreadsheetId();
-      }
-      const action = req.nextUrl.searchParams.get('action') || 'ping';
-      const params: Record<string, unknown> = {};
-      req.nextUrl.searchParams.forEach((val, key) => {
-        params[key] = val;
-      });
-      const { result, sessionChanged } = await executeUserGoogleAction(session, action, params);
-      const res = NextResponse.json({
-        success: true,
-        data: result,
-        _proxy: {
-          proxied: true,
-          mode: 'google_oauth_user_drive',
-          userEmail: session.email,
-          spreadsheetId: session.spreadsheetId,
-        },
-      });
-      if (!cookieHadSheetId || refreshed || sessionChanged || (headerSheetId && session.spreadsheetId !== headerSheetId)) {
-        setSessionCookie(res, session);
-      }
-      return res;
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      return NextResponse.json({ success: false, message }, { status: 500 });
     }
   } else if (!hasValidAdminProxyToken(req)) {
     return NextResponse.json(
@@ -80,9 +79,25 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Admin proxy token without OAuth session routes to the owner's Apps Script ledger
+  // Admin account (or authenticated admin proxy token) routes to the owner's Apps Script ledger
   const endpoint = getAdminAppsScriptEndpoint();
   if (!endpoint) {
+    if (session) {
+      try {
+        const action = req.nextUrl.searchParams.get('action') || 'ping';
+        const params: Record<string, unknown> = {};
+        req.nextUrl.searchParams.forEach((val, key) => {
+          params[key] = val;
+        });
+        const { result, sessionChanged } = await executeUserGoogleAction(session, action, params);
+        const res = NextResponse.json({ success: true, data: result });
+        if (refreshed || sessionChanged) setSessionCookie(res, session);
+        return res;
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return NextResponse.json({ success: false, message }, { status: 500 });
+      }
+    }
     return NextResponse.json(
       { success: false, message: 'Google Apps Script URL is not configured.' },
       { status: 503 }
@@ -149,36 +164,35 @@ export async function POST(req: NextRequest) {
 
     void setActiveShortcutOwner(session.email, req.headers.get('user-agent'));
 
-    // Authenticated Google OAuth users (both admin and personal) execute via Google Sheets User Engine
-    try {
-      const cookieHadSheetId = Boolean(session.spreadsheetId);
-      const headerSheetId = (req.headers.get('x-kinova-spreadsheet-id') || '').trim();
-      if (!session.spreadsheetId && headerSheetId) {
-        session.spreadsheetId = headerSheetId;
+    // Non-admin Google users always read/write their own personal Google Drive
+    if (!session.isAdmin) {
+      try {
+        const cookieHadSheetId = Boolean(session.spreadsheetId);
+        const headerSheetId = (req.headers.get('x-kinova-spreadsheet-id') || '').trim();
+        if (!session.spreadsheetId && headerSheetId) {
+          session.spreadsheetId = headerSheetId;
+        }
+        const body = await req.json();
+        const action = String(body.action || req.nextUrl.searchParams.get('action') || '');
+        const { result, sessionChanged } = await executeUserGoogleAction(session, action, body);
+        const res = NextResponse.json({
+          success: true,
+          data: result,
+          _proxy: {
+            proxied: true,
+            mode: 'google_oauth_user_drive',
+            userEmail: session.email,
+            spreadsheetId: session.spreadsheetId,
+          },
+        });
+        if (!cookieHadSheetId || refreshed || sessionChanged || (headerSheetId && session.spreadsheetId !== headerSheetId)) {
+          setSessionCookie(res, session);
+        }
+        return res;
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return NextResponse.json({ success: false, message }, { status: 500 });
       }
-      if (!session.spreadsheetId && session.isAdmin) {
-        session.spreadsheetId = resolveAdminSpreadsheetId();
-      }
-      const body = await req.json();
-      const action = String(body.action || req.nextUrl.searchParams.get('action') || '');
-      const { result, sessionChanged } = await executeUserGoogleAction(session, action, body);
-      const res = NextResponse.json({
-        success: true,
-        data: result,
-        _proxy: {
-          proxied: true,
-          mode: 'google_oauth_user_drive',
-          userEmail: session.email,
-          spreadsheetId: session.spreadsheetId,
-        },
-      });
-      if (!cookieHadSheetId || refreshed || sessionChanged || (headerSheetId && session.spreadsheetId !== headerSheetId)) {
-        setSessionCookie(res, session);
-      }
-      return res;
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      return NextResponse.json({ success: false, message }, { status: 500 });
     }
   } else if (!hasValidAdminProxyToken(req)) {
     return NextResponse.json(
@@ -187,9 +201,22 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Admin proxy token without OAuth session routes to the owner's Apps Script ledger
+  // Admin account (or authenticated admin proxy token) routes to the owner's Apps Script ledger
   const endpoint = getAdminAppsScriptEndpoint();
   if (!endpoint) {
+    if (session) {
+      try {
+        const body = await req.json();
+        const action = String(body.action || req.nextUrl.searchParams.get('action') || '');
+        const { result, sessionChanged } = await executeUserGoogleAction(session, action, body);
+        const res = NextResponse.json({ success: true, data: result });
+        if (refreshed || sessionChanged) setSessionCookie(res, session);
+        return res;
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return NextResponse.json({ success: false, message }, { status: 500 });
+      }
+    }
     return NextResponse.json(
       { success: false, message: 'Google Apps Script URL is not configured.' },
       { status: 503 }

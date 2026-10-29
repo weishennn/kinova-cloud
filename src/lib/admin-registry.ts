@@ -65,7 +65,7 @@ export function getAdminAppsScriptEndpoint(): { targetUrl: string; apiKey: strin
   return { targetUrl, apiKey };
 }
 
-async function fetchAdminAppsScript(
+export async function fetchAdminAppsScript(
   method: 'GET' | 'POST',
   action: string,
   params: Record<string, unknown> = {}

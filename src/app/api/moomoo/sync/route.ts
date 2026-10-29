@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getMoomooConfig, callMoomooApi } from '@/lib/moomoo-client';
-import { getValidGoogleSession, setSessionCookie } from '@/lib/google-auth';
+import { getValidGoogleSession, setSessionCookie, type GoogleUserSession } from '@/lib/google-auth';
 import { executeUserGoogleAction } from '@/lib/google-sheets-user-engine';
+import { fetchAdminAppsScript, getAdminAppsScriptEndpoint } from '@/lib/admin-registry';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +37,87 @@ function parseMoomooDate(val: any): string {
     return firstPart;
   }
   return new Date().toISOString().split('T')[0];
+}
+
+async function getExistingTrades(session: GoogleUserSession): Promise<Array<Record<string, unknown>>> {
+  if (session.isAdmin && getAdminAppsScriptEndpoint()) {
+    const res = (await fetchAdminAppsScript('GET', 'getTrades')) as any;
+    const rows = res?.data?.rows || res?.rows || (Array.isArray(res?.data) ? res.data : []);
+    return Array.isArray(rows) ? rows : [];
+  }
+  const existingTradesRes = await executeUserGoogleAction(session, 'getTrades', {}).catch(() => ({
+    result: { rows: [] },
+  }));
+  return ((existingTradesRes as any)?.result?.rows || []) as Array<Record<string, unknown>>;
+}
+
+async function syncTradesToLedger(
+  session: GoogleUserSession,
+  trades: Array<Record<string, unknown>>,
+  rawExistingRows: Array<Record<string, unknown>>
+): Promise<{ added: number; rows: Array<Record<string, unknown>> }> {
+  if (session.isAdmin && getAdminAppsScriptEndpoint()) {
+    let added = 0;
+    for (const t of trades) {
+      const res = (await fetchAdminAppsScript('POST', 'addTrade', { tradeData: t })) as any;
+      if (res?.success) added++;
+    }
+    await fetchAdminAppsScript('POST', 'syncPortfolio', {});
+    const freshRes = (await fetchAdminAppsScript('GET', 'getTrades')) as any;
+    const freshRows = freshRes?.data?.rows || freshRes?.rows || (Array.isArray(freshRes?.data) ? freshRes.data : []);
+    return {
+      added,
+      rows: Array.isArray(freshRows) && freshRows.length > 0 ? freshRows : [...rawExistingRows, ...trades],
+    };
+  }
+  const batchRes = await executeUserGoogleAction(session, 'batchSyncTrades', {
+    trades,
+  }).catch((e) => {
+    console.error('Batch sync trades error:', e);
+    return null;
+  });
+  const batchData = (batchRes as any)?.result;
+  return {
+    added: batchData?.added ?? trades.length,
+    rows: batchData?.rows ?? [...rawExistingRows, ...trades],
+  };
+}
+
+async function getMonthRows(session: GoogleUserSession, monthStr: string): Promise<Array<Record<string, unknown>>> {
+  if (session.isAdmin && getAdminAppsScriptEndpoint()) {
+    const res = (await fetchAdminAppsScript('GET', 'getSheetDataIfExists', { sheetName: monthStr })) as any;
+    return (res?.data?.rows || res?.rows || []) as Array<Record<string, unknown>>;
+  }
+  const monthDataRes = await executeUserGoogleAction(session, 'getSheetDataIfExists', {
+    sheetName: monthStr,
+  }).catch(() => null);
+  return ((monthDataRes as any)?.result?.rows || []) as Array<Record<string, unknown>>;
+}
+
+async function addDepositRow(session: GoogleUserSession, monthStr: string, rowData: Record<string, unknown>): Promise<void> {
+  if (session.isAdmin && getAdminAppsScriptEndpoint()) {
+    await fetchAdminAppsScript('POST', 'addRow', { sheetName: monthStr, rowData });
+    return;
+  }
+  await executeUserGoogleAction(session, 'addRow', { sheetName: monthStr, rowData });
+}
+
+async function syncPortfolioLedger(session: GoogleUserSession): Promise<void> {
+  if (session.isAdmin && getAdminAppsScriptEndpoint()) {
+    await fetchAdminAppsScript('POST', 'syncPortfolio', {});
+    return;
+  }
+  await executeUserGoogleAction(session, 'syncPortfolio', {}).catch(() => null);
+}
+
+async function getPortfolioRows(session: GoogleUserSession): Promise<Array<Record<string, unknown>>> {
+  if (session.isAdmin && getAdminAppsScriptEndpoint()) {
+    const res = (await fetchAdminAppsScript('GET', 'getPortfolio', {})) as any;
+    const rows = res?.data?.rows || res?.rows || (Array.isArray(res?.data) ? res.data : []);
+    return Array.isArray(rows) ? rows : [];
+  }
+  const freshPortfolioRes = await executeUserGoogleAction(session, 'getPortfolio', {}).catch(() => null);
+  return ((freshPortfolioRes as any)?.result || []) as Array<Record<string, unknown>>;
 }
 
 export async function GET(req: NextRequest) {
@@ -200,10 +282,7 @@ export async function POST(req: NextRequest) {
     const positionsList = posRes?.data?.d || [];
 
     // 3. Read existing Trades from Google Sheets
-    const existingTradesRes = await executeUserGoogleAction(session, 'getTrades', {}).catch(() => ({
-      result: { rows: [] },
-    }));
-    const rawExistingRows = ((existingTradesRes as any)?.result?.rows || []) as Array<Record<string, unknown>>;
+    const rawExistingRows = await getExistingTrades(session);
 
     let syncedTrades = 0;
     let skippedTrades = 0;
@@ -333,17 +412,10 @@ export async function POST(req: NextRequest) {
 
     // Atomically sync all trades in a single contiguous batch operation!
     if (tradesToSync.length > 0) {
-      const batchRes = await executeUserGoogleAction(session, 'batchSyncTrades', {
-        trades: tradesToSync,
-      }).catch((e) => {
-        console.error('Batch sync trades error:', e);
-        return null;
-      });
-
-      const batchData = (batchRes as any)?.result;
-      syncedTrades = batchData?.added ?? tradesToSync.length;
+      const batchResult = await syncTradesToLedger(session, tradesToSync, rawExistingRows);
+      syncedTrades = batchResult.added;
       allSyncedTrades.length = 0;
-      allSyncedTrades.push(...(batchData?.rows ?? rawExistingRows));
+      allSyncedTrades.push(...batchResult.rows);
     }
 
     // 4. Sync cash top-ups (deposits) from cash logs
@@ -358,11 +430,7 @@ export async function POST(req: NextRequest) {
         const amount = parseFloat(rawAmount) || 0;
 
         // Check if month already contains this deposit
-        const monthDataRes = await executeUserGoogleAction(session, 'getSheetDataIfExists', {
-          sheetName: monthStr,
-        }).catch(() => null);
-
-        const monthRows = ((monthDataRes as any)?.result?.rows || []) as Array<Record<string, unknown>>;
+        const monthRows = await getMonthRows(session, monthStr);
         const alreadyLogged = monthRows.some((r) => {
           const desc = String(r.Description || '').toLowerCase();
           const rDate = String(r.Date || '');
@@ -379,19 +447,16 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        await executeUserGoogleAction(session, 'addRow', {
-          sheetName: monthStr,
-          rowData: {
-            Id: `moo_dep_${depositDate.replace(/-/g, '')}_${Math.floor(amount)}`,
-            Date: depositDate,
-            Type: 'Income',
-            Category: 'Investment Deposit',
-            SubCategory: 'Moomoo Deposit',
-            Description: 'Moomoo Bank Transfer Deposit',
-            Amount: amount,
-            Currency: 'MYR',
-            Notes: 'Auto-synced from Moomoo Cloud API',
-          },
+        await addDepositRow(session, monthStr, {
+          Id: `moo_dep_${depositDate.replace(/-/g, '')}_${Math.floor(amount)}`,
+          Date: depositDate,
+          Type: 'Income',
+          Category: 'Investment Deposit',
+          SubCategory: 'Moomoo Deposit',
+          Description: 'Moomoo Bank Transfer Deposit',
+          Amount: amount,
+          Currency: 'MYR',
+          Notes: 'Auto-synced from Moomoo Cloud API',
         });
 
         syncedDeposits++;
@@ -402,14 +467,11 @@ export async function POST(req: NextRequest) {
     const fundsMyr = fundsMyrRes?.data?.d;
 
     // Force synchronize the Portfolio formulas sheet
-    await executeUserGoogleAction(session, 'syncPortfolio', {}).catch(() => null);
+    await syncPortfolioLedger(session);
 
     // Fetch the clean trades and portfolio lists from Google Sheets
-    const freshTradesRes = await executeUserGoogleAction(session, 'getTrades', {}).catch(() => null);
-    const freshTrades = ((freshTradesRes as any)?.result?.rows || []) as Array<Record<string, unknown>>;
-
-    const freshPortfolioRes = await executeUserGoogleAction(session, 'getPortfolio', {}).catch(() => null);
-    const freshPortfolio = ((freshPortfolioRes as any)?.result || []) as Array<Record<string, unknown>>;
+    const freshTrades = await getExistingTrades(session);
+    const freshPortfolio = await getPortfolioRows(session);
 
     // Defensively ensure trades is NEVER empty when trades were synced or existed
     const resolvedTrades = freshTrades.length > 0
