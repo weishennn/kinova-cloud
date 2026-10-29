@@ -4,10 +4,12 @@ import {
   calculateMoomooNetTotal,
   findMoomooOrderTradeIndex,
   getMoomooSyncStartMs,
+  getMoomooTradingMarkets,
   makeMoomooTradeId,
   normalizeMoomooOrder,
   parseMoomooDate,
   parseMoomooSyncState,
+  selectMoomooAuthorizedAccounts,
   MOOMOO_FULL_SYNC_START_MS,
   MOOMOO_SYNC_OVERLAP_MS,
 } from '../src/lib/moomoo-sync.ts';
@@ -26,13 +28,19 @@ test('incremental sync overlaps the last cursor to catch delayed fills and fee u
 
 test('sync state parsing safely rejects malformed values and retains per-account cursors', () => {
   assert.equal(parseMoomooSyncState('{broken'), null);
+  assert.equal(parseMoomooSyncState({
+    version: 1,
+    lastSyncAt: '2026-10-29T04:00:00.000Z',
+    accountLastSyncAt: { '12345': '2026-10-29T04:00:00.000Z' },
+  }), null, 'previous sync state must trigger one complete backfill after the request fix');
   assert.deepEqual(
     parseMoomooSyncState({
+      version: 2,
       lastSyncAt: '2026-10-29T04:00:00.000Z',
       accountLastSyncAt: { '12345': '2026-10-29T04:00:00.000Z', bad: 'invalid' },
     }),
     {
-      version: 1,
+      version: 2,
       lastSyncAt: '2026-10-29T04:00:00.000Z',
       accountLastSyncAt: { '12345': '2026-10-29T04:00:00.000Z' },
     }
@@ -58,6 +66,27 @@ test('same order IDs in different accounts never match each other', () => {
   }];
   assert.equal(findMoomooOrderTradeIndex(rows, '12345', 'order-9'), -1);
   assert.equal(findMoomooOrderTradeIndex(rows, '54321', 'order-9'), 0);
+});
+
+test('configured account selection matches only the full authorized account_id', () => {
+  const accounts = [
+    { account_id: '281756476993717634', univs_account_card_number: '9071', user_id: '12345678' },
+    { account_id: '281756479194114175', univs_account_card_number: '9072', user_id: '12345678' },
+  ];
+  assert.deepEqual(selectMoomooAuthorizedAccounts(accounts, '281756476993717634'), [accounts[0]]);
+  assert.throws(
+    () => selectMoomooAuthorizedAccounts(accounts, '9071'),
+    /full account_id/,
+    'card suffixes must not silently select every authorized account'
+  );
+  assert.deepEqual(selectMoomooAuthorizedAccounts(accounts), accounts);
+});
+
+test('enabled Moomoo markets are translated to the required trd_market query values', () => {
+  assert.deepEqual(
+    getMoomooTradingMarkets({ enable_market: [2, 11, 1, 11, 7, 14] }),
+    ['US', 'MY', 'HK']
+  );
 });
 
 test('order normalization uses executed quantity, average fill price, itemized fees, and signed sell proceeds', () => {
@@ -90,6 +119,7 @@ test('order normalization uses executed quantity, average fill price, itemized f
   assert.equal(trade.Price, 100);
   assert.equal(trade.Fees, 1.25);
   assert.equal(trade['Net Total'], 248.75);
+  assert.match(String(trade.Notes), /Fee sync: confirmed/);
   assert.match(String(trade.Notes), /Fee breakdown: Commission 0\.75, Platform fee 0\.50/);
 });
 

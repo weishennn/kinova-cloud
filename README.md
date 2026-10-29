@@ -77,13 +77,19 @@ GEMINI_MODEL=gemini-2.5-flash
 # Optional model override for user-requested web price comparisons (defaults to gemini-2.5-flash)
 GEMINI_PRICE_SEARCH_MODEL=gemini-2.5-flash
 
-# 3. Admin Google Apps Script Bridge & Shortcut Token
+# 3. Optional Moomoo OpenAPI trade-history sync (server-side only)
+MOOMOO_API_KEY=your_moomoo_api_key
+MOOMOO_SECRET_KEY=your_moomoo_secret_key
+# Optional exact trading account_id from authorized_trd_accs
+MOOMOO_ACCOUNT_ID=your_full_trading_account_id
+
+# 4. Admin Google Apps Script Bridge & Shortcut Token
 APPS_SCRIPT_URL=https://script.google.com/macros/s/.../exec
 APPS_SCRIPT_API_KEY=your_apps_script_api_key
 CASHFLOW_PROXY_TOKEN=your_proxy_token
 KINOVA_SHORTCUT_TOKEN=your_shortcut_token
 
-# 4. Optional Trixpense Integration
+# 5. Optional Trixpense Integration
 NEXT_PUBLIC_SPLITWISE_APP_URL=https://your-trixpense-url.vercel.app
 ```
 
@@ -113,6 +119,12 @@ npm run build
 
 - **Normal Sync (`Sync Now` / Auto Sync)**: Flushes pending local mutations (new/edited/deleted rows, recurring rules, installment plans, settings) to Google Sheets and refreshes the active month cache. Fast and incremental for everyday use.
 - **Force Full Sync (`Settings → Force Full Sync to Google Sheet`)**: Reconciles and rebuilds all spreadsheet tabs and formulas (`Overview` annual/monthly `SUMIFS` dashboard, `Portfolio` live `GOOGLEFINANCE` rows, `Trades`, `Recurring`, `Installments`, `Trips`, and `Settings`). Use only when you need to repair or regenerate sheet tabs/formulas.
+
+### Moomoo Trade History
+
+- **Moomoo Sync** reads Moomoo's historical orders separately for each trading market enabled on the authorized account, then fetches the fee details for each executed order before writing trades to Google Sheets. If fees cannot be verified, it stops before writing the trades or deposits instead of recording a guessed zero fee.
+- The first successful sync checks the available history. Later syncs use the saved per-account sync time with a 48-hour overlap to catch recent updates. The Investments page shows the last completed sync time. The corrected history request uses a new cursor version, so the next sync performs a one-time full backfill rather than trusting the cursor saved by the old request.
+- Set `MOOMOO_ACCOUNT_ID` only to the full `account_id` from `authorized_trd_accs`. A Universal Account card number (including its last four digits) and a Moomoo user ID are different values. If `MOOMOO_ACCOUNT_ID` is blank, all authorized trading accounts are synced.
 
 ---
 

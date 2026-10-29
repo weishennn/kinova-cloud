@@ -1,11 +1,55 @@
-export const MOOMOO_SYNC_STATE_KEY = 'moomoo_sync_state_v1';
+export const MOOMOO_SYNC_STATE_KEY = 'moomoo_sync_state_v2';
 export const MOOMOO_FULL_SYNC_START_MS = Date.UTC(2000, 0, 1);
 export const MOOMOO_SYNC_OVERLAP_MS = 48 * 60 * 60 * 1000;
 
+const ENABLE_MARKET_TO_TRD_MARKET: Record<number, string> = {
+  1: 'HK',
+  2: 'US',
+  4: 'HKCC',
+  5: 'FUTURES',
+  6: 'SG',
+  8: 'AU',
+  9: 'FOREX',
+  11: 'MY',
+  12: 'CA',
+  15: 'JP',
+  17: 'PREDICTION',
+  18: 'KR',
+};
+
 export interface MoomooSyncState {
-  version: 1;
+  version: 2;
   lastSyncAt: string;
   accountLastSyncAt: Record<string, string>;
+}
+
+/**
+ * Resolves only real trading account IDs returned by authorized_trd_accs.
+ * Universal-account card numbers and Moomoo user IDs are not account IDs.
+ */
+export function selectMoomooAuthorizedAccounts<T extends Record<string, unknown>>(
+  accounts: T[],
+  configuredAccountId?: string
+): T[] {
+  const withAccountId = accounts.filter((account) => String(account.account_id ?? '').trim());
+  const requestedId = String(configuredAccountId || '').trim();
+  if (!requestedId) return withAccountId;
+
+  const selected = withAccountId.filter((account) => String(account.account_id).trim() === requestedId);
+  if (selected.length === 0) {
+    throw new Error(
+      'MOOMOO_ACCOUNT_ID did not match an authorized account_id. Use the full account_id from Moomoo OpenAPI; a Universal Account card number or Moomoo user ID is not the trading account ID.'
+    );
+  }
+  return selected;
+}
+
+/** Resolves the trd_market values required by Moomoo order-history requests. */
+export function getMoomooTradingMarkets(account: Record<string, unknown>): string[] {
+  const enabledMarkets = Array.isArray(account.enable_market) ? account.enable_market : [];
+  return [...new Set(enabledMarkets
+    .map((value) => ENABLE_MARKET_TO_TRD_MARKET[Number(value)])
+    .filter((market): market is string => Boolean(market)))];
 }
 
 function asFiniteNumber(value: unknown): number | null {
@@ -54,6 +98,7 @@ export function parseMoomooSyncState(value: unknown): MoomooSyncState | null {
   }
   if (!raw || typeof raw !== 'object') return null;
   const state = raw as Record<string, unknown>;
+  if (state.version !== 2) return null;
   const lastSyncAt = typeof state.lastSyncAt === 'string' ? state.lastSyncAt : '';
   const accountLastSyncAt = state.accountLastSyncAt && typeof state.accountLastSyncAt === 'object'
     ? Object.fromEntries(
@@ -63,7 +108,7 @@ export function parseMoomooSyncState(value: unknown): MoomooSyncState | null {
       )
     : {};
   if (!lastSyncAt && Object.keys(accountLastSyncAt).length === 0) return null;
-  return { version: 1, lastSyncAt, accountLastSyncAt };
+  return { version: 2, lastSyncAt, accountLastSyncAt };
 }
 
 export function getMoomooSyncStartMs(lastSyncAt: string | undefined): number {
@@ -123,6 +168,7 @@ export function normalizeMoomooOrder(
     })
     .filter(Boolean);
   const feeNote = feeItems.length > 0 ? `; Fee breakdown: ${feeItems.join(', ')}` : '';
+  const feeSyncNote = feeInfo && (feeValue !== null || feeItems.length > 0) ? '; Fee sync: confirmed' : '';
   const accountNote = accountId ? `Account: ${accountId}; ` : '';
 
   return {
@@ -136,7 +182,7 @@ export function normalizeMoomooOrder(
     Fees: fees,
     'Net Total': calculateMoomooNetTotal(action, quantity, price, fees),
     Currency: currency,
-    Notes: `Moomoo Auto-Sync (${accountNote}Order: ${orderId}${feeNote})`,
+    Notes: `Moomoo Auto-Sync (${accountNote}Order: ${orderId}${feeSyncNote}${feeNote})`,
   };
 }
 
