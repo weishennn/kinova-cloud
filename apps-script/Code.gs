@@ -2412,7 +2412,6 @@ function syncMoomooTrades(incomingTrades) {
       newRows.push(rowValues);
       deltaTrades.push(normalizedTrade);
       rowById[tradeId] = lastRow + newRows.length;
-      if (orderMatch) rowByOrder[orderMatch[1]] = lastRow + newRows.length;
       addedCount++;
     }
   });
