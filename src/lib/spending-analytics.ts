@@ -231,7 +231,7 @@ export function computeSpendingAnalytics<T extends SpendingTransaction = Spendin
 
   // Filter expenses within target timeframe
   const periodExpenses = transactions.filter((t) => {
-    if (t.type !== 'expense') return false;
+    if (String(t.type || '').toLowerCase() !== 'expense') return false;
     return t.date >= timeframe.startDate && t.date <= timeframe.endDate;
   });
 
@@ -279,7 +279,7 @@ export function computeSpendingAnalytics<T extends SpendingTransaction = Spendin
 
   if (timeframe.prevStartDate && timeframe.prevEndDate) {
     const prevPeriodExpenses = transactions.filter((t) => {
-      if (t.type !== 'expense') return false;
+      if (String(t.type || '').toLowerCase() !== 'expense') return false;
       if (t.date < timeframe.prevStartDate! || t.date > timeframe.prevEndDate!) return false;
       if (!targetCategory) return true;
 

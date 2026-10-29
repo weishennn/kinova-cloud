@@ -158,6 +158,13 @@ test('5. generateAiFinancialBriefing summarizes monthly highlights, largest expe
   assert.equal(briefing.topCategoryName, 'Shopping');
   assert.equal(briefing.largestExpense?.description, 'Nike Shoes');
   assert.equal(briefing.largestExpense?.amount, 250);
+  assert.equal(briefing.topCategoryRatio, 56);
   assert.ok(briefing.highlights.length >= 2);
-  assert.ok(briefing.actionableTip.length > 0);
+  assert.ok(briefing.actionableTip.includes('占比 56%'), 'Actionable tip must show 56% without double multiplication');
+  assert.ok(!briefing.actionableTip.includes('5600%'), 'Actionable tip must NOT show 5600%');
+
+  const enBriefing = generateAiFinancialBriefing(transactions, '2026-10', 1000, 'en');
+  assert.ok(enBriefing.periodLabel.includes('Financial Briefing'));
+  assert.ok(enBriefing.actionableTip.includes('56%'));
+  assert.ok(enBriefing.actionableTip.includes('Assistant insight'));
 });

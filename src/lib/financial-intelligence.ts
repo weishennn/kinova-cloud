@@ -43,6 +43,22 @@ function getStoredInstallments(): SavedInstallmentItem[] {
   }
 }
 
+function resolveIntelligenceLanguage(lang?: string): 'zh' | 'en' | 'ms' {
+  if (lang === 'zh' || lang === 'en' || lang === 'ms') return lang;
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('cashflow_preferred_language');
+      if (stored === 'zh' || stored === 'en' || stored === 'ms') return stored;
+      if (typeof navigator !== 'undefined') {
+        const nav = (navigator.language || '').toLowerCase();
+        if (nav.startsWith('ms') || nav.startsWith('id')) return 'ms';
+        if (nav.startsWith('en')) return 'en';
+      }
+    } catch {}
+  }
+  return 'zh';
+}
+
 export interface MinimalTransactionRecord {
   id: string;
   date: string;
@@ -91,6 +107,7 @@ export function calculateFinancialHealthScore(params: {
   emergencyFundBalance?: number;
   referenceDateStr?: string;
   targetMonthStr?: string;
+  language?: 'zh' | 'en' | 'ms' | 'auto';
 }): FinancialHealthReport {
   const {
     transactions,
@@ -100,7 +117,10 @@ export function calculateFinancialHealthScore(params: {
     emergencyFundBalance = 0,
     referenceDateStr,
     targetMonthStr,
+    language,
   } = params;
+
+  const effLang = resolveIntelligenceLanguage(language);
 
   const todayStr = referenceDateStr || getLocalDateString();
   const currentMonthStr = targetMonthStr || todayStr.slice(0, 7);
@@ -125,11 +145,14 @@ export function calculateFinancialHealthScore(params: {
   const effectiveIncome = actualIncome > 0 ? actualIncome : (baselineIncome && baselineIncome > 0 ? baselineIncome : 0);
 
   // Dimension 1: Savings Rate (储蓄率: 30分)
-  // Benchmark: >= 30% -> 30pts, 20-30% -> 24-29pts, 10-20% -> 15-23pts, 0-10% -> 5-14pts, Negative -> 0pts
   let savingsRateScore = 15;
   let savingsRatePct = 0;
   let savingsStatus: HealthDimension['status'] = 'warning';
-  let savingsDetails = '尚未记录本月收入或基准月薪（建议记录收入以精准评估）';
+  let savingsDetails = effLang === 'en'
+    ? 'No income or baseline salary recorded yet (log income for accurate assessment)'
+    : effLang === 'ms'
+    ? 'Tiada pendapatan atau gaji asas direkodkan (rekod pendapatan untuk penilaian tepat)'
+    : '尚未记录本月收入或基准月薪（建议记录收入以精准评估）';
 
   if (effectiveIncome > 0) {
     const netSavings = effectiveIncome - totalExpense;
@@ -137,30 +160,54 @@ export function calculateFinancialHealthScore(params: {
     if (savingsRatePct >= 30) {
       savingsRateScore = 30;
       savingsStatus = 'excellent';
-      savingsDetails = `本月储蓄率达 ${savingsRatePct}%（优秀，远超 20% 标准）`;
+      savingsDetails = effLang === 'en'
+        ? `Savings rate at ${savingsRatePct}% (excellent, well above 20% benchmark)`
+        : effLang === 'ms'
+        ? `Kadar simpanan ${savingsRatePct}% (cemerlang, jauh melebihi penanda aras 20%)`
+        : `本月储蓄率达 ${savingsRatePct}%（优秀，远超 20% 标准）`;
     } else if (savingsRatePct >= 20) {
       savingsRateScore = 25;
       savingsStatus = 'good';
-      savingsDetails = `本月储蓄率达 ${savingsRatePct}%（健康，达到 20% 标准）`;
+      savingsDetails = effLang === 'en'
+        ? `Savings rate at ${savingsRatePct}% (healthy, meets 20% benchmark)`
+        : effLang === 'ms'
+        ? `Kadar simpanan ${savingsRatePct}% (sihat, mencapai penanda aras 20%)`
+        : `本月储蓄率达 ${savingsRatePct}%（健康，达到 20% 标准）`;
     } else if (savingsRatePct >= 10) {
       savingsRateScore = 18;
       savingsStatus = 'warning';
-      savingsDetails = `本月储蓄率为 ${savingsRatePct}%（略偏低，建议控制弹性开支）`;
+      savingsDetails = effLang === 'en'
+        ? `Savings rate at ${savingsRatePct}% (slightly low, consider trimming discretionary spending)`
+        : effLang === 'ms'
+        ? `Kadar simpanan ${savingsRatePct}% (agak rendah, kawal perbelanjaan budi bicara)`
+        : `本月储蓄率为 ${savingsRatePct}%（略偏低，建议控制弹性开支）`;
     } else if (savingsRatePct >= 0) {
       savingsRateScore = 10;
       savingsStatus = 'warning';
-      savingsDetails = `本月接近收支平衡（储蓄率 ${savingsRatePct}%），注意控制支出`;
+      savingsDetails = effLang === 'en'
+        ? `Near break-even this month (savings rate ${savingsRatePct}%), monitor spending closely`
+        : effLang === 'ms'
+        ? `Hampir pulang modal (kadar simpanan ${savingsRatePct}%), pantau perbelanjaan`
+        : `本月接近收支平衡（储蓄率 ${savingsRatePct}%），注意控制支出`;
     } else {
       savingsRateScore = 0;
       savingsStatus = 'critical';
-      savingsDetails = `本月支出已超出收入 ${Math.abs(savingsRatePct)}%（出现财务赤字）`;
+      savingsDetails = effLang === 'en'
+        ? `Expenses exceeded income by ${Math.abs(savingsRatePct)}% this month (cashflow deficit)`
+        : effLang === 'ms'
+        ? `Perbelanjaan melebihi pendapatan sebanyak ${Math.abs(savingsRatePct)}% (defisit aliran tunai)`
+        : `本月支出已超出收入 ${Math.abs(savingsRatePct)}%（出现财务赤字）`;
     }
   }
 
   // Dimension 2: Budget Adherence / Pacing (预算执行度: 25分)
   let budgetScore = 20;
   let budgetStatus: HealthDimension['status'] = 'good';
-  let budgetDetails = '未设定月度预算，按日常消费节奏平稳进行';
+  let budgetDetails = effLang === 'en'
+    ? 'No monthly budget set, tracking baseline spending pace'
+    : effLang === 'ms'
+    ? 'Tiada bajet bulanan ditetapkan, memantau perbelanjaan harian'
+    : '未设定月度预算，按日常消费节奏平稳进行';
   const dayOfMonth = Math.max(1, parseInt(todayStr.slice(8, 10), 10) || 1);
   const totalDays = getDaysInMonth(parseInt(todayStr.slice(0, 4), 10) || 2026, parseInt(todayStr.slice(5, 7), 10) || 10);
 
@@ -172,24 +219,39 @@ export function calculateFinancialHealthScore(params: {
     if (paceRatio <= 0.9) {
       budgetScore = 25;
       budgetStatus = 'excellent';
-      budgetDetails = `预计月底消耗预算 ${Math.round(paceRatio * 100)}%，预算节余充裕`;
+      budgetDetails = effLang === 'en'
+        ? `Projected to use ${Math.round(paceRatio * 100)}% of budget by month-end, buffer ample`
+        : effLang === 'ms'
+        ? `Dijangka menggunakan ${Math.round(paceRatio * 100)}% bajet menjelang akhir bulan, baki mencukupi`
+        : `预计月底消耗预算 ${Math.round(paceRatio * 100)}%，预算节余充裕`;
     } else if (paceRatio <= 1.05) {
       budgetScore = 22;
       budgetStatus = 'good';
-      budgetDetails = `预计月底刚好达成预算（${Math.round(paceRatio * 100)}%），执行力优秀`;
+      budgetDetails = effLang === 'en'
+        ? `Projected on-target at ${Math.round(paceRatio * 100)}% of budget by month-end, great execution`
+        : effLang === 'ms'
+        ? `Dijangka menepati bajet pada ${Math.round(paceRatio * 100)}% menjelang akhir bulan`
+        : `预计月底刚好达成预算（${Math.round(paceRatio * 100)}%），执行力优秀`;
     } else if (paceRatio <= 1.2) {
       budgetScore = 14;
       budgetStatus = 'warning';
-      budgetDetails = `按当前进度月底预计超支 ${Math.round((paceRatio - 1) * 100)}%，需适度紧缩`;
+      budgetDetails = effLang === 'en'
+        ? `Projected to exceed budget by ${Math.round((paceRatio - 1) * 100)}% at current pace, tighten spending`
+        : effLang === 'ms'
+        ? `Dijangka melebihi bajet sebanyak ${Math.round((paceRatio - 1) * 100)}% mengikut kadar semasa`
+        : `按当前进度月底预计超支 ${Math.round((paceRatio - 1) * 100)}%，需适度紧缩`;
     } else {
       budgetScore = 5;
       budgetStatus = 'critical';
-      budgetDetails = `按当前进度月底预计严重超支 >${Math.round((paceRatio - 1) * 100)}%，请暂停非必要消费`;
+      budgetDetails = effLang === 'en'
+        ? `Projected severe budget overrun >${Math.round((paceRatio - 1) * 100)}%, pause non-essential purchases`
+        : effLang === 'ms'
+        ? `Amaran: Dijangka terlebih belanja >${Math.round((paceRatio - 1) * 100)}%, henti belanja bukan keperluan`
+        : `按当前进度月底预计严重超支 >${Math.round((paceRatio - 1) * 100)}%，请暂停非必要消费`;
     }
   }
 
   // Dimension 3: Fixed-Cost Burden (固定支出与负债负担率: 25分)
-  // Includes recurring commitments & monthly installment plans
   const commitments = getStoredCommitments();
   const installments = getStoredInstallments();
 
@@ -198,33 +260,57 @@ export function calculateFinancialHealthScore(params: {
 
   let fixedScore = 22;
   let fixedStatus: HealthDimension['status'] = 'good';
-  let fixedDetails = `固定扣款与分期共约 RM ${fixedMonthlyBurn.toFixed(0)}/月`;
+  let fixedDetails = effLang === 'en'
+    ? `Fixed commitments & installments ~RM ${fixedMonthlyBurn.toFixed(0)}/mo`
+    : effLang === 'ms'
+    ? `Komitmen tetap & ansuran ~RM ${fixedMonthlyBurn.toFixed(0)}/bln`
+    : `固定扣款与分期共约 RM ${fixedMonthlyBurn.toFixed(0)}/月`;
 
   if (effectiveIncome > 0 && fixedMonthlyBurn > 0) {
     const fixedRatio = (fixedMonthlyBurn / effectiveIncome) * 100;
     if (fixedRatio <= 35) {
       fixedScore = 25;
       fixedStatus = 'excellent';
-      fixedDetails = `固定支出占收入 ${Math.round(fixedRatio)}%（结构极佳，抗风险能力强）`;
+      fixedDetails = effLang === 'en'
+        ? `Fixed costs are ${Math.round(fixedRatio)}% of income (excellent structure, resilient)`
+        : effLang === 'ms'
+        ? `Kos tetap adalah ${Math.round(fixedRatio)}% daripada pendapatan (struktur sangat baik)`
+        : `固定支出占收入 ${Math.round(fixedRatio)}%（结构极佳，抗风险能力强）`;
     } else if (fixedRatio <= 50) {
       fixedScore = 20;
       fixedStatus = 'good';
-      fixedDetails = `固定支出占收入 ${Math.round(fixedRatio)}%（符合 50% 安全基准线）`;
+      fixedDetails = effLang === 'en'
+        ? `Fixed costs are ${Math.round(fixedRatio)}% of income (within safe 50% guideline)`
+        : effLang === 'ms'
+        ? `Kos tetap adalah ${Math.round(fixedRatio)}% daripada pendapatan (dalam penanda aras 50%)`
+        : `固定支出占收入 ${Math.round(fixedRatio)}%（符合 50% 安全基准线）`;
     } else if (fixedRatio <= 65) {
       fixedScore = 12;
       fixedStatus = 'warning';
-      fixedDetails = `固定支出占收入 ${Math.round(fixedRatio)}%（负担偏重，自由现金流受压）`;
+      fixedDetails = effLang === 'en'
+        ? `Fixed costs are ${Math.round(fixedRatio)}% of income (heavy burden, cashflow pressure)`
+        : effLang === 'ms'
+        ? `Kos tetap adalah ${Math.round(fixedRatio)}% daripada pendapatan (bebanan agak tinggi)`
+        : `固定支出占收入 ${Math.round(fixedRatio)}%（负担偏重，自由现金流受压）`;
     } else {
       fixedScore = 5;
       fixedStatus = 'critical';
-      fixedDetails = `固定支出占收入 ${Math.round(fixedRatio)}%（严重过载，面临现金流断裂风险）`;
+      fixedDetails = effLang === 'en'
+        ? `Fixed costs are ${Math.round(fixedRatio)}% of income (critical overload, liquidity risk)`
+        : effLang === 'ms'
+        ? `Kos tetap adalah ${Math.round(fixedRatio)}% daripada pendapatan (risiko kecairan)`
+        : `固定支出占收入 ${Math.round(fixedRatio)}%（严重过载，面临现金流断裂风险）`;
     }
   }
 
   // Dimension 4: Cash & Emergency Buffer (应急安全垫: 20分)
   let bufferScore = 6;
   let bufferStatus: HealthDimension['status'] = 'warning';
-  let bufferDetails = '尚未记录应急储备金（建议设定或积累 3-6 个月生活备用金）';
+  let bufferDetails = effLang === 'en'
+    ? 'No emergency reserve recorded (recommended: 3-6 months living expenses)'
+    : effLang === 'ms'
+    ? 'Tiada rizab kecemasan direkodkan (cadangan: 3-6 bulan perbelanjaan hidup)'
+    : '尚未记录应急储备金（建议设定或积累 3-6 个月生活备用金）';
 
   const monthlyBurnBaseline = Math.max(totalExpense, fixedMonthlyBurn, 500);
   if (emergencyFundBalance > 0) {
@@ -232,15 +318,27 @@ export function calculateFinancialHealthScore(params: {
     if (monthsCovered >= 6) {
       bufferScore = 20;
       bufferStatus = 'excellent';
-      bufferDetails = `应急备用金可覆盖 ${monthsCovered.toFixed(1)} 个月日常开支（护城河稳固）`;
+      bufferDetails = effLang === 'en'
+        ? `Emergency fund covers ${monthsCovered.toFixed(1)} months of expenses (robust moat)`
+        : effLang === 'ms'
+        ? `Dana kecemasan menampung ${monthsCovered.toFixed(1)} bulan perbelanjaan (sangat kukuh)`
+        : `应急备用金可覆盖 ${monthsCovered.toFixed(1)} 个月日常开支（护城河稳固）`;
     } else if (monthsCovered >= 3) {
       bufferScore = 16;
       bufferStatus = 'good';
-      bufferDetails = `应急备用金可覆盖 ${monthsCovered.toFixed(1)} 个月（达到推荐的 3-6 个月标准）`;
+      bufferDetails = effLang === 'en'
+        ? `Emergency fund covers ${monthsCovered.toFixed(1)} months (meets 3-6 month standard)`
+        : effLang === 'ms'
+        ? `Dana kecemasan menampung ${monthsCovered.toFixed(1)} bulan (mencapai piawaian 3-6 bulan)`
+        : `应急备用金可覆盖 ${monthsCovered.toFixed(1)} 个月（达到推荐的 3-6 个月标准）`;
     } else {
       bufferScore = 10;
       bufferStatus = 'warning';
-      bufferDetails = `应急备用金可覆盖 ${monthsCovered.toFixed(1)} 个月（建议补充至 3 个月以上）`;
+      bufferDetails = effLang === 'en'
+        ? `Emergency fund covers ${monthsCovered.toFixed(1)} months (aim for 3+ months)`
+        : effLang === 'ms'
+        ? `Dana kecemasan menampung ${monthsCovered.toFixed(1)} bulan (cadang tambah ke 3+ bulan)`
+        : `应急备用金可覆盖 ${monthsCovered.toFixed(1)} 个月（建议补充至 3 个月以上）`;
     }
   }
 
@@ -253,45 +351,105 @@ export function calculateFinancialHealthScore(params: {
 
   if (!hasSufficientData) {
     grade = 'D';
-    gradeLabel = '数据不足，暂不评分';
-    summary = '暂无基准月收入或应急储备记录。在偏好设置中补充收入与应急金后，即可解锁精准评分。';
+    gradeLabel = effLang === 'en' ? 'Insufficient Data' : effLang === 'ms' ? 'Data Tidak Mencukupi' : '数据不足，暂不评分';
+    summary = effLang === 'en'
+      ? 'No baseline income or emergency reserve recorded. Add them in Settings to unlock your financial health score.'
+      : effLang === 'ms'
+      ? 'Tiada rekod pendapatan asas atau dana kecemasan. Tambah dalam Tetapan untuk mendapatkan skor kesihatan kewangan.'
+      : '暂无基准月收入或应急储备记录。在偏好设置中补充收入与应急金后，即可解锁精准评分。';
   } else if (totalScore >= 90) {
     grade = 'S';
-    gradeLabel = '卓越稳健 (Top Tier)';
-    summary = '储蓄率与预算控制均处于极佳状态，财务护城河非常深厚。';
+    gradeLabel = effLang === 'en' ? 'Top Tier (Exceptional)' : effLang === 'ms' ? 'Cemerlang Teguh (Top Tier)' : '卓越稳健 (Top Tier)';
+    summary = effLang === 'en'
+      ? 'Savings rate and budget control are outstanding, with a deep financial safety moat.'
+      : effLang === 'ms'
+      ? 'Kadar simpanan dan kawalan bajet berada dalam keadaan cemerlang dengan benteng kewangan kukuh.'
+      : '储蓄率与预算控制均处于极佳状态，财务护城河非常深厚。';
   } else if (totalScore >= 75) {
     grade = 'A';
-    gradeLabel = '健康良好 (Healthy)';
-    summary = '收支平衡控制得当，固定成本与日常弹性支出比例合理。';
+    gradeLabel = effLang === 'en' ? 'Healthy' : effLang === 'ms' ? 'Sihat' : '健康良好 (Healthy)';
+    summary = effLang === 'en'
+      ? 'Income and expenses are well balanced, with a sound ratio between fixed and discretionary spending.'
+      : effLang === 'ms'
+      ? 'Imbangan pendapatan dan perbelanjaan terkawal dengan nisbah kos yang munasabah.'
+      : '收支平衡控制得当，固定成本与日常弹性支出比例合理。';
   } else if (totalScore >= 60) {
     grade = 'B';
-    gradeLabel = '稳中向好 (Moderate)';
-    summary = '基本保持收支平衡，建议优化非必要订阅或适度提高每月储蓄比。';
+    gradeLabel = effLang === 'en' ? 'Moderate' : effLang === 'ms' ? 'Sederhana' : '稳中向好 (Moderate)';
+    summary = effLang === 'en'
+      ? 'Breaking even comfortably. Consider trimming unused subscriptions or boosting your savings rate.'
+      : effLang === 'ms'
+      ? 'Mengekalkan imbangan. Pertimbangkan untuk memotong langganan terbiar atau meningkatkan simpanan bulanan.'
+      : '基本保持收支平衡，建议优化非必要订阅或适度提高每月储蓄比。';
   } else if (totalScore >= 45) {
     grade = 'C';
-    gradeLabel = '稍显吃紧 (Tight)';
-    summary = '预算执行或固定扣款负担较重，需注意防范月底现金流缺口。';
+    gradeLabel = effLang === 'en' ? 'Tight' : effLang === 'ms' ? 'Ketat' : '稍显吃紧 (Tight)';
+    summary = effLang === 'en'
+      ? 'Budget or fixed cost burden is heavy; watch out for month-end cashflow pinches.'
+      : effLang === 'ms'
+      ? 'Beban bajet atau komitmen agak berat, berhati-hati terhadap kekurangan tunai akhir bulan.'
+      : '预算执行或固定扣款负担较重，需注意防范月底现金流缺口。';
   } else {
     grade = 'D';
-    gradeLabel = '需要关注 (Attention Needed)';
-    summary = '支出增速高于资金供给，建议立即检查闲置扣款并暂停大额非必要开支。';
+    gradeLabel = effLang === 'en' ? 'Attention Needed' : effLang === 'ms' ? 'Perlu Perhatian' : '需要关注 (Attention Needed)';
+    summary = effLang === 'en'
+      ? 'Spending pace exceeds cash inflow. Review idle deductions and pause large discretionary expenses.'
+      : effLang === 'ms'
+      ? 'Kadar perbelanjaan melebihi aliran masuk tunai. Semak potongan terbiar dan tangguhkan belanja besar.'
+      : '支出增速高于资金供给，建议立即检查闲置扣款并暂停大额非必要开支。';
   }
 
   // Recommendations generator
   const recommendations: string[] = [];
   if (savingsStatus === 'critical' || savingsStatus === 'warning') {
-    recommendations.push('本月储蓄偏弱：建议优先削减餐饮与娱乐等弹性开销，锁定每月基本积蓄。');
+    recommendations.push(
+      effLang === 'en'
+        ? 'Low savings pace: Prioritize trimming discretionary dining and entertainment to lock in base monthly savings.'
+        : effLang === 'ms'
+        ? 'Simpanan rendah: Kurangkan perbelanjaan makanan luar dan hiburan untuk mengunci simpanan asas.'
+        : '本月储蓄偏弱：建议优先削减餐饮与娱乐等弹性开销，锁定每月基本积蓄。'
+    );
   }
   if (fixedStatus === 'warning' || fixedStatus === 'critical') {
-    recommendations.push('固定负担偏高：建议全面审视订阅服务与分期计划，清理长期不用的扣费。');
+    recommendations.push(
+      effLang === 'en'
+        ? 'High fixed burden: Audit recurring subscriptions and installment plans to eliminate unused monthly drains.'
+        : effLang === 'ms'
+        ? 'Beban tetap tinggi: Semak semula perkhidmatan langganan dan ansuran untuk membersihkan caj terbiar.'
+        : '固定负担偏高：建议全面审视订阅服务与分期计划，清理长期不用的扣费。'
+    );
   }
   if (budgetStatus === 'warning' || budgetStatus === 'critical') {
-    recommendations.push('进度有超支风险：距月底还有部分时日，可设置单日消费上限以拉平总进度。');
+    recommendations.push(
+      effLang === 'en'
+        ? 'Budget overrun risk: Set a daily spending cap for the remaining days to keep your total within limits.'
+        : effLang === 'ms'
+        ? 'Risiko belanja lebih: Tetapkan had perbelanjaan harian untuk hari-hari berbaki bulan ini.'
+        : '进度有超支风险：距月底还有部分时日，可设置单日消费上限以拉平总进度。'
+    );
   }
   if (recommendations.length === 0) {
-    recommendations.push('当前财务运转非常健康！可考虑将节余资金按计划转入应急储蓄或低风险理财。');
-    recommendations.push('继续保持记账习惯，良好的资金透明度是实现资产增长的最佳护城河。');
+    recommendations.push(
+      effLang === 'en'
+        ? 'Finances are operating very smoothly! Consider routing surplus cash into emergency savings or low-risk assets.'
+        : effLang === 'ms'
+        ? 'Kewangan berjalan dengan sangat lancar! Pertimbangkan untuk menyalurkan lebihan ke dana kecemasan.'
+        : '当前财务运转非常健康！可考虑将节余资金按计划转入应急储蓄或低风险理财。'
+    );
+    recommendations.push(
+      effLang === 'en'
+        ? 'Keep logging regularly; continuous financial visibility is the foundation of long-term wealth.'
+        : effLang === 'ms'
+        ? 'Teruskan tabiat mencatat; ketelusan aliran tunai adalah benteng terbaik pertumbuhan aset.'
+        : '继续保持记账习惯，良好的资金透明度是实现资产增长的最佳护城河。'
+    );
   }
+
+  const dimensionLabels = effLang === 'en'
+    ? { savings: 'Savings & Cash Retention', budget: 'Budget Discipline', fixed: 'Fixed Burden Ratio', buffer: 'Emergency Buffer' }
+    : effLang === 'ms'
+    ? { savings: 'Kadar Simpanan & Baki', budget: 'Disiplin Bajet', fixed: 'Nisbah Beban Tetap', buffer: 'Penampan Kecemasan' }
+    : { savings: '储蓄与节余率', budget: '预算执行力', fixed: '固定成本负债比', buffer: '现金与应急缓冲' };
 
   return {
     totalScore: hasSufficientData ? totalScore : 0,
@@ -301,7 +459,7 @@ export function calculateFinancialHealthScore(params: {
     summary,
     dimensions: {
       savingsRate: {
-        name: '储蓄与节余率',
+        name: dimensionLabels.savings,
         score: savingsRateScore,
         maxScore: 30,
         percentage: Math.round((savingsRateScore / 30) * 100),
@@ -309,7 +467,7 @@ export function calculateFinancialHealthScore(params: {
         details: savingsDetails,
       },
       budgetDiscipline: {
-        name: '预算执行力',
+        name: dimensionLabels.budget,
         score: budgetScore,
         maxScore: 25,
         percentage: Math.round((budgetScore / 25) * 100),
@@ -317,7 +475,7 @@ export function calculateFinancialHealthScore(params: {
         details: budgetDetails,
       },
       fixedCostBurden: {
-        name: '固定成本负债比',
+        name: dimensionLabels.fixed,
         score: fixedScore,
         maxScore: 25,
         percentage: Math.round((fixedScore / 25) * 100),
@@ -325,7 +483,7 @@ export function calculateFinancialHealthScore(params: {
         details: fixedDetails,
       },
       cashBuffer: {
-        name: '现金与应急缓冲',
+        name: dimensionLabels.buffer,
         score: bufferScore,
         maxScore: 20,
         percentage: Math.round((bufferScore / 20) * 100),
@@ -374,6 +532,7 @@ export function predictCashflowTrajectory(params: {
   installmentsOverride?: SavedInstallmentItem[];
   referenceDateStr?: string;
   isStartingCashConfigured?: boolean;
+  language?: 'zh' | 'en' | 'ms' | 'auto';
 }): CashflowForecastResult {
   const {
     transactions,
@@ -384,7 +543,10 @@ export function predictCashflowTrajectory(params: {
     installmentsOverride,
     referenceDateStr,
     isStartingCashConfigured = false,
+    language,
   } = params;
+
+  const effLang = resolveIntelligenceLanguage(language);
 
   const todayStr = referenceDateStr || getLocalDateString();
   const today = parseLocalDate(todayStr);
@@ -491,24 +653,49 @@ export function predictCashflowTrajectory(params: {
   }
 
   let status: CashflowForecastResult['status'] = 'safe';
-  let insightMessage = '未来 90 天现金流充裕，收支结构稳固，无流动性风险。';
+  let insightMessage = effLang === 'en'
+    ? 'Cash flow is healthy for the next 90 days with no liquidity risks.'
+    : effLang === 'ms'
+    ? 'Aliran tunai kukuh untuk 90 hari akan datang tanpa risiko kecairan.'
+    : '未来 90 天现金流充裕，收支结构稳固，无流动性风险。';
 
   if (startingCash <= 0 && baselineMonthlyIncome <= 0 && totalMonthlyFixed === 0 && dailyDiscretionaryBurn === 0) {
     status = 'tight';
-    insightMessage = '账本流水尚少，请先记录日常开支或设定流动资金以生成预测。';
+    insightMessage = effLang === 'en'
+      ? 'Few transactions recorded. Log your daily expenses or set starting cash to generate a forecast.'
+      : effLang === 'ms'
+      ? 'Transaksi masih sedikit. Rekod perbelanjaan atau tetapkan baki tunai permulaan.'
+      : '账本流水尚少，请先记录日常开支或设定流动资金以生成预测。';
   } else if (!isStartingCashConfigured && startingCash <= 0) {
     status = 'tight';
-    insightMessage = `当前以账本累计净结余（RM ${startingCash.toFixed(0)}）起算，建议在备用金或设置中补充初始资金，获得更准确走势。`;
+    insightMessage = effLang === 'en'
+      ? `Starting from net ledger balance (RM ${startingCash.toFixed(0)}). Add initial cash in Settings for a more accurate trajectory.`
+      : effLang === 'ms'
+      ? `Bermula dari baki bersih lejar (RM ${startingCash.toFixed(0)}). Tambah baki tunai dalam Tetapan untuk unjuran lebih tepat.`
+      : `当前以账本累计净结余（RM ${startingCash.toFixed(0)}）起算，建议在备用金或设置中补充初始资金，获得更准确走势。`;
   } else if (lowestPoint.balance < 0) {
     status = 'deficit_warning';
-    insightMessage = `⚠️ 预警：预计在第 ${lowestPoint.dayOffset} 天（${lowestPoint.dateStr}）可能出现资金缺口（约 RM ${Math.abs(lowestPoint.balance).toFixed(0)}），请提前预留资金。`;
+    insightMessage = effLang === 'en'
+      ? `⚠️ Warning: Projected cash deficit of ~RM ${Math.abs(lowestPoint.balance).toFixed(0)} on day ${lowestPoint.dayOffset} (${lowestPoint.dateStr}). Reserve funds in advance.`
+      : effLang === 'ms'
+      ? `⚠️ Amaran: Unjuran kekurangan tunai ~RM ${Math.abs(lowestPoint.balance).toFixed(0)} pada hari ke-${lowestPoint.dayOffset} (${lowestPoint.dateStr}). Sediakan dana lebih awal.`
+      : `⚠️ 预警：预计在第 ${lowestPoint.dayOffset} 天（${lowestPoint.dateStr}）可能出现资金缺口（约 RM ${Math.abs(lowestPoint.balance).toFixed(0)}），请提前预留资金。`;
   } else if (lowestPoint.balance < (startingCash > 0 ? startingCash * 0.2 : 500)) {
     status = 'tight';
-    insightMessage = `💡 提示：第 ${lowestPoint.dayOffset} 天（${lowestPoint.dateStr}）余额将降至低位（RM ${lowestPoint.balance.toFixed(0)}），需注意缓冲。`;
+    insightMessage = effLang === 'en'
+      ? `💡 Tip: Balance will dip to a low of RM ${lowestPoint.balance.toFixed(0)} on day ${lowestPoint.dayOffset} (${lowestPoint.dateStr}). Maintain buffer.`
+      : effLang === 'ms'
+      ? `💡 Tip: Baki akan menyusut ke paras rendah RM ${lowestPoint.balance.toFixed(0)} pada hari ke-${lowestPoint.dayOffset} (${lowestPoint.dateStr}).`
+      : `💡 提示：第 ${lowestPoint.dayOffset} 天（${lowestPoint.dateStr}）余额将降至低位（RM ${lowestPoint.balance.toFixed(0)}），需注意缓冲。`;
   }
 
   if (paydayDay == null && baselineMonthlyIncome > 0) {
-    insightMessage = `${insightMessage}（发薪日未指定，预测暂未计入薪水入账，可在设置中补充发薪日以完善预测）`;
+    const note = effLang === 'en'
+      ? ' (Payday not set; projected income is not booked. Set payday in Settings to include salary)'
+      : effLang === 'ms'
+      ? ' (Hari gaji belum ditetapkan; unjuran gaji belum dimasukkan. Tetapkan hari gaji dalam Tetapan)'
+      : '（发薪日未指定，预测暂未计入薪水入账，可在设置中补充发薪日以完善预测）';
+    insightMessage = `${insightMessage}${note}`;
   }
 
   return {
@@ -790,8 +977,10 @@ export interface FinancialBriefingResult {
 export function generateAiFinancialBriefing(
   transactions: MinimalTransactionRecord[],
   targetMonthStr?: string,
-  budgetCap?: number
+  budgetCap?: number,
+  userLanguage?: 'zh' | 'en' | 'ms' | 'auto'
 ): FinancialBriefingResult {
+  const effLang = resolveIntelligenceLanguage(userLanguage);
   const currentMonth = targetMonthStr || getLocalDateString().slice(0, 7);
   const monthExpenses = (transactions || []).filter(
     (t) => t.type === 'expense' && t.date?.startsWith(currentMonth) && t.amount > 0
@@ -810,7 +999,7 @@ export function generateAiFinancialBriefing(
     catMap.set(cat, (catMap.get(cat) || 0) + getAmountInBaseCurrency(t.amount, t.currency));
   }
 
-  let topCategoryName = '无支出';
+  let topCategoryName = effLang === 'en' ? 'No spending' : effLang === 'ms' ? 'Tiada perbelanjaan' : '无支出';
   let topCategoryAmount = 0;
   for (const [cat, amt] of catMap.entries()) {
     if (amt > topCategoryAmount) {
@@ -828,7 +1017,7 @@ export function generateAiFinancialBriefing(
   const sortedByAmt = [...monthExpenses].sort((a, b) => b.amount - a.amount);
   if (sortedByAmt.length > 0) {
     largestExpense = {
-      description: sortedByAmt[0].description || sortedByAmt[0].category || '大额支出',
+      description: sortedByAmt[0].description || sortedByAmt[0].category || (effLang === 'en' ? 'Large Expense' : effLang === 'ms' ? 'Belanja Besar' : '大额支出'),
       amount: sortedByAmt[0].amount,
       date: sortedByAmt[0].date,
     };
@@ -837,34 +1026,89 @@ export function generateAiFinancialBriefing(
   // Highlights
   const highlights: string[] = [];
   if (totalSpending > 0) {
-    highlights.push(`累计记录支出 ${monthExpenses.length} 笔，总开销 RM ${totalSpending.toLocaleString('en-MY', { minimumFractionDigits: 2 })}。`);
+    highlights.push(
+      effLang === 'en'
+        ? `Recorded ${monthExpenses.length} expenses totaling RM ${totalSpending.toLocaleString('en-MY', { minimumFractionDigits: 2 })}.`
+        : effLang === 'ms'
+        ? `Merekodkan ${monthExpenses.length} perbelanjaan berjumlah RM ${totalSpending.toLocaleString('en-MY', { minimumFractionDigits: 2 })}.`
+        : `累计记录支出 ${monthExpenses.length} 笔，总开销 RM ${totalSpending.toLocaleString('en-MY', { minimumFractionDigits: 2 })}。`
+    );
   }
   if (topCategoryAmount > 0) {
-    highlights.push(`主要支出集中在「${topCategoryName}」，共消费 RM ${topCategoryAmount.toFixed(2)}（占比 ${topCategoryRatio}%）。`);
+    highlights.push(
+      effLang === 'en'
+        ? `Primary spending in "${topCategoryName}", totaling RM ${topCategoryAmount.toFixed(2)} (${topCategoryRatio}%).`
+        : effLang === 'ms'
+        ? `Perbelanjaan utama dalam "${topCategoryName}", berjumlah RM ${topCategoryAmount.toFixed(2)} (${topCategoryRatio}%).`
+        : `主要支出集中在「${topCategoryName}」，共消费 RM ${topCategoryAmount.toFixed(2)}（占比 ${topCategoryRatio}%）。`
+    );
   }
   if (largestExpense) {
-    highlights.push(`单笔最大支出为「${largestExpense.description}」RM ${largestExpense.amount.toFixed(2)}（${largestExpense.date}）。`);
+    highlights.push(
+      effLang === 'en'
+        ? `Largest single expense: "${largestExpense.description}" RM ${largestExpense.amount.toFixed(2)} (${largestExpense.date}).`
+        : effLang === 'ms'
+        ? `Perbelanjaan tunggal terbesar: "${largestExpense.description}" RM ${largestExpense.amount.toFixed(2)} (${largestExpense.date}).`
+        : `单笔最大支出为「${largestExpense.description}」RM ${largestExpense.amount.toFixed(2)}（${largestExpense.date}）。`
+    );
   }
 
   // Risk alerts
   const riskAlerts: string[] = [];
   if (budgetCap && budgetCap > 0 && totalSpending > budgetCap * 0.85) {
-    riskAlerts.push(`本月支出已达到设定预算的 ${Math.round((totalSpending / budgetCap) * 100)}%，余下天数需控制节奏。`);
+    const pct = Math.round((totalSpending / budgetCap) * 100);
+    riskAlerts.push(
+      effLang === 'en'
+        ? `Spending reached ${pct}% of monthly budget; pace yourself for the remaining days.`
+        : effLang === 'ms'
+        ? `Perbelanjaan mencapai ${pct}% daripada bajet bulanan; kawal perbelanjaan untuk baki hari.`
+        : `本月支出已达到设定预算的 ${pct}%，余下天数需控制节奏。`
+    );
   }
 
   const commitments = getStoredCommitments();
   const upcomingCommitmentsTotal = commitments.reduce((s, c) => s + (c.amount || 0), 0);
 
   const remainingBudgetText = budgetCap && budgetCap > 0
-    ? `当前距离预算上限还剩 RM ${(budgetCap - totalSpending).toFixed(2)}。`
-    : '暂未设定月度预算上限。';
+    ? (
+        effLang === 'en'
+          ? `RM ${(budgetCap - totalSpending).toFixed(2)} remaining until monthly budget cap.`
+          : effLang === 'ms'
+          ? `Baki RM ${(budgetCap - totalSpending).toFixed(2)} sebelum mencapai had bajet.`
+          : `当前距离预算上限还剩 RM ${(budgetCap - totalSpending).toFixed(2)}。`
+      )
+    : (
+        effLang === 'en'
+          ? 'No monthly budget cap set.'
+          : effLang === 'ms'
+          ? 'Tiada had bajet bulanan ditetapkan.'
+          : '暂未设定月度预算上限。'
+      );
 
   const actionableTip = totalSpending > 0
-    ? `智能管家依据：本月累计已支出 RM ${totalSpending.toFixed(2)}，其中「${topCategoryName}」占比 ${Math.round(topCategoryRatio * 100)}%（RM ${topCategoryAmount.toFixed(2)}）。${remainingBudgetText}`
-    : '本月暂无支出记录，保持记账以形成个性化财务分析。';
+    ? (
+        effLang === 'en'
+          ? `Assistant insight: Month-to-date spending is RM ${totalSpending.toFixed(2)}, with "${topCategoryName}" taking ${topCategoryRatio}% (RM ${topCategoryAmount.toFixed(2)}). ${remainingBudgetText}`
+          : effLang === 'ms'
+          ? `Pandangan Pembantu: Perbelanjaan bulan ini RM ${totalSpending.toFixed(2)}, "${topCategoryName}" merangkumi ${topCategoryRatio}% (RM ${topCategoryAmount.toFixed(2)}). ${remainingBudgetText}`
+          : `智能管家依据：本月累计已支出 RM ${totalSpending.toFixed(2)}，其中「${topCategoryName}」占比 ${topCategoryRatio}%（RM ${topCategoryAmount.toFixed(2)}）。${remainingBudgetText}`
+      )
+    : (
+        effLang === 'en'
+          ? 'No expenses recorded this month. Continue logging to build personalized analysis.'
+          : effLang === 'ms'
+          ? 'Tiada rekod perbelanjaan bulan ini. Teruskan mencatat untuk membentuk analisis peribadi.'
+          : '本月暂无支出记录，保持记账以形成个性化财务分析。'
+      );
+
+  const periodLabel = effLang === 'en'
+    ? `${currentMonth} Financial Briefing`
+    : effLang === 'ms'
+    ? `Taklimat Kewangan ${currentMonth}`
+    : `${currentMonth} 财务深度简报`;
 
   return {
-    periodLabel: `${currentMonth} 财务深度简报`,
+    periodLabel,
     totalSpending,
     topCategoryName,
     topCategoryAmount: Number(topCategoryAmount.toFixed(2)),

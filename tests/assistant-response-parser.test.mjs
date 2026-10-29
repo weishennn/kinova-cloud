@@ -44,6 +44,16 @@ test('computeDeterministicLedgerFacts correctly aggregates whole-ledger totals w
   assert.equal(facts.matchedExactSpent, 15);
 });
 
+test('computeDeterministicLedgerFacts accurately resolves full sentence spending queries using copilot facts', () => {
+  const queryFacts = computeDeterministicLedgerFacts(transactions, mockProfile, 'How much did I spend on food this month?', '2026-10-29');
+
+  // Must match the 3 Food & Dining expenses in October (15 + 12 + 65 = 92)
+  assert.equal(queryFacts.queryItemFoundInLedger, true);
+  assert.equal(queryFacts.matchedRecordCount, 3);
+  assert.equal(queryFacts.matchedExactSpent, 92);
+  assert.ok(queryFacts.categoryLabel?.includes('Food & Dining'));
+});
+
 test('computeDeterministicLedgerFacts detects potential duplicate against receipt', () => {
   const pendingReceipt = {
     amount: 80.0,

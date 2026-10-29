@@ -24,6 +24,7 @@ export interface AssistantRequestBody {
     emergencyReserve?: number | null;
     goals?: Array<{ name: string; targetAmount: number; currentAmount?: number }>;
     rejectedChips?: Array<{ text: string }>;
+    habits?: Array<{ text: string; amount?: number; category: string; source?: string }>;
   };
   deterministicFacts?: {
     currentMonthTotalSpent?: number;
@@ -33,6 +34,11 @@ export interface AssistantRequestBody {
     matchedRecordCount?: number;
     matchedExactSpent?: number;
     queryItemFoundInLedger?: boolean;
+    timeframeLabel?: string;
+    categoryLabel?: string;
+    priceLadder?: Array<{ store: string; unitPrice: number; unit: string; date: string; isLowest: boolean }>;
+    categoryBreakdown?: Array<{ category: string; amount: number; percentage: number }>;
+    largestExpense?: { id?: string; date: string; description: string; category?: string; amount: number } | null;
     potentialDuplicate?: { date: string; amount: number; description: string } | null;
   };
   recentActions?: Array<{
@@ -73,7 +79,7 @@ Decide exactly one mode:
 - unknown: you cannot tell. Ask one question.
 
 Rules:
-- If the ledger has no matching records, say it is not in their records. Then offer the public Malaysian benchmark.
+- If the ledger has no matching records, say clearly that no records exist in their personal ledger (e.g. "在你的个人账本中暂无此记录" / "No matching records found in your personal ledger"). NEVER invent or hallucinate market prices when there is no match. Missing data must be explicitly reported as missing.
 - For receipts or screenshots: extract the net out-of-pocket amount, items, tax, and deductions. Then interpret: tax relief hint (e.g. LHDN Lifestyle RM2,500, Medical RM10,000), duplicate check against facts, comparison to user median, and one proposed action button.
 - Always provide reasoning: 1-2 concise user-facing sentences citing evidence (e.g. "6 weekday lunches, median RM 15.50" or "receipt net RM 42.30 after SST, not the pre-discount bill"). Never dump raw chain of thought.
 - Return ONLY valid JSON matching this schema:

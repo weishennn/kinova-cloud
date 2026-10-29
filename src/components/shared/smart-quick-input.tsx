@@ -8,6 +8,8 @@ import { parseNaturalExpense, ParsedExpense } from '@/lib/natural-expense-parser
 import {
   addUnifiedRow,
   applyOptimisticAddToQueryCache,
+  updateUnifiedRow,
+  applyOptimisticUpdateToQueryCache,
   deleteUnifiedRow,
   applyOptimisticDeleteToQueryCache,
 } from '@/hooks/useSheets';
@@ -510,6 +512,194 @@ export function SmartQuickInput() {
     }
   };
 
+  const handleRepeatAction = async (baseAction: any, targetDate: string) => {
+    if (!baseAction?.payload) {
+      toast.info('No recent record to repeat');
+      return;
+    }
+    const payload = baseAction.payload as {
+      amount?: number;
+      category?: string;
+      description?: string;
+      currency?: string;
+    };
+    const amount = Number(payload.amount) || 0;
+    const category = String(payload.category || 'Other');
+    const description = String(payload.description || 'Repeat expense');
+    const currency = String(payload.currency || 'MYR');
+
+    if (amount <= 0) {
+      toast.error('Invalid amount for repeat');
+      return;
+    }
+
+    const tempId = `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const monthStr = targetDate.slice(0, 7);
+    const rowData: Record<string, any> = {
+      Id: tempId,
+      id: tempId,
+      Date: targetDate,
+      date: targetDate,
+      Type: 'expense',
+      type: 'expense',
+      Category: category,
+      category: category,
+      Description: description,
+      description: description,
+      Amount: amount,
+      amount: amount,
+      Currency: currency,
+      currency: currency,
+      Notes: '',
+      notes: '',
+      _month: monthStr,
+      _rowIndex: 2,
+    };
+
+    applyOptimisticAddToQueryCache(queryClient, monthStr, rowData);
+
+    try {
+      const ledgerWrite = addUnifiedRow(monthStr, {
+        Id: tempId,
+        id: tempId,
+        Date: targetDate,
+        Type: 'expense',
+        Category: category,
+        Description: description,
+        Amount: amount,
+        Currency: currency,
+        Notes: '',
+      });
+
+      recordRecentAction({
+        actionType: 'record',
+        targetType: 'transaction',
+        summary: `Repeat: ${currency} ${amount.toFixed(2)} for ${description}`,
+        payload: {
+          id: tempId,
+          amount,
+          category,
+          description,
+          date: targetDate,
+          monthStr,
+        },
+      });
+
+      setInput('');
+      toast.success(`🔁 Repeated: ${currency} ${amount.toFixed(2)} for ${description}`, {
+        duration: 15000,
+        action: {
+          label: 'Undo / 撤销',
+          onClick: () => void handleUndoAction(tempId, monthStr),
+        },
+      });
+
+      void (async () => {
+        try {
+          await ledgerWrite;
+          queryClient.invalidateQueries({ queryKey: ['sheet'] });
+          queryClient.invalidateQueries({ queryKey: ['months'] });
+          queryClient.invalidateQueries({ queryKey: ['overview'] });
+        } catch (err) {
+          console.warn('Background repeat sync failed:', err);
+        }
+      })();
+    } catch (err) {
+      console.error('Failed to repeat transaction:', err);
+      toast.error('Failed to repeat transaction');
+    }
+  };
+
+  const handleCorrectAction = async (baseAction: any, patch: Record<string, unknown>) => {
+    if (!baseAction?.payload) {
+      toast.info('No recent action in this session to correct');
+      return;
+    }
+    const targetId = String(baseAction.payload.id || baseAction.id);
+    const monthStr = String(baseAction.payload.monthStr || getLocalDateString().slice(0, 7));
+
+    const existingTx = transactions.find((t) => t.id === targetId);
+    const rowIndex = (existingTx as any)?._rowIndex || 2;
+
+    const newAmount = typeof patch.amount === 'number'
+      ? patch.amount
+      : Number(baseAction.payload.amount || existingTx?.amount || 0);
+    const newCategory = typeof patch.category === 'string'
+      ? patch.category
+      : String(baseAction.payload.category || existingTx?.category || 'Other');
+    const description = String(baseAction.payload.description || existingTx?.description || '');
+    const date = String(baseAction.payload.date || existingTx?.date || getLocalDateString());
+    const currency = String(baseAction.payload.currency || existingTx?.currency || 'MYR');
+
+    const updatedRow = {
+      Id: targetId,
+      id: targetId,
+      Date: date,
+      date: date,
+      Type: 'expense',
+      type: 'expense',
+      Category: newCategory,
+      category: newCategory,
+      Description: description,
+      description: description,
+      Amount: newAmount,
+      amount: newAmount,
+      Currency: currency,
+      currency: currency,
+      Notes: (existingTx as any)?.notes || '',
+      notes: (existingTx as any)?.notes || '',
+      _month: monthStr,
+      _rowIndex: rowIndex,
+    };
+
+    applyOptimisticUpdateToQueryCache(queryClient, monthStr, rowIndex, updatedRow);
+
+    try {
+      const ledgerWrite = updateUnifiedRow(monthStr, rowIndex, {
+        Id: targetId,
+        id: targetId,
+        Date: date,
+        Type: 'expense',
+        Category: newCategory,
+        Description: description,
+        Amount: newAmount,
+        Currency: currency,
+        Notes: (existingTx as any)?.notes || '',
+      });
+
+      recordRecentAction({
+        actionType: 'edit',
+        targetType: 'transaction',
+        summary: `Corrected to ${currency} ${newAmount.toFixed(2)} (${newCategory}) for ${description}`,
+        payload: {
+          id: targetId,
+          amount: newAmount,
+          category: newCategory,
+          description,
+          date,
+          monthStr,
+        },
+      });
+
+      setInput('');
+      toast.success(`✏️ Updated: ${currency} ${newAmount.toFixed(2)} (${newCategory}) for ${description}`);
+
+      void (async () => {
+        try {
+          await ledgerWrite;
+          queryClient.invalidateQueries({ queryKey: ['sheet'] });
+          queryClient.invalidateQueries({ queryKey: ['months'] });
+          queryClient.invalidateQueries({ queryKey: ['overview'] });
+        } catch (err) {
+          console.warn('Background update sync failed:', err);
+        }
+      })();
+    } catch (err) {
+      console.error('Failed to correct transaction:', err);
+      toast.error('Failed to update transaction');
+    }
+  };
+
   const handleHabitChipClick = async (item: HabitSuggestionItem) => {
     if (!item.actionPayload) {
       setInput(item.text);
@@ -885,20 +1075,40 @@ export function SmartQuickInput() {
           merchant: tx.description,
           date: tx.date,
         });
+        let note = '';
         if (facts.potentialDuplicate) {
-          setReceiptAssistantNote(
-            `⚠️ Matches another ${tx.currency} ${facts.potentialDuplicate.amount.toFixed(2)} on ${facts.potentialDuplicate.date}`
-          );
+          note = `⚠️ Matches another ${tx.currency} ${facts.potentialDuplicate.amount.toFixed(2)} on ${facts.potentialDuplicate.date}`;
         } else {
           const catMedian = facts.categoryMedians[tx.category];
           if (catMedian && tx.amount > catMedian * 1.5) {
-            setReceiptAssistantNote(
-              `📈 Higher than usual (${tx.currency} ${tx.amount.toFixed(2)} vs median ${tx.currency} ${catMedian.toFixed(2)} for ${tx.category})`
-            );
+            note = `📈 Higher than usual (${tx.currency} ${tx.amount.toFixed(2)} vs median ${tx.currency} ${catMedian.toFixed(2)} for ${tx.category})`;
           } else {
-            setReceiptAssistantNote(`✓ Verified under ${tx.category}`);
+            note = `✓ Verified under ${tx.category}`;
           }
         }
+        setReceiptAssistantNote(note);
+
+        // Pass 2: Thinking assistant pass interprets LHDN tax relief, duplicates, and proposed action
+        void (async () => {
+          try {
+            const turn = await runKinovaTurn({
+              text: `Interpret receipt from ${tx.description} for ${tx.currency} ${tx.amount.toFixed(2)}, subtotal ${tx.currency} ${(tx.subtotal || tx.amount).toFixed(2)}, SST ${tx.currency} ${(tx.taxAmount || 0).toFixed(2)}. Check tax relief, duplicate, and category.`,
+              today: getLocalDateString(),
+              profile,
+              transactions,
+              forceAssistant: true,
+            });
+            if (turn.source === 'assistant') {
+              setAssistantResult(turn.assistantResult);
+              const reliefTag = turn.assistantResult.receiptAnalysis?.taxReliefCategory;
+              if (reliefTag) {
+                setReceiptAssistantNote(`${note} · 🇲🇾 LHDN ${reliefTag}`);
+              }
+            }
+          } catch (e) {
+            console.warn('[Pass2 Receipt] Non-fatal thinking error:', e);
+          }
+        })();
       } catch (err) {
         console.warn('Receipt interpretation non-fatal:', err);
       }
@@ -1486,6 +1696,95 @@ export function SmartQuickInput() {
         </div>
       )}
 
+      {/* Local Router Special Modes: Repeat */}
+      {localRoute?.mode === 'repeat' && (
+        <div className="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-3.5 shadow-md space-y-2.5 text-left animate-in fade-in duration-150">
+          <div className="text-xs font-bold text-blue-900 dark:text-blue-200 flex items-center justify-between">
+            <span>🔁 {localRoute.message}</span>
+          </div>
+          {localRoute.baseAction ? (
+            <div className="flex items-center justify-between gap-3 pt-1">
+              <span className="text-xs text-slate-700 dark:text-zinc-300">
+                {String(localRoute.baseAction.payload?.currency || 'MYR')}{' '}
+                {Number(localRoute.baseAction.payload?.amount || 0).toFixed(2)} ·{' '}
+                {String(localRoute.baseAction.payload?.description || '')} ·{' '}
+                {String(localRoute.baseAction.payload?.category || '')} (Today / 今日)
+              </span>
+              <button
+                type="button"
+                onClick={() => void handleRepeatAction(localRoute.baseAction, localRoute.targetDate)}
+                className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow cursor-pointer transition-all shrink-0"
+              >
+                Confirm Repeat / 确认记录
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-2 text-xs text-slate-500 dark:text-zinc-400">
+              <span>No recent expense in this session to repeat.</span>
+              <button
+                type="button"
+                onClick={() => void triggerAssistantTurn(input)}
+                className="text-xs font-semibold text-blue-600 dark:text-blue-400 underline cursor-pointer"
+              >
+                Ask Assistant / 咨询助手
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Local Router Special Modes: Correct */}
+      {localRoute?.mode === 'correct' && (
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3.5 shadow-md space-y-2.5 text-left animate-in fade-in duration-150">
+          <div className="text-xs font-bold text-amber-900 dark:text-amber-200 flex items-center justify-between">
+            <span>✏️ {localRoute.message}</span>
+          </div>
+          {localRoute.baseAction ? (
+            <div className="flex items-center justify-between gap-3 pt-1">
+              <div className="text-xs text-slate-700 dark:text-zinc-300">
+                {typeof localRoute.patch.amount === 'number' && (
+                  <span>
+                    Amount: RM {Number(localRoute.baseAction.payload?.amount || 0).toFixed(2)} ➔{' '}
+                    <strong className="text-amber-700 dark:text-amber-300 font-bold">
+                      RM {localRoute.patch.amount.toFixed(2)}
+                    </strong>
+                  </span>
+                )}
+                {typeof localRoute.patch.category === 'string' && (
+                  <span>
+                    Category: {String(localRoute.baseAction.payload?.category || '')} ➔{' '}
+                    <strong className="text-amber-700 dark:text-amber-300 font-bold">
+                      {localRoute.patch.category}
+                    </strong>
+                  </span>
+                )}
+                <span className="text-slate-500 block text-[11px] mt-0.5">
+                  ({String(localRoute.baseAction.payload?.description || '')})
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleCorrectAction(localRoute.baseAction, localRoute.patch)}
+                className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold shadow cursor-pointer transition-all shrink-0"
+              >
+                Confirm Update / 确认修改
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-2 text-xs text-slate-500 dark:text-zinc-400">
+              <span>No recent expense in this session to update.</span>
+              <button
+                type="button"
+                onClick={() => void triggerAssistantTurn(input)}
+                className="text-xs font-semibold text-amber-600 dark:text-amber-400 underline cursor-pointer"
+              >
+                Ask Assistant / 咨询助手
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Assistant Mode: Advise */}
       {assistantResult?.mode === 'advise' && (
         <div className="rounded-2xl border border-indigo-500/30 bg-white/95 dark:bg-zinc-950/90 p-3.5 shadow-lg space-y-2.5 text-left animate-in fade-in duration-200">
@@ -1629,6 +1928,35 @@ export function SmartQuickInput() {
                         立减优惠: -{activeCommand.data.currency} {activeCommand.data.discountAmount.toFixed(2)}
                         {activeCommand.data.dealsDescription ? ` (${activeCommand.data.dealsDescription})` : ''}
                       </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Pass 2 Assistant Interpretation & Proposed Action */}
+                {assistantResult && (assistantResult.answer || assistantResult.reasoning) && (
+                  <div className="flex items-start gap-2.5 rounded-xl bg-indigo-500/10 border border-indigo-500/25 p-3 text-xs text-indigo-900 dark:text-indigo-200">
+                    <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+                    <div className="space-y-1.5 flex-1">
+                      <div className="font-semibold text-slate-900 dark:text-white leading-snug">
+                        {assistantResult.answer}
+                      </div>
+                      {assistantResult.reasoning && (
+                        <div className="text-[11px] text-slate-600 dark:text-zinc-400 bg-white/60 dark:bg-zinc-900/60 p-2 rounded-lg border border-slate-200/60 dark:border-white/[0.04]">
+                          💡 <span className="font-semibold text-slate-700 dark:text-zinc-300">Kinova judgment:</span> {assistantResult.reasoning}
+                        </div>
+                      )}
+                      {assistantResult.proposedAction && (
+                        <div className="pt-0.5 flex items-center justify-end">
+                          <button
+                            type="button"
+                            onClick={() => void handleQuickSubmit()}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md transition-all cursor-pointer"
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                            <span>{assistantResult.proposedAction.label || 'Save this expense'}</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

@@ -508,6 +508,31 @@ Return JSON shape:
       merchantOrDescription: effectiveDescription || 'screenshot_draft',
     });
 
+    // Generate intelligent assistant advice (interpretation of tax relief, category, and proposed action)
+    let taxReliefHint = '';
+    const catLower = effectiveCategory.toLowerCase();
+    const descLower = effectiveDescription.toLowerCase();
+    if (catLower.includes('health') || descLower.includes('clinic') || descLower.includes('doctor') || descLower.includes('pharmacy') || descLower.includes('hospital')) {
+      taxReliefHint = 'LHDN 医疗/体检减免 (最高 RM10,000)';
+    } else if (catLower.includes('education') || descLower.includes('course') || descLower.includes('book') || descLower.includes('tuition')) {
+      taxReliefHint = 'LHDN 进修/书籍减免 (最高 RM7,000)';
+    } else if (catLower.includes('sport') || descLower.includes('gym') || descLower.includes('fitness')) {
+      taxReliefHint = 'LHDN 运动设备/健身减免 (最高 RM1,000)';
+    } else if (catLower.includes('insurance') || descLower.includes('takaful') || descLower.includes('prudential') || descLower.includes('great eastern')) {
+      taxReliefHint = 'LHDN 人寿保险/公积金减免 (最高 RM7,000)';
+    }
+
+    const proposedActionLabel = moneyRes.amount != null && moneyRes.amount > 0
+      ? `Save ${moneyRes.currency} ${moneyRes.amount.toFixed(2)} (${effectiveCategory})`
+      : 'Review and Confirm Draft';
+
+    const assistantAdvice = [
+      `智能分析：识别为「${effectiveCategory}」`,
+      moneyRes.amount ? `实付 ${moneyRes.currency} ${moneyRes.amount.toFixed(2)}` : '',
+      taxReliefHint ? `🇲🇾 建议申报 ${taxReliefHint}` : '',
+      '待用户在账本中一键保存确认',
+    ].filter(Boolean).join(' · ');
+
     const saved = saveShortcutQuickDraft({
       ownerEmail: userEmail || undefined,
       source: 'back_tap_screenshot',
@@ -525,9 +550,12 @@ Return JSON shape:
       billAmount,
       items: items.length > 0 ? items : undefined,
       ocrSummary,
+      assistantAdvice,
+      proposedActionLabel,
       notes: [
         '快捷指令截图草稿（待核对确认）',
         habitNotice,
+        assistantAdvice,
         discountAmount && discountAmount > 0
           ? `[优惠抵扣: -${moneyRes.currency} ${discountAmount.toFixed(2)}${dealsDescription ? ` (${dealsDescription})` : ''}]`
           : '',
@@ -568,6 +596,8 @@ Return JSON shape:
         pwaUrl: `${origin}/`,
         missingFields: saved.missingFields,
         uncertainFields: saved.uncertainFields,
+        assistantAdvice: saved.assistantAdvice,
+        proposedActionLabel: saved.proposedActionLabel,
         suspectedDuplicateOfDraftId: saved.suspectedDuplicateOfDraftId || null,
         requiresUserConfirmation: !ledgerRes.autoRecorded,
       },

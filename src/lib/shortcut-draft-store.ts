@@ -36,6 +36,8 @@ export interface ShortcutQuickDraft {
   billAmount?: number | null;
   items?: ShortcutDraftItem[];
   ocrSummary?: string;
+  assistantAdvice?: string;
+  proposedActionLabel?: string;
   notes: string;
   missingFields: Array<'amount' | 'description' | 'currency' | 'category'>;
   uncertainFields: Array<'amount' | 'description' | 'currency' | 'category'>;

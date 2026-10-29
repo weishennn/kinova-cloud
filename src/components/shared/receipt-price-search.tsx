@@ -395,8 +395,8 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
       });
     }
 
-    list.push({ text: '查鸡蛋与牛奶公开发售参考价', type: 'price', icon: '🛒' });
-    list.push({ text: '现在有什么稳健指数ETF适合定投？', type: 'stock', icon: '📈' });
+    list.push({ text: '我这个月预算还剩多少？', type: 'analytics', icon: '💰' });
+    list.push({ text: '最近有什么大额开支？', type: 'analytics', icon: '📊' });
 
     return list.slice(0, 8);
   }, [allTransactions]);
@@ -1134,11 +1134,11 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                     {/* Personal Ledger Absence Distinction */}
                     {copilotState.isFoundInPersonalLedger === false && (
                       <div className="flex items-start gap-3 p-3.5 rounded-2xl bg-amber-500/15 border border-amber-400/30 text-amber-200 text-xs">
-                        <span className="text-lg">⚠️</span>
+                        <span className="text-lg">ℹ️</span>
                         <div>
                           <div className="font-bold text-amber-300">个人账本暂无此消费记录</div>
                           <div className="text-[11px] text-amber-200/90 mt-0.5">
-                            已自动转为检索马来西亚全网公开发售参考价（如 Lotus&apos;s、99 Speedmart、各大超市公允市价），助你快速对比行情。
+                            你的个人账本中暂无匹配记录。记录相关开支后，Kinova 即可基于你的真实账目提供个性化分析与对比。
                           </div>
                         </div>
                       </div>

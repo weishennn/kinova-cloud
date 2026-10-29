@@ -17,6 +17,11 @@ import { routeLocalIntent, type LocalRouteResult } from './intent-router.ts';
 import { getUserMoneyProfile, type UserMoneyProfile } from './user-money-profile.ts';
 import { getLocalDateString } from './date-helper.ts';
 import type { AiCommand } from '../types/ai-command.ts';
+import {
+  computeDeterministicLedgerFacts as computeCopilotFacts,
+  type DeterministicLedgerFacts as CopilotFactsResult,
+} from './copilot-ledger-facts.ts';
+import { mineUserHabitSuggestions } from './habit-suggestions.ts';
 
 export interface AssistantTurnMessage {
   role: 'user' | 'assistant';
@@ -31,7 +36,19 @@ export interface DeterministicLedgerFacts {
   matchedRecordCount: number;
   matchedExactSpent: number;
   queryItemFoundInLedger: boolean;
+  timeframeLabel?: string;
+  categoryLabel?: string;
+  priceLadder?: Array<{ store: string; unitPrice: number; unit: string; date: string; isLowest: boolean }>;
+  categoryBreakdown?: Array<{ category: string; amount: number; percentage: number }>;
+  largestExpense?: { id?: string; date: string; description: string; category?: string; amount: number } | null;
   potentialDuplicate: { date: string; amount: number; description: string } | null;
+  relevantTransactionsSample?: Array<{
+    date: string;
+    description: string;
+    category: string;
+    amount: number;
+    type?: string;
+  }>;
 }
 
 export interface AssistantApiResponse {
@@ -80,6 +97,8 @@ export function computeDeterministicLedgerFacts(
     category?: string;
     description?: string;
     amount?: number;
+    notes?: string;
+    receiptItems?: any[];
   }>,
   profile: UserMoneyProfile,
   queryKeyword?: string,
@@ -90,11 +109,6 @@ export function computeDeterministicLedgerFacts(
   let currentMonthTotalSpent = 0;
   const categorySpending: Record<string, number> = {};
   const categoryValues: Record<string, number[]> = {};
-
-  let matchedRecordCount = 0;
-  let matchedExactSpent = 0;
-  let queryItemFoundInLedger = false;
-  const cleanQuery = queryKeyword?.trim().toLowerCase() || '';
 
   let potentialDuplicate: { date: string; amount: number; description: string } | null = null;
 
@@ -116,18 +130,6 @@ export function computeDeterministicLedgerFacts(
       // Collect amounts for median calculation (last 90 days)
       if (!categoryValues[category]) categoryValues[category] = [];
       categoryValues[category].push(amount);
-
-      // Check query keyword match
-      if (cleanQuery.length >= 2) {
-        if (
-          description.toLowerCase().includes(cleanQuery) ||
-          category.toLowerCase().includes(cleanQuery)
-        ) {
-          matchedRecordCount += 1;
-          matchedExactSpent += amount;
-          queryItemFoundInLedger = true;
-        }
-      }
 
       // Check duplicate against pending receipt
       if (pendingReceipt && pendingReceipt.amount > 0) {
@@ -161,6 +163,66 @@ export function computeDeterministicLedgerFacts(
       ? profile.monthlyBudgetCap - currentMonthTotalSpent
       : null;
 
+  // Use deep deterministic copilot ledger intelligence for the query
+  let matchedRecordCount = 0;
+  let matchedExactSpent = 0;
+  let queryItemFoundInLedger = false;
+  let timeframeLabel: string | undefined;
+  let categoryLabel: string | undefined;
+  let priceLadder: DeterministicLedgerFacts['priceLadder'];
+  let categoryBreakdown: DeterministicLedgerFacts['categoryBreakdown'];
+  let largestExpense: DeterministicLedgerFacts['largestExpense'];
+  let relevantTransactionsSample: DeterministicLedgerFacts['relevantTransactionsSample'];
+
+  const cleanQuery = queryKeyword?.trim() || '';
+  if (cleanQuery.length >= 2) {
+    try {
+      const copilotFacts = computeCopilotFacts(cleanQuery, transactions as any, today);
+      timeframeLabel = copilotFacts.timeframeLabel;
+      categoryLabel = copilotFacts.categoryLabel;
+      priceLadder = copilotFacts.priceLadder;
+      categoryBreakdown = copilotFacts.categoryBreakdown;
+      largestExpense = copilotFacts.largestExpense;
+      if (copilotFacts.relevantTransactionsSample && copilotFacts.relevantTransactionsSample.length > 0) {
+        relevantTransactionsSample = copilotFacts.relevantTransactionsSample.map((t) => ({
+          date: t.date,
+          description: t.description || '',
+          category: t.category || '',
+          amount: t.amount,
+          type: t.type,
+        }));
+      }
+
+      if (copilotFacts.transactionCount > 0 || copilotFacts.isFoundInPersonalLedger) {
+        matchedRecordCount = copilotFacts.transactionCount;
+        matchedExactSpent = copilotFacts.exactTotalSpent;
+        queryItemFoundInLedger = true;
+      }
+    } catch (err) {
+      console.warn('[computeDeterministicLedgerFacts] Copilot facts error:', err);
+    }
+
+    // Direct fallback if query wasn't an analytics/item lookup or returned 0
+    if (!queryItemFoundInLedger) {
+      const lowerQ = cleanQuery.toLowerCase();
+      for (const t of transactions) {
+        if (!t || typeof t !== 'object') continue;
+        const isExpense = String(t.type || '').toLowerCase() === 'expense';
+        const amount = Number(t.amount) || 0;
+        const category = String(t.category || 'Other');
+        const description = String(t.description || '');
+
+        if (isExpense && amount > 0) {
+          if (description.toLowerCase().includes(lowerQ) || category.toLowerCase().includes(lowerQ)) {
+            matchedRecordCount += 1;
+            matchedExactSpent += amount;
+            queryItemFoundInLedger = true;
+          }
+        }
+      }
+    }
+  }
+
   return {
     currentMonthTotalSpent: Number(currentMonthTotalSpent.toFixed(2)),
     currentMonthBudgetRemaining:
@@ -170,7 +232,13 @@ export function computeDeterministicLedgerFacts(
     matchedRecordCount,
     matchedExactSpent: Number(matchedExactSpent.toFixed(2)),
     queryItemFoundInLedger,
+    timeframeLabel,
+    categoryLabel,
+    priceLadder,
+    categoryBreakdown,
+    largestExpense,
     potentialDuplicate,
+    relevantTransactionsSample,
   };
 }
 
@@ -218,15 +286,19 @@ export async function runKinovaTurn(
   );
 
   // Take small sample of matching or recent transactions
-  const ledgerSample = allTx
-    .slice(0, 20)
-    .map((t) => ({
-      date: String(t.date || ''),
-      description: String(t.description || ''),
-      category: String(t.category || ''),
-      amount: Number(t.amount) || 0,
-      type: String(t.type || 'Expense'),
-    }));
+  const ledgerSample = deterministicFacts.relevantTransactionsSample && deterministicFacts.relevantTransactionsSample.length > 0
+    ? deterministicFacts.relevantTransactionsSample.slice(0, 20)
+    : allTx
+        .slice(0, 20)
+        .map((t) => ({
+          date: String(t.date || ''),
+          description: String(t.description || ''),
+          category: String(t.category || ''),
+          amount: Number(t.amount) || 0,
+          type: String(t.type || 'Expense'),
+        }));
+
+  const habits = mineUserHabitSuggestions(allTx as any, undefined, undefined, profile.rejectedChips).slice(0, 5);
 
   const res = await fetch('/api/ai/assistant', {
     method: 'POST',
@@ -244,6 +316,12 @@ export async function runKinovaTurn(
         emergencyReserve: profile.emergencyReserve,
         goals: profile.goals,
         rejectedChips: profile.rejectedChips,
+        habits: habits.map((h) => ({
+          text: h.text,
+          amount: h.actionPayload?.amount,
+          category: h.actionPayload?.category || 'Food & Dining',
+          source: h.isPersonalized ? 'learned_habit' : 'default',
+        })),
       },
       deterministicFacts,
       recentActions: profile.recentActions,

@@ -30,10 +30,29 @@ const KNOWN_SUBSCRIPTION_KEYWORDS = [
 export function generateProactiveAlerts<T extends MinimalTransaction>(
   allTransactions: T[],
   budgetCap?: number,
-  referenceDateStr?: string
+  referenceDateStr?: string,
+  userLanguage?: 'zh' | 'en' | 'ms' | 'auto'
 ): ProactiveAlert[] {
   const alerts: ProactiveAlert[] = [];
   if (!Array.isArray(allTransactions) || allTransactions.length === 0) return alerts;
+
+  let lang = userLanguage;
+  if (!lang || lang === 'auto') {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('cashflow_preferred_language');
+        if (stored === 'zh' || stored === 'en' || stored === 'ms') {
+          lang = stored;
+        } else if (typeof navigator !== 'undefined') {
+          const nav = (navigator.language || '').toLowerCase();
+          if (nav.startsWith('ms') || nav.startsWith('id')) lang = 'ms';
+          else if (nav.startsWith('en')) lang = 'en';
+          else lang = 'zh';
+        }
+      } catch {}
+    }
+  }
+  const effectiveLang = lang === 'en' || lang === 'ms' ? lang : 'zh';
 
   const todayStr = referenceDateStr || getLocalDateString();
   const today = new Date(todayStr);
@@ -134,30 +153,31 @@ export function generateProactiveAlerts<T extends MinimalTransaction>(
   }
 
   // 3. Category Spending Spikes (vs Trailing 3-month daily pace)
-  // Calculate trailing 3-month category daily averages across the total window days
+  // For each trailing month, track spending and ONLY credit that month's days to categories that were actually active in that month
   const trailingCatTotals = new Map<string, { total: number; days: number }>();
-  let totalTrailingDays = 0;
   for (let mOffset = 1; mOffset <= 3; mOffset++) {
     const pDate = new Date(currentYear, currentMonthNum - 1 - mOffset, 1);
     const pStr = `${pDate.getFullYear()}-${String(pDate.getMonth() + 1).padStart(2, '0')}`;
     const pDays = getDaysInMonth(pDate.getFullYear(), pDate.getMonth() + 1);
-    totalTrailingDays += pDays;
 
     const mExpenses = allTransactions.filter(
       (t) => t.type === 'expense' && t.date?.startsWith(pStr) && t.amount > 0
     );
 
+    const monthCatMap = new Map<string, number>();
     for (const t of mExpenses) {
       const cat = t.category || 'Other';
-      const existing = trailingCatTotals.get(cat) || { total: 0, days: 0 };
-      existing.total += getAmountInBaseCurrency(t.amount, t.currency);
-      trailingCatTotals.set(cat, existing);
+      monthCatMap.set(cat, (monthCatMap.get(cat) || 0) + getAmountInBaseCurrency(t.amount, t.currency));
     }
-  }
 
-  // Set the exact trailing window duration for all categories present
-  for (const entry of trailingCatTotals.values()) {
-    entry.days = totalTrailingDays;
+    for (const [cat, amt] of monthCatMap.entries()) {
+      if (amt > 0) {
+        const existing = trailingCatTotals.get(cat) || { total: 0, days: 0 };
+        existing.total += amt;
+        existing.days += pDays; // ONLY add days for months where this category had spending > 0!
+        trailingCatTotals.set(cat, existing);
+      }
+    }
   }
 
   // Current month category totals
@@ -180,14 +200,31 @@ export function generateProactiveAlerts<T extends MinimalTransaction>(
     if (curr.total >= 150 && currDailyPace >= histDailyPace * 1.35) {
       const increasePct = Math.round(((currDailyPace - histDailyPace) / histDailyPace) * 100);
 
+      let title = `「${cat}」支出进度偏高`;
+      let message = `本月「${cat}」支出进度显著快于往期活跃月份平均水平。`;
+      let explanation = `依据：本月「${cat}」已累计支出 RM ${curr.total.toFixed(2)}（日均 RM ${currDailyPace.toFixed(2)}），往期活跃月份（共 ${hist.days} 天）日均 RM ${histDailyPace.toFixed(2)}，增速达 +${increasePct}%。`;
+      let actionLabel = `查看「${cat}」账目 (${curr.txs.length}笔)`;
+
+      if (effectiveLang === 'en') {
+        title = `High Spending Pace in "${cat}"`;
+        message = `Spending pace in "${cat}" this month is significantly higher than historical active months.`;
+        explanation = `Basis: "${cat}" spent RM ${curr.total.toFixed(2)} so far (daily RM ${currDailyPace.toFixed(2)}). Historical active months (${hist.days} days) averaged RM ${histDailyPace.toFixed(2)}/day, a +${increasePct}% surge.`;
+        actionLabel = `View "${cat}" records (${curr.txs.length})`;
+      } else if (effectiveLang === 'ms') {
+        title = `Kadar Perbelanjaan Tinggi untuk "${cat}"`;
+        message = `Kadar perbelanjaan "${cat}" bulan ini jauh lebih laju berbanding bulan-bulan aktif sebelum ini.`;
+        explanation = `Asas: RM ${curr.total.toFixed(2)} dibelanjakan untuk "${cat}" (harian RM ${currDailyPace.toFixed(2)}). Purata bulan aktif (${hist.days} hari) ialah RM ${histDailyPace.toFixed(2)}/hari (+${increasePct}%).`;
+        actionLabel = `Lihat rekod "${cat}" (${curr.txs.length})`;
+      }
+
       alerts.push({
         id: `alert_cat_spike_${cat}`,
         type: 'category_spike',
         severity: 'warning',
-        title: `「${cat}」支出进度偏高`,
-        message: `本月「${cat}」支出进度显著快于往期同期平均水平。`,
-        explanation: `依据：本月「${cat}」已累计支出 RM ${curr.total.toFixed(2)}（日均 RM ${currDailyPace.toFixed(2)}），过去 3 个月该分类日均仅 RM ${histDailyPace.toFixed(2)}，增速达 +${increasePct}%。`,
-        actionLabel: `查看「${cat}」账目 (${curr.txs.length}笔)`,
+        title,
+        message,
+        explanation,
+        actionLabel,
         actionCategory: cat,
         matchingTransactionIds: curr.txs.map((t) => t.id),
       });

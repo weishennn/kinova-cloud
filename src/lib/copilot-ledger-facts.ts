@@ -91,7 +91,7 @@ export function computeDeterministicLedgerFacts<T extends SpendingTransaction>(
   const storeMap = new Map<string, { store: string; minUnitPrice: number; unit: string; date: string }>();
 
   for (const tx of allTransactions) {
-    if (tx.type !== 'expense') continue;
+    if (String(tx.type || '').toLowerCase() !== 'expense') continue;
 
     const desc = (tx.description || '').toLowerCase();
     const cat = (tx.category || '').toLowerCase();

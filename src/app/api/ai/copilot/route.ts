@@ -119,8 +119,8 @@ ${JSON.stringify(transactionContext, null, 2)}
 3. PERSONAL LEDGER vs MARKET REFERENCE:
    - If the item/merchant was NOT found in the user's personal ledger (or transaction count is 0):
      You MUST explicitly state: "在你的个人账本中暂无此记录" (or "No records found in your personal ledger").
-     THEN, provide a realistic Malaysian market price benchmark (e.g. Lotus's, 99 Speedmart, Jaya Grocer, or local hawkers) and clearly identify it as "马来西亚公开市场参考行情".
-     Set "type": "market_benchmark".
+     DO NOT invent, fabricate, or guess market prices when there is no match. Missing data must be explicitly reported as missing.
+     Set "type": "conversational".
    - If found in personal ledger:
      Interpret and explain the figures directly from the user's personal ledger facts.
 4. For store comparisons (e.g. petrol stations, grocery stores), build or reference a "priceLadder" sorted from lowest unit price to highest.
