@@ -645,7 +645,11 @@ export const sheetsData = {
               if (stored) {
                 const parsed = JSON.parse(stored);
                 if (Array.isArray(parsed) && parsed.length > 0) {
-                  rawRows = parsed;
+                  rawRows = parsed.filter((t: any) => {
+                    const tId = String(t.Id || t.id || '');
+                    const sym = String(t.Ticker || t.ticker || '').trim().toUpperCase();
+                    return !isRecordTombstoned(tId) && !isRecordTombstoned(sym);
+                  });
                 }
               }
             } catch {
@@ -655,7 +659,11 @@ export const sheetsData = {
           if (rawRows.length === 0) {
             const cached = this.getInitialSheetData('Trades');
             if (cached?.data?.rows && cached.data.rows.length > 0) {
-              rawRows = cached.data.rows;
+              rawRows = cached.data.rows.filter((t: any) => {
+                const tId = String(t.Id || t.id || '');
+                const sym = String(t.Ticker || t.ticker || '').trim().toUpperCase();
+                return !isRecordTombstoned(tId) && !isRecordTombstoned(sym);
+              });
             }
           }
         }
@@ -870,7 +878,7 @@ export const sheetsData = {
         }
         return true;
       });
-      if (nextRows.length !== rows.length) {
+        if (nextRows.length !== rows.length) {
         setSwrCachedData('getSheetData', { sheetName: sName }, {
           success: true,
           data: {
@@ -880,6 +888,25 @@ export const sheetsData = {
         });
       }
     });
+
+    if (sheetName === 'Trades') {
+      const portEntry = getSwrCachedEntry<Record<string, unknown>[] | { success: boolean; data: Record<string, unknown>[] }>('getPortfolio', {});
+      const portRows = Array.isArray(portEntry?.data)
+        ? portEntry.data
+        : (portEntry?.data && 'data' in portEntry.data && Array.isArray((portEntry.data as any).data))
+          ? (portEntry.data as any).data
+          : null;
+      if (Array.isArray(portRows) && id) {
+        let ticker = '';
+        if (id.startsWith('moo_holding_')) {
+          ticker = id.replace(/^moo_holding_/i, '').split('_')[0].toUpperCase();
+        }
+        if (ticker) {
+          const nextPort = portRows.filter((h: any) => String(h.ticker || h.Ticker || '').trim().toUpperCase() !== ticker);
+          setSwrCachedData('getPortfolio', {}, nextPort);
+        }
+      }
+    }
   },
 
   /**

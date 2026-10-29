@@ -2215,6 +2215,92 @@ export async function executeUserGoogleAction(
             }
           }
         }
+
+        // Special handling for synthetic holding trades (e.g. moo_holding_spcx_0) or deleting a holding directly
+        let holdingTicker = "";
+        if (targetId.startsWith("moo_holding_")) {
+          const parts = targetId.replace(/^moo_holding_/i, "").split("_");
+          holdingTicker = parts[0].toUpperCase();
+        } else if (rawSheetName === "Portfolio") {
+          holdingTicker = targetId.toUpperCase();
+        }
+
+        if (holdingTicker) {
+          await recordDeletedTombstone(spreadsheetId, accessToken, meta, targetId, "Trades", mutationId);
+          await recordDeletedTombstone(spreadsheetId, accessToken, meta, holdingTicker, "Portfolio", mutationId);
+
+          const portMeta = meta.sheets.find((s) => s.properties.title === "Portfolio");
+          if (portMeta) {
+            const portVals = await readSheetValues(spreadsheetId, accessToken, "Portfolio");
+            for (let i = 1; i < portVals.length; i++) {
+              const sym = String(portVals[i]?.[0] || "").trim().toUpperCase();
+              if (sym === holdingTicker) {
+                await googleApiFetch(
+                  `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`,
+                  accessToken,
+                  {
+                    method: "POST",
+                    body: JSON.stringify({
+                      requests: [{
+                        deleteDimension: {
+                          range: {
+                            sheetId: portMeta.properties.sheetId,
+                            dimension: "ROWS",
+                            startIndex: i,
+                            endIndex: i + 1,
+                          },
+                        },
+                      }],
+                    }),
+                  }
+                );
+                break;
+              }
+            }
+          }
+
+          const tradesMeta = meta.sheets.find((s) => s.properties.title.trim().toLowerCase() === "trades");
+          if (tradesMeta) {
+            const tradeVals = await readSheetValues(spreadsheetId, accessToken, tradesMeta.properties.title);
+            const tHeaders = (tradeVals[0] || []).map((h) => String(h || "").trim().toLowerCase());
+            const tickerIdx = tHeaders.indexOf("ticker");
+            const tCol = tickerIdx >= 0 ? tickerIdx : 3;
+            for (let i = tradeVals.length - 1; i >= 1; i--) {
+              const sym = String(tradeVals[i]?.[tCol] || "").trim().toUpperCase();
+              if (sym === holdingTicker) {
+                await googleApiFetch(
+                  `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`,
+                  accessToken,
+                  {
+                    method: "POST",
+                    body: JSON.stringify({
+                      requests: [{
+                        deleteDimension: {
+                          range: {
+                            sheetId: tradesMeta.properties.sheetId,
+                            dimension: "ROWS",
+                            startIndex: i,
+                            endIndex: i + 1,
+                          },
+                        },
+                      }],
+                    }),
+                  }
+                );
+              }
+            }
+          }
+
+          await syncPortfolioFromTradesUser(spreadsheetId, accessToken, meta);
+          return wrap({
+            deleted: true,
+            verified: true,
+            verifiedId: targetId,
+            tombstoned: true,
+            id: targetId,
+            sheetName: "Portfolio",
+          });
+        }
       }
 
       // Row numbers can shift while another write is in flight. Only use them

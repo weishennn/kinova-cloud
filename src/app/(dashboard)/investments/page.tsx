@@ -13,7 +13,7 @@ import { usePortfolio, useTrades, useAddTrade, useUpdateRow, useDeleteRow } from
 import { clearAllSwrCache, setSwrCachedData } from '@/lib/sheets-api';
 import { runSerializedSheetMutation } from '@/lib/sheets-data';
 import { discardPendingMoomooDeletes } from '@/lib/cache-manager';
-import { clearDeletedTombstone } from '@/lib/data-integrity';
+import { clearDeletedTombstone, recordDeletedTombstone } from '@/lib/data-integrity';
 import { 
   convertCurrency, 
   formatAssetCurrency, 
@@ -883,13 +883,28 @@ export default function InvestmentsPage() {
       const deleteResult = await deleteTradeMutation.mutateAsync({ sheetName: 'Trades', id: trade.id, rowIndex: trade.rowIndex });
       clearAllSwrCache();
 
+      // Ensure durable tombstone for both this trade ID and ticker
+      recordDeletedTombstone(trade.id, 'trade', 'Trades');
+      if (trade.ticker) {
+        recordDeletedTombstone(trade.ticker.toUpperCase(), 'trade', 'Portfolio');
+        recordDeletedTombstone(`moo_holding_${trade.ticker.toLowerCase()}_0`, 'trade', 'Trades');
+      }
+
       if (typeof window !== 'undefined') {
         try {
           const rawP = localStorage.getItem('cashflow_persistent_trades');
           if (rawP) {
             const pTrades = JSON.parse(rawP);
             if (Array.isArray(pTrades)) {
-              const updated = pTrades.filter((t: any) => String(t.Id || t.id || '') !== trade.id);
+              const updated = pTrades.filter((t: any) => {
+                const tId = String(t.Id || t.id || '');
+                if (trade.id && tId === trade.id) return false;
+                const tTicker = String(t.Ticker || t.ticker || '').trim().toUpperCase();
+                if (trade.ticker && tTicker === trade.ticker.toUpperCase() && (trade.id?.startsWith('moo_holding_') || pTrades.length <= 1)) {
+                  return false;
+                }
+                return true;
+              });
               localStorage.setItem('cashflow_persistent_trades', JSON.stringify(updated));
             }
           }
@@ -904,6 +919,9 @@ export default function InvestmentsPage() {
         const nextRows = oldRows.filter((r: any) => {
           const rId = String(r.Id || r.id || '');
           if (trade.id && rId) return rId !== trade.id;
+          if (trade.id?.startsWith('moo_holding_') && String(r.Ticker || r.ticker || '').trim().toUpperCase() === trade.ticker.toUpperCase()) {
+            return false;
+          }
           if (typeof trade.rowIndex === 'number' && typeof r._rowIndex === 'number') {
             return r._rowIndex !== trade.rowIndex;
           }
@@ -912,9 +930,17 @@ export default function InvestmentsPage() {
         return Array.isArray(old) ? nextRows : { ...old, rows: nextRows };
       });
 
+      // Optimistically remove holding from portfolio query cache so it doesn't resurrect fallback trades
+      queryClient.setQueryData(['portfolio'], (old: any) => {
+        if (!Array.isArray(old)) return old;
+        return old.filter((h: any) => String(h.ticker || h.Ticker || '').trim().toUpperCase() !== trade.ticker.toUpperCase());
+      });
+
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['portfolio'] }),
         queryClient.refetchQueries({ queryKey: ['portfolio'] }),
+        queryClient.invalidateQueries({ queryKey: ['sheet', 'Trades'] }),
+        queryClient.refetchQueries({ queryKey: ['sheet', 'Trades', 'active'] }),
       ]);
       if (deleteResult.pending) {
         toast.info('Trade deletion is queued and will finish syncing when Drive is available.');

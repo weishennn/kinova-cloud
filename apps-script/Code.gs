@@ -1277,6 +1277,55 @@ function deleteRow(sheetName, rowIndex, id, mutationId) {
       }
     }
 
+    // Special handling for synthetic holding trades (e.g. moo_holding_spcx_0) or deleting holding directly
+    let holdingTicker = '';
+    if (targetId.indexOf('moo_holding_') === 0) {
+      const parts = targetId.replace('moo_holding_', '').split('_');
+      holdingTicker = parts[0].toUpperCase();
+    } else if (sheetName === 'Portfolio') {
+      holdingTicker = targetId.toUpperCase();
+    }
+
+    if (holdingTicker) {
+      recordTombstone(targetId, 'Trades', mutationId);
+      recordTombstone(holdingTicker, 'Portfolio', mutationId);
+      const portSheet = getSpreadsheet().getSheetByName('Portfolio');
+      if (portSheet && portSheet.getLastRow() > 1) {
+        const portCell = portSheet.getRange(2, 1, portSheet.getLastRow() - 1, 1)
+          .createTextFinder(holdingTicker)
+          .matchCase(false)
+          .matchEntireCell(true)
+          .findNext();
+        if (portCell) {
+          portSheet.deleteRow(portCell.getRow());
+          SpreadsheetApp.flush();
+        }
+      }
+      const tradeSheet = getSpreadsheet().getSheetByName('Trades');
+      if (tradeSheet && tradeSheet.getLastRow() > 1) {
+        const lastRow = tradeSheet.getLastRow();
+        const tickers = tradeSheet.getRange(2, 4, lastRow - 1, 1).getValues();
+        for (let r = tickers.length - 1; r >= 0; r--) {
+          if (String(tickers[r][0] || '').trim().toUpperCase() === holdingTicker) {
+            tradeSheet.deleteRow(r + 2);
+          }
+        }
+        SpreadsheetApp.flush();
+      }
+      syncPortfolioFromTrades();
+      syncAllSheets();
+      const holdResult = {
+        deleted: true,
+        verified: true,
+        verifiedId: targetId,
+        tombstoned: true,
+        id: targetId,
+        sheetName: 'Portfolio',
+      };
+      if (mutationId) recordMutationInLedger(mutationId, holdResult);
+      return holdResult;
+    }
+
     // Row with this ID is already absent (e.g. retried delete after timeout). Ensure tombstone exists and return verified idempotent success!
     recordTombstone(targetId, sheetName || 'Transactions', mutationId);
     if (sheetName === 'Trades') {

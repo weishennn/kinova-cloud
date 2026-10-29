@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tansta
 import { sheetsApi, getApiUrl, getSwrCachedEntry, setSwrCachedData, clearAllSwrCache } from '@/lib/sheets-api';
 import { syncAllGoogleSheets } from '@/lib/sync-engine';
 import { sheetsData, collectLocallyKnownMonths } from '@/lib/sheets-data';
+import { isRecordTombstoned } from '@/lib/data-integrity';
 
 export function shouldUseGoogleSheets(): boolean {
   return !!getApiUrl();
@@ -222,19 +223,22 @@ export function usePortfolio() {
 
       holdingsList = Object.values(holdings).filter(row => Number(row['Units Held'] || row.units) > 0);
 
-      // Fallback and reconcile with raw Portfolio tab so holdings (like SPCX) never disappear
+      // Fallback and reconcile with raw Portfolio tab so holdings (like SPCX) never disappear unless explicitly deleted
       try {
         const res = await sheetsApi.getPortfolio();
         const sheetHoldings = Array.isArray(res?.data) ? res.data : [];
         if (holdingsList.length === 0 && sheetHoldings.length > 0) {
-          holdingsList = sheetHoldings;
+          holdingsList = sheetHoldings.filter((sh) => {
+            const sym = String(sh.ticker || sh.Ticker || '').trim().toUpperCase();
+            return !isRecordTombstoned(sym) && !isRecordTombstoned(`moo_holding_${sym.toLowerCase()}_0`);
+          });
         } else if (sheetHoldings.length > 0) {
           const existingTickers = new Set(
             holdingsList.map((h) => String(h.Ticker || h.ticker || '').trim().toUpperCase())
           );
           for (const sh of sheetHoldings) {
             const sym = String(sh.ticker || sh.Ticker || '').trim().toUpperCase();
-            if (sym && !existingTickers.has(sym)) {
+            if (sym && !existingTickers.has(sym) && !isRecordTombstoned(sym) && !isRecordTombstoned(`moo_holding_${sym.toLowerCase()}_0`)) {
               holdingsList.push(sh);
               existingTickers.add(sym);
             }
@@ -362,16 +366,23 @@ export function useTrades() {
         if (stored) {
           const parsed = JSON.parse(stored);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            return {
-              ...query,
-              data: {
-                headers: [
-                  'Id', 'Date', 'Action', 'Ticker', 'Asset Name',
-                  'Quantity', 'Price', 'Fees', 'Net Total', 'Currency', 'Notes',
-                ],
-                rows: parsed,
-              },
-            };
+            const valid = parsed.filter((t: any) => {
+              const tId = String(t.Id || t.id || '');
+              const sym = String(t.Ticker || t.ticker || '').trim().toUpperCase();
+              return !isRecordTombstoned(tId) && !isRecordTombstoned(sym);
+            });
+            if (valid.length > 0) {
+              return {
+                ...query,
+                data: {
+                  headers: [
+                    'Id', 'Date', 'Action', 'Ticker', 'Asset Name',
+                    'Quantity', 'Price', 'Fees', 'Net Total', 'Currency', 'Notes',
+                  ],
+                  rows: valid,
+                },
+              };
+            }
           }
         }
       } catch {
@@ -380,7 +391,12 @@ export function useTrades() {
     }
 
     // Defensive fallback: if Trades query returned 0 rows but Portfolio has active holdings
-    const holdings = Array.isArray(portfolioQuery.data) ? portfolioQuery.data : [];
+    const holdings = Array.isArray(portfolioQuery.data)
+      ? portfolioQuery.data.filter((h: any) => {
+          const sym = String(h.Ticker || h.ticker || '').trim().toUpperCase();
+          return !isRecordTombstoned(sym) && !isRecordTombstoned(`moo_holding_${sym.toLowerCase()}_0`);
+        })
+      : [];
     if (holdings.length > 0) {
       const fallbackTrades = holdings.map((h: any, idx: number) => {
         const ticker = String(h.Ticker || h.ticker || '').trim().toUpperCase();

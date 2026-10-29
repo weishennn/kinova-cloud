@@ -1,5 +1,6 @@
 import { sheetsApi } from '@/lib/sheets-api';
 import { sheetsData } from '@/lib/sheets-data';
+import { isRecordTombstoned } from '@/lib/data-integrity';
 
 export interface SyncResult {
   success: boolean;
@@ -62,7 +63,14 @@ export async function syncAllGoogleSheets(): Promise<SyncResult> {
       if (stored) {
         const trades = JSON.parse(stored);
         if (Array.isArray(trades) && trades.length > 0) {
-          await sheetsApi.batchSyncTrades(trades).catch(() => null);
+          const validTrades = trades.filter((t: any) => {
+            const tId = String(t.Id || t.id || '');
+            const sym = String(t.Ticker || t.ticker || '').trim().toUpperCase();
+            return !isRecordTombstoned(tId) && !isRecordTombstoned(sym);
+          });
+          if (validTrades.length > 0) {
+            await sheetsApi.batchSyncTrades(validTrades).catch(() => null);
+          }
         }
       }
     } catch {
