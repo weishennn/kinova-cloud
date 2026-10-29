@@ -154,55 +154,94 @@ export function usePortfolio() {
 
         const current = holdings[ticker] || {
           Ticker: ticker,
+          ticker,
           'Asset Name': String(row['Asset Name'] || row.AssetName || row.name || ticker),
+          name: String(row['Asset Name'] || row.AssetName || row.name || ticker),
           Type: String(row.Type || row.type || 'US Stock'),
+          type: String(row.Type || row.type || 'US Stock'),
           Currency: String(row.Currency || row.currency || 'USD'),
+          currency: String(row.Currency || row.currency || 'USD'),
           'Units Held': 0,
+          units: 0,
           'Total Cost': 0,
+          totalCost: 0,
           'Total Cost MYR': 0,
+          totalCostMyr: 0,
           'Live Price': price,
+          livePrice: price,
         };
-        const units = Number(current['Units Held']) || 0;
-        const totalCost = Number(current['Total Cost']) || 0;
-        const totalCostMyr = Number(current['Total Cost MYR']) || 0;
+        const units = Number(current['Units Held'] || current.units) || 0;
+        const totalCost = Number(current['Total Cost'] || current.totalCost) || 0;
+        const totalCostMyr = Number(current['Total Cost MYR'] || current.totalCostMyr) || 0;
         const tradeCostMyr = Number(row.CostInMyr || row.costInMyr || 0) || (current.Currency === 'MYR' ? (quantity * price + fees) : 0);
         const tradeRateToMyr = Number(row.RateToMyr || row.rateToMyr || 0);
 
         current['Live Price'] = price || current['Live Price'];
+        current.livePrice = price || current.livePrice;
 
         const rowNotes = String(row.Notes || row.notes || '').toLowerCase();
         const isReinvested = Boolean(row.isReinvested || row.IsReinvested || action === 'REINVEST' || (action === 'DIVIDEND' && (rowNotes.includes('reinvest') || rowNotes.includes('drip'))));
 
         if (action === 'BUY' || isReinvested) {
-          current['Units Held'] = units + quantity;
-          current['Total Cost'] = totalCost + quantity * price + fees;
-          current['Total Cost MYR'] = totalCostMyr + tradeCostMyr;
+          const nextU = units + quantity;
+          const nextTC = totalCost + quantity * price + fees;
+          const nextTCM = totalCostMyr + tradeCostMyr;
+          current['Units Held'] = nextU;
+          current.units = nextU;
+          current['Total Cost'] = nextTC;
+          current.totalCost = nextTC;
+          current['Total Cost MYR'] = nextTCM;
+          current.totalCostMyr = nextTCM;
           if (tradeRateToMyr > 0) current['RateToMyr'] = tradeRateToMyr;
         } else if (action === 'SELL') {
           const averageCost = units > 0 ? totalCost / units : 0;
           const averageCostMyr = units > 0 ? totalCostMyr / units : 0;
-          current['Units Held'] = Math.max(0, units - quantity);
-          current['Total Cost'] = Math.max(0, totalCost - quantity * averageCost);
-          current['Total Cost MYR'] = Math.max(0, totalCostMyr - quantity * averageCostMyr);
+          const nextU = Math.max(0, units - quantity);
+          const nextTC = Math.max(0, totalCost - quantity * averageCost);
+          const nextTCM = Math.max(0, totalCostMyr - quantity * averageCostMyr);
+          current['Units Held'] = nextU;
+          current.units = nextU;
+          current['Total Cost'] = nextTC;
+          current.totalCost = nextTC;
+          current['Total Cost MYR'] = nextTCM;
+          current.totalCostMyr = nextTCM;
         }
-        const nextUnits = Number(current['Units Held']) || 0;
-        current['Avg Cost'] = nextUnits > 0 ? Number(current['Total Cost']) / nextUnits : 0;
-        current['Avg Cost MYR'] = nextUnits > 0 && Number(current['Total Cost MYR']) > 0 ? Number(current['Total Cost MYR']) / nextUnits : 0;
-        current['Market Value'] = nextUnits * (Number(current['Live Price']) || 0);
+        const nextUnits = Number(current['Units Held'] || current.units) || 0;
+        const avgCost = nextUnits > 0 ? Number(current['Total Cost']) / nextUnits : 0;
+        const avgCostMyr = nextUnits > 0 && Number(current['Total Cost MYR']) > 0 ? Number(current['Total Cost MYR']) / nextUnits : 0;
+        const marketValue = nextUnits * (Number(current['Live Price']) || 0);
+
+        current['Avg Cost'] = avgCost;
+        current.avgCost = avgCost;
+        current['Avg Cost MYR'] = avgCostMyr;
+        current.avgCostMyr = avgCostMyr;
+        current['Market Value'] = marketValue;
+        current.marketValue = marketValue;
         holdings[ticker] = current;
       });
 
-      holdingsList = Object.values(holdings).filter(row => Number(row['Units Held']) > 0);
+      holdingsList = Object.values(holdings).filter(row => Number(row['Units Held'] || row.units) > 0);
 
-      // Only fallback to raw Portfolio tab if Trades sheet has never been created or loaded.
-      // If Trades sheet exists (even with 0 rows after trade deletion), do not resurrect ghost holdings!
-      const hasTradesSheet = Boolean(tradesRes && Array.isArray(tradesRes.rows) && tradesRes.headers && tradesRes.headers.length > 0);
-      if (holdingsList.length === 0 && !hasTradesSheet) {
-        // Fallback for Google Sheets Direct Mode Portfolio tab
+      // Fallback and reconcile with raw Portfolio tab so holdings (like SPCX) never disappear
+      try {
         const res = await sheetsApi.getPortfolio();
-        if (res.data && res.data.length > 0) {
-          holdingsList = res.data;
+        const sheetHoldings = Array.isArray(res?.data) ? res.data : [];
+        if (holdingsList.length === 0 && sheetHoldings.length > 0) {
+          holdingsList = sheetHoldings;
+        } else if (sheetHoldings.length > 0) {
+          const existingTickers = new Set(
+            holdingsList.map((h) => String(h.Ticker || h.ticker || '').trim().toUpperCase())
+          );
+          for (const sh of sheetHoldings) {
+            const sym = String(sh.ticker || sh.Ticker || '').trim().toUpperCase();
+            if (sym && !existingTickers.has(sym)) {
+              holdingsList.push(sh);
+              existingTickers.add(sym);
+            }
+          }
         }
+      } catch (err) {
+        console.warn('Portfolio fallback notice:', err);
       }
 
       // Enrich with real-time live quotes with generous 6s timeout and sheets fallback

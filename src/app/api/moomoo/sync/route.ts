@@ -241,45 +241,75 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const primaryAcc = realAccounts[0];
-    const accId = String(primaryAcc.account_id || '');
-
     const nowMs = Date.now();
     const beginTimeMicroseconds = (nowMs - 365 * 24 * 60 * 60 * 1000) * 1000;
     const endTimeMicroseconds = (nowMs + 24 * 60 * 60 * 1000) * 1000;
 
-    // 2. Fetch positions, orders, cash logs, and funds in parallel
-    const [posRes, ordersUsRes, cashLogsRes, fundsUsdRes, fundsMyrRes] = await Promise.all([
-      callMoomooApi<any>(`/api/v1.0/accounts/${accId}/positions`, { method: 'GET', config }),
-      callMoomooApi<any>(`/api/v1.0/accounts/${accId}/orders_history`, {
-        method: 'GET',
-        params: { trd_market: 'US' },
-        config,
-      }),
-      callMoomooApi<any>(`/api/v1.0/accounts/${accId}/cash_logs`, {
-        method: 'GET',
-        params: {
-          begin_time: beginTimeMicroseconds,
-          end_time: endTimeMicroseconds,
-          page_size: 20,
-        },
-        config,
-      }),
-      callMoomooApi<any>(`/api/v1.0/accounts/${accId}/funds`, {
-        method: 'GET',
-        params: { currency: 'USD' },
-        config,
-      }),
-      callMoomooApi<any>(`/api/v1.0/accounts/${accId}/funds`, {
-        method: 'GET',
-        params: { currency: 'MYR' },
-        config,
-      }),
-    ]);
+    // 2. Fetch positions, orders, cash logs, and funds across all authorized accounts
+    const positionsList: any[] = [];
+    const ordersList: any[] = [];
+    const cashLogsList: any[] = [];
+    let fundsUsdRes: any = null;
+    let fundsMyrRes: any = null;
 
-    const cashLogsList = cashLogsRes?.data?.d?.list || [];
-    const ordersList = ordersUsRes?.data?.d?.orders || [];
-    const positionsList = posRes?.data?.d || [];
+    for (const acc of realAccounts) {
+      const accId = String(acc.account_id || '');
+      if (!accId) continue;
+
+      const [posRes, ordersUsRes, ordersMyRes, cashLogsRes, fUsd, fMyr] = await Promise.all([
+        callMoomooApi<any>(`/api/v1.0/accounts/${accId}/positions`, { method: 'GET', config }).catch(() => null),
+        callMoomooApi<any>(`/api/v1.0/accounts/${accId}/orders_history`, {
+          method: 'GET',
+          params: { trd_market: 'US', begin_time: beginTimeMicroseconds, end_time: endTimeMicroseconds },
+          config,
+        }).catch(() => null),
+        callMoomooApi<any>(`/api/v1.0/accounts/${accId}/orders_history`, {
+          method: 'GET',
+          params: { trd_market: 'MY', begin_time: beginTimeMicroseconds, end_time: endTimeMicroseconds },
+          config,
+        }).catch(() => null),
+        callMoomooApi<any>(`/api/v1.0/accounts/${accId}/cash_logs`, {
+          method: 'GET',
+          params: {
+            begin_time: beginTimeMicroseconds,
+            end_time: endTimeMicroseconds,
+            page_size: 100,
+          },
+          config,
+        }).catch(() => null),
+        callMoomooApi<any>(`/api/v1.0/accounts/${accId}/funds`, {
+          method: 'GET',
+          params: { currency: 'USD' },
+          config,
+        }).catch(() => null),
+        callMoomooApi<any>(`/api/v1.0/accounts/${accId}/funds`, {
+          method: 'GET',
+          params: { currency: 'MYR' },
+          config,
+        }).catch(() => null),
+      ]);
+
+      if (fUsd?.data?.d) fundsUsdRes = fUsd;
+      if (fMyr?.data?.d) fundsMyrRes = fMyr;
+
+      const rawPos =
+        posRes?.data?.d?.positions ||
+        posRes?.data?.d?.list ||
+        posRes?.data?.positions ||
+        posRes?.data?.list ||
+        posRes?.data?.d ||
+        [];
+      if (Array.isArray(rawPos)) positionsList.push(...rawPos);
+
+      const rawOrdersUs = ordersUsRes?.data?.d?.orders || ordersUsRes?.data?.d?.list || ordersUsRes?.data?.orders || [];
+      if (Array.isArray(rawOrdersUs)) ordersList.push(...rawOrdersUs);
+
+      const rawOrdersMy = ordersMyRes?.data?.d?.orders || ordersMyRes?.data?.d?.list || ordersMyRes?.data?.orders || [];
+      if (Array.isArray(rawOrdersMy)) ordersList.push(...rawOrdersMy);
+
+      const rawCashLogs = cashLogsRes?.data?.d?.list || cashLogsRes?.data?.d?.cash_logs || cashLogsRes?.data?.list || [];
+      if (Array.isArray(rawCashLogs)) cashLogsList.push(...rawCashLogs);
+    }
 
     // 3. Read existing Trades from Google Sheets
     const rawExistingRows = await getExistingTrades(session);
@@ -288,13 +318,25 @@ export async function POST(req: NextRequest) {
     let skippedTrades = 0;
     const allSyncedTrades: Array<Record<string, unknown>> = [...rawExistingRows];
 
-    // Build fee lookup map from cash logs: { symbol -> total fee }
+    // Build fee lookup map from cash logs: by clean symbol & by order_id
     const feeBySymbol: Record<string, number> = {};
+    const feeByOrderId: Record<string, number> = {};
+
     for (const log of cashLogsList) {
-      if (log.transaction_name === 'Stock Buy Fee' && log.symbol) {
-        const sym = log.symbol.toUpperCase();
+      const isFee =
+        /fee|commission|charges|佣金|费用|收费/i.test(String(log.transaction_name || '')) ||
+        String(log.transaction_type || '').toLowerCase().includes('fee');
+
+      if (isFee) {
         const feeAmount = Math.abs(parseFloat(log.cash_change || '0'));
-        feeBySymbol[sym] = (feeBySymbol[sym] || 0) + feeAmount;
+        if (log.symbol) {
+          const sym = String(log.symbol).replace(/^(US\.|HK\.|MY\.)/, '').trim().toUpperCase();
+          feeBySymbol[sym] = (feeBySymbol[sym] || 0) + feeAmount;
+        }
+        if (log.order_id) {
+          const oId = String(log.order_id).trim();
+          feeByOrderId[oId] = (feeByOrderId[oId] || 0) + feeAmount;
+        }
       }
     }
 
@@ -306,8 +348,8 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      const rawCode = String(order.code || '');
-      const ticker = rawCode.replace(/^(US\.|HK\.|MY\.)/, '').toUpperCase();
+      const rawCode = String(order.code || order.symbol || '');
+      const ticker = rawCode.replace(/^(US\.|HK\.|MY\.)/, '').trim().toUpperCase();
       const orderId = String(order.order_id || '');
       const orderDate = parseMoomooDate(order.create_time || order.updated_time || order.time);
 
@@ -334,8 +376,12 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      // Approximate or lookup fee
-      const fees = feeBySymbol[ticker] || 0.50;
+      // Extract accurate fee from order directly or lookup from cash logs
+      const orderFee = Math.abs(
+        parseFloat(order.dealt_fee || order.fee || order.fees || order.total_fee || order.commission || '0')
+      );
+      const logFee = (orderId && feeByOrderId[orderId]) ? feeByOrderId[orderId] : (feeBySymbol[ticker] || 0);
+      const fees = orderFee > 0 ? orderFee : logFee > 0 ? logFee : 0;
       const netTotal = parseFloat((qty * price + fees).toFixed(2));
       const tradeId = `moo_${orderId || Date.now().toString(36)}_${Date.now().toString(36)}`;
 
@@ -359,19 +405,17 @@ export async function POST(req: NextRequest) {
 
     // If an older holding exists in positions (e.g. SPCX) that wasn't in the recent orders list:
     for (const pos of positionsList) {
-      const rawCode = String(pos.code || '');
-      const ticker = rawCode.replace(/^(US\.|HK\.|MY\.)/, '').toUpperCase();
-      const posQty = parseFloat(pos.qty || '0');
+      const rawCode = String(pos.code || pos.symbol || '');
+      const ticker = rawCode.replace(/^(US\.|HK\.|MY\.)/, '').trim().toUpperCase();
+      const posQty = parseFloat(pos.qty || pos.can_sell_qty || '0');
       if (posQty <= 0) continue;
 
       // Check if this ticker is already covered by ANY trade (either in rawExistingRows or filled ordersList or tradesToSync)
       const hasExistingTradeForTicker = rawExistingRows.some(
         (r) => String(r.Ticker || '').toUpperCase() === ticker
       );
-      const hasOrderForTicker = ordersList.some(
-        (o: any) =>
-          (o.order_status === 'FILLED_ALL' || o.order_status === 'FILLED_PART') &&
-          String(o.code || '').replace(/^(US\.|HK\.|MY\.)/, '').toUpperCase() === ticker
+      const hasOrderForTicker = tradesToSync.some(
+        (t) => String(t.Ticker || '').toUpperCase() === ticker
       );
 
       if (hasExistingTradeForTicker || hasOrderForTicker) {
@@ -379,16 +423,20 @@ export async function POST(req: NextRequest) {
       }
 
       // Find execution in cash logs
-      const buyExec = cashLogsList.find(
-        (c: any) => c.symbol === ticker && c.transaction_name === 'Stock Buy Execution'
-      );
-      const buyFee = cashLogsList.find(
-        (c: any) => c.symbol === ticker && c.transaction_name === 'Stock Buy Fee'
-      );
+      const buyExec = cashLogsList.find((c: any) => {
+        const sym = String(c.symbol || '').replace(/^(US\.|HK\.|MY\.)/, '').trim().toUpperCase();
+        return sym === ticker && /buy|execution|买入/i.test(String(c.transaction_name || ''));
+      });
+      const buyFee = cashLogsList.find((c: any) => {
+        const sym = String(c.symbol || '').replace(/^(US\.|HK\.|MY\.)/, '').trim().toUpperCase();
+        return sym === ticker && /fee|commission|佣金/i.test(String(c.transaction_name || ''));
+      });
 
-      const tradeDate = buyExec ? parseMoomooDate(buyExec.created_time) : '2026-06-13';
-      const price = parseFloat(pos.cost_price || '0');
-      const fees = buyFee ? Math.abs(parseFloat(buyFee.cash_change || '0')) : 0.47;
+      const tradeDate = buyExec
+        ? parseMoomooDate(buyExec.created_time)
+        : (pos.open_date ? parseMoomooDate(pos.open_date) : '2026-06-13');
+      const price = parseFloat(pos.cost_price || pos.nominal_price || '0');
+      const fees = buyFee ? Math.abs(parseFloat(buyFee.cash_change || '0')) : (feeBySymbol[ticker] || 0);
       const netTotal = parseFloat((posQty * price + fees).toFixed(2));
       const posTradeId = `moo_pos_${ticker.toLowerCase()}_${Date.now().toString(36)}`;
 
@@ -402,7 +450,7 @@ export async function POST(req: NextRequest) {
         Price: price,
         Fees: fees,
         'Net Total': netTotal,
-        Currency: 'USD',
+        Currency: String(pos.currency || 'USD').toUpperCase(),
         Notes: `Moomoo Auto-Sync Holding (${ticker})`,
       };
 
@@ -486,22 +534,33 @@ export async function POST(req: NextRequest) {
       resolvedPortfolio = positionsList
         .filter((p: any) => parseFloat(p.qty || '0') > 0)
         .map((p: any) => {
-          const rawCode = String(p.code || '');
-          const ticker = rawCode.replace(/^(US\.|HK\.|MY\.)/, '').toUpperCase();
-          const units = parseFloat(p.qty || '0');
+          const rawCode = String(p.code || p.symbol || '');
+          const ticker = rawCode.replace(/^(US\.|HK\.|MY\.)/, '').trim().toUpperCase();
+          const units = parseFloat(p.qty || p.can_sell_qty || '0');
           const avgCost = parseFloat(p.cost_price || '0');
           const livePrice = parseFloat(p.nominal_price || p.cost_price || '0');
           return {
+            ticker,
             Ticker: ticker,
+            name: String(p.stock_name || ticker),
             'Asset Name': String(p.stock_name || ticker),
+            type: 'Stock',
             Type: 'Stock',
-            Currency: 'USD',
+            currency: String(p.currency || 'USD').toUpperCase(),
+            Currency: String(p.currency || 'USD').toUpperCase(),
+            units,
             'Units Held': units,
+            avgCost,
             'Avg Cost': avgCost,
+            totalCost: parseFloat((units * avgCost).toFixed(2)),
             'Total Cost': parseFloat((units * avgCost).toFixed(2)),
+            livePrice,
             'Live Price': livePrice,
+            marketValue: parseFloat((units * livePrice).toFixed(2)),
             'Market Value': parseFloat((units * livePrice).toFixed(2)),
+            pnl: parseFloat(((units * livePrice) - (units * avgCost)).toFixed(2)),
             'Profit / Loss': parseFloat(((units * livePrice) - (units * avgCost)).toFixed(2)),
+            returnPercent: avgCost > 0 ? parseFloat((((livePrice - avgCost) / avgCost) * 100).toFixed(2)) : 0,
             'Return %': avgCost > 0 ? parseFloat((((livePrice - avgCost) / avgCost) * 100).toFixed(2)) : 0,
           };
         });
