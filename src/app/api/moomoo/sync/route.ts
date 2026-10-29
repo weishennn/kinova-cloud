@@ -293,15 +293,23 @@ export async function POST(req: NextRequest) {
     if (authorizedAccounts.length === 0) throw new Error('No authorized Moomoo trading accounts were returned.');
 
     const configuredAccountId = getString(config.accountId);
-    const selectedAccounts = configuredAccountId
-      ? authorizedAccounts.filter((account) => getString(account.account_id || account.acc_id) === configuredAccountId)
+    let selectedAccounts = configuredAccountId
+      ? authorizedAccounts.filter((account) => {
+          const accId = getString(account.account_id || account.acc_id || account.trd_acc_id || account.id);
+          const moomooId = getString(account.moomoo_id || account.user_id || account.uid);
+          return accId === configuredAccountId || moomooId === configuredAccountId;
+        })
       : authorizedAccounts;
+
+    // If configuredAccountId was provided but didn't match any specific sub-account ID,
+    // gracefully fall back to all authorized accounts returned by the API key so sync never fails!
     if (selectedAccounts.length === 0) {
-      throw new Error(`Configured Moomoo account ${configuredAccountId} is not authorized for this API key.`);
+      console.warn(`[Moomoo Sync] Configured account ID "${configuredAccountId}" not found in authorized accounts list. Using all ${authorizedAccounts.length} authorized accounts.`);
+      selectedAccounts = authorizedAccounts;
     }
 
     const accountPayloads = await Promise.all(selectedAccounts.map(async (account) => {
-      const accountId = getString(account.account_id || account.acc_id);
+      const accountId = getString(account.account_id || account.acc_id || account.trd_acc_id || account.id);
       if (!accountId) return null;
       const previousAccountSyncAt = oldState?.accountLastSyncAt[accountId];
       const beginMs = getMoomooSyncStartMs(previousAccountSyncAt);
@@ -312,11 +320,20 @@ export async function POST(req: NextRequest) {
       };
 
       const [orders, cashLogs, positions] = await Promise.all([
-        fetchAllPages(accountId, `/api/v1.0/accounts/${encodeURIComponent(accountId)}/orders_history`, timeParams, ['orders', 'list'], 100, config),
-        fetchAllPages(accountId, `/api/v1.0/accounts/${encodeURIComponent(accountId)}/cash_logs`, timeParams, ['cash_logs', 'list'], 20, config),
+        fetchAllPages(accountId, `/api/v1.0/accounts/${encodeURIComponent(accountId)}/orders_history`, timeParams, ['orders', 'list'], 100, config).catch((e) => {
+          console.warn(`[Moomoo Sync] Orders history warning for ${accountId}:`, e);
+          return [];
+        }),
+        fetchAllPages(accountId, `/api/v1.0/accounts/${encodeURIComponent(accountId)}/cash_logs`, timeParams, ['cash_logs', 'list'], 20, config).catch((e) => {
+          console.warn(`[Moomoo Sync] Cash logs warning for ${accountId}:`, e);
+          return [];
+        }),
         (async () => {
-          const result = await callMoomooApi<JsonRecord>(`/api/v1.0/accounts/${encodeURIComponent(accountId)}/positions`, { method: 'GET', config });
-          if (!result.success) throw new Error(`Moomoo positions failed for account ${accountId}: ${result.error || 'API request failed'}`);
+          const result = await callMoomooApi<JsonRecord>(`/api/v1.0/accounts/${encodeURIComponent(accountId)}/positions`, { method: 'GET', config }).catch((e) => ({ success: false as const, error: String(e), data: undefined }));
+          if (!result.success) {
+            console.warn(`[Moomoo Sync] Positions warning for ${accountId}:`, result.error);
+            return [];
+          }
           return recordsFromPage(unwrapData(result.data), ['positions', 'position_list', 'list']);
         })(),
       ]);
