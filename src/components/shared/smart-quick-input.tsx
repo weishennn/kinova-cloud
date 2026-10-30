@@ -910,50 +910,12 @@ export function SmartQuickInput() {
     }
   };
 
+  // Reset assistant error when input is cleared
   useEffect(() => {
-    const trimmed = input.trim();
-    if (!trimmed || trimmed.length < 2 || isScanningReceipt || receiptAttachment) {
-      setIsAssistantThinking(false);
+    if (!input.trim()) {
       setAssistantError(null);
-      return;
     }
-
-    const isQuestionOrAdvice =
-      /\b(?:can i afford|should i|worth it|is this expensive|am i over budget|budget|advice|recommend|tax relief|trip|install|trade|stock|buy|sell)\b/i.test(
-        trimmed
-      ) || /(?:能不能买|值得吗|怎么看|贵不贵|超支|建议|税务减免|扣税|分期|买入|卖出|预算|旅行)/.test(trimmed);
-
-    if (
-      localRoute?.mode === 'quick_parse' &&
-      !isQuestionOrAdvice &&
-      !/\b(?:tax|before tax|after tax|sst|relief)\b/i.test(trimmed)
-    ) {
-      setIsAssistantThinking(false);
-      setAssistantError(null);
-      return;
-    }
-
-    if (localRoute && localRoute.mode !== 'quick_parse' && !isQuestionOrAdvice) {
-      setIsAssistantThinking(false);
-      setAssistantError(null);
-      return;
-    }
-
-    setIsAssistantThinking(true);
-    setAssistantError(null);
-
-    const timer = setTimeout(() => {
-      void triggerAssistantTurn(trimmed);
-    }, 400);
-
-    return () => clearTimeout(timer);
-  }, [input, isScanningReceipt, receiptAttachment, localRoute, triggerAssistantTurn]);
-
-  const handleAiParse = async () => {
-    const trimmed = input.trim();
-    if (trimmed.length < 4 || isAiParsing) return;
-    await triggerAssistantTurn(trimmed);
-  };
+  }, [input]);
 
   const handleReceiptScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1145,7 +1107,16 @@ export function SmartQuickInput() {
 
   const handleQuickSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!activeCommand || isSubmitting) return;
+    if (isSubmitting || isAssistantThinking) return;
+
+    // If no local transaction command is resolved, send to Kinova Assistant
+    if (!activeCommand) {
+      const trimmed = input.trim();
+      if (trimmed) {
+        await triggerAssistantTurn(trimmed);
+      }
+      return;
+    }
 
     if (activeCommand.intent !== 'transaction') {
       if (!activeCommand.data) {
@@ -1470,6 +1441,8 @@ export function SmartQuickInput() {
                 setAiParsed(null);
                 setIsAiEnhanced(false);
                 setScanError('');
+                setAssistantResult(null);
+                setAssistantError(null);
               }
             }}
             onKeyDown={(e) => {
@@ -1532,20 +1505,43 @@ export function SmartQuickInput() {
             e.stopPropagation();
             void handleQuickSubmit(e);
           }}
-          disabled={!activeCommand || isSubmitting}
+          disabled={(!activeCommand && !input.trim()) || isSubmitting || isAssistantThinking}
           whileTap={{ scale: 0.95 }}
           className={`h-11 px-4 rounded-2xl flex items-center gap-1.5 text-xs font-semibold shadow-md transition-all shrink-0 cursor-pointer ${
-            activeCommand && !isSubmitting
+            (activeCommand || input.trim()) && !isSubmitting && !isAssistantThinking
               ? 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white dark:text-white shadow-indigo-500/25 hover:from-indigo-400 hover:to-purple-500'
               : 'bg-slate-100 dark:bg-zinc-800/50 text-slate-500 dark:text-zinc-400 border border-slate-200 dark:border-white/5 cursor-not-allowed'
           }`}
         >
-          {isSubmitting ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
+          {isSubmitting || isAssistantThinking ? (
+            <div className="flex items-center gap-1.5">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>{isSubmitting ? 'Saving...' : 'Thinking...'}</span>
+            </div>
           ) : (
             <>
-              <span>{receiptAttachment ? 'Save' : 'Record'}</span>
-              <CornerDownLeft className="h-3 w-3 opacity-60 hidden sm:inline" />
+              {receiptAttachment ? (
+                <>
+                  <span>Save</span>
+                  <CornerDownLeft className="h-3 w-3 opacity-60 hidden sm:inline" />
+                </>
+              ) : activeCommand ? (
+                <>
+                  <span>Record</span>
+                  <CornerDownLeft className="h-3 w-3 opacity-60 hidden sm:inline" />
+                </>
+              ) : input.trim() ? (
+                <>
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span>Ask Kinova</span>
+                  <CornerDownLeft className="h-3 w-3 opacity-60 hidden sm:inline" />
+                </>
+              ) : (
+                <>
+                  <span>Record</span>
+                  <CornerDownLeft className="h-3 w-3 opacity-60 hidden sm:inline" />
+                </>
+              )}
             </>
           )}
         </motion.button>
@@ -1843,7 +1839,7 @@ export function SmartQuickInput() {
                   type="button"
                   onClick={() => {
                     setInput(opt);
-                    inputRef.current?.focus();
+                    void triggerAssistantTurn(opt);
                   }}
                   className="text-xs px-3 py-1.5 rounded-xl bg-white dark:bg-zinc-900 border border-amber-500/30 font-medium text-slate-800 dark:text-zinc-200 hover:bg-amber-500/20 transition-all cursor-pointer"
                 >
