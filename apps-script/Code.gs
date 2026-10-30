@@ -188,6 +188,8 @@ function doGet(e) {
         const trades = rawTrades ? (typeof rawTrades === 'string' ? JSON.parse(rawTrades) : rawTrades) : [];
         return createResponse(true, withScriptLock(() => batchSyncTrades(trades)));
       }
+      case 'syncMoomooFlows':
+        return createResponse(true, withScriptLock(() => syncMoomooFlowsFromTradeLedger()));
       case 'syncMoomooTrades': {
         const rawTrades = params.trades;
         const trades = rawTrades ? (typeof rawTrades === 'string' ? JSON.parse(rawTrades) : rawTrades) : [];
@@ -318,6 +320,8 @@ function doPost(e) {
         const trades = rawTrades ? (typeof rawTrades === 'string' ? JSON.parse(rawTrades) : rawTrades) : [];
         return createResponse(true, withScriptLock(() => batchSyncTrades(trades)));
       }
+      case 'syncMoomooFlows':
+        return createResponse(true, withScriptLock(() => syncMoomooFlowsFromTradeLedger()));
       case 'syncMoomooTrades': {
         const rawTrades = body.trades !== undefined ? body.trades : params.trades;
         const trades = rawTrades ? (typeof rawTrades === 'string' ? JSON.parse(rawTrades) : rawTrades) : [];
@@ -2861,6 +2865,12 @@ function syncMoomooTrades(incomingTrades, restoreDeletedMoomooTrades, reconcileF
   return Object.assign({ added: addedCount, updated: updatedCount, changes: changes, removedIds: removedIds, restoredTombstones: restoredTombstones, duplicateTradeRowsRemoved: duplicateTradeRows.length }, cashflowResult);
 }
 
+function syncMoomooFlowsFromTradeLedger() {
+  const tradeData = getSheetData('Trades');
+  const result = syncMoomooCashflowRows((tradeData && tradeData.rows) || [], false);
+  return Object.assign({ success: true }, result);
+}
+
 function applyPortfolioTradeDeltas(trades) {
   const portfolioSheet = getSheet('Portfolio');
   const lastRow = portfolioSheet.getLastRow();
@@ -3127,10 +3137,15 @@ function syncAllSheets() {
   // 1. Sync Portfolio from Trades
   syncPortfolioFromTrades();
 
-  // 2. Sanitize categories across all sheets to enforce canonical Food & Dining
+  // 2. Rebuild missing or duplicate Moomoo Flow entries from the cloud Trade
+  // ledger. This makes Google Sheets sync idempotent and prevents local cache
+  // entries from disappearing when the app refreshes.
+  const moomooFlowResult = syncMoomooFlowsFromTradeLedger();
+
+  // 3. Sanitize categories across all sheets to enforce canonical Food & Dining
   sanitizeAllSheetCategories();
   
-  // 3. Sync all months for Overview with dynamic formulas
+  // 4. Sync all months for Overview with dynamic formulas
   const currentYear = new Date().getFullYear();
   for (let m = 1; m <= 12; m++) {
     const monthStr = `${currentYear}-${String(m).padStart(2, '0')}`;
@@ -3143,7 +3158,7 @@ function syncAllSheets() {
     updateOverviewForMonth(m);
   });
 
-  // 3. Ensure Annual Total Row 14 formulas are intact
+  // 5. Ensure Annual Total Row 14 formulas are intact
   const ss = getSpreadsheet();
   const overviewSheet = ss.getSheetByName('Overview');
   if (overviewSheet && overviewSheet.getLastRow() >= 14) {
@@ -3158,7 +3173,7 @@ function syncAllSheets() {
   }
   
   SpreadsheetApp.flush();
-  return { success: true, message: "All sheets synchronized successfully" };
+  return Object.assign({ success: true, message: "All sheets synchronized successfully" }, moomooFlowResult);
 }
 
 function deletePaymentMethodColumn() {

@@ -11,7 +11,7 @@ import dynamic from 'next/dynamic';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePortfolio, useTrades, useAddTrade, useUpdateRow, useDeleteRow } from '@/hooks/useSheets';
 import { clearAllSwrCache, getActiveUserCacheScope, setSwrCachedData } from '@/lib/sheets-api';
-import { runSerializedSheetMutation, sheetsData } from '@/lib/sheets-data';
+import { sheetsData } from '@/lib/sheets-data';
 import { discardPendingMoomooDeletes } from '@/lib/cache-manager';
 import { recordDeletedTombstone } from '@/lib/data-integrity';
 import { 
@@ -371,12 +371,32 @@ export default function InvestmentsPage() {
         // An invalid checkpoint safely falls back to a full-history import.
       }
 
-      const res = await runSerializedSheetMutation('Trades', () => fetch('/api/moomoo/sync', {
+      const flowRepairPromise = forceFullSync
+        ? sheetsData.queueMoomooFlowRepair(existingRows).catch((error) => {
+            console.warn('[Moomoo Sync] Local Flow repair could not be queued:', error);
+            return { success: false, pending: true, result: undefined };
+          })
+        : null;
+      if (forceFullSync) {
+        toast.info('Restoring missing Flow entries from Trade History while checking Moomoo.');
+        void flowRepairPromise?.then((repair) => {
+          if (repair.pending) return;
+          const added = Number(repair.result?.flowAdded) || 0;
+          toast.success(added > 0
+            ? `Restored ${added} missing Moomoo Flow entr${added === 1 ? 'y' : 'ies'} from Trade History.`
+            : 'Moomoo Flow is reconciled with Trade History.');
+        });
+      }
+
+      // This endpoint only reads Moomoo. It no longer writes Sheets, so it can
+      // run in parallel with the durable phone-first Flow repair above.
+      const res = await fetch('/api/moomoo/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fullHistory: forceFullSync, syncState: localSyncState, existingTrades: existingRows }),
-      }));
+      });
       const data = await res.json();
+      if (flowRepairPromise) await flowRepairPromise;
       if (!res.ok || !data.success) {
         toast.error(data.error || 'Failed to sync with Moomoo API');
         return;

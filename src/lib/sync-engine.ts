@@ -1,6 +1,5 @@
 import { sheetsApi } from '@/lib/sheets-api';
 import { sheetsData } from '@/lib/sheets-data';
-import { isRecordTombstoned } from '@/lib/data-integrity';
 
 export interface SyncResult {
   success: boolean;
@@ -56,35 +55,13 @@ export async function syncAllGoogleSheets(): Promise<SyncResult> {
     return { total: 0, succeeded: 0, failed: 0 };
   });
 
-  // 2. Proactively ensure persistent trades are synced to Google Sheets
-  if (typeof window !== 'undefined') {
-    try {
-      const stored = localStorage.getItem('cashflow_persistent_trades');
-      if (stored) {
-        const trades = JSON.parse(stored);
-        if (Array.isArray(trades) && trades.length > 0) {
-          const validTrades = trades.filter((t: any) => {
-            const tId = String(t.Id || t.id || '');
-            const sym = String(t.Ticker || t.ticker || '').trim().toUpperCase();
-            return !isRecordTombstoned(tId) && !isRecordTombstoned(sym);
-          });
-          if (validTrades.length > 0) {
-            await sheetsApi.batchSyncTrades(validTrades).catch(() => null);
-          }
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  // 3. Proactively sanitize all categories across Google Sheets so legacy groceries/food are merged into Food & Dining
+  // 2. Proactively sanitize all categories across Google Sheets so legacy groceries/food are merged into Food & Dining
   await sheetsApi.sanitizeCategories().catch((err) => {
     console.warn('Category sanitization notice:', err);
     return null;
   });
 
-  // 4. Run atomic server-side Portfolio + Overview sync in a single LockService pass
+  // 3. Run server-side Portfolio, Moomoo Flow, and Overview reconciliation.
   try {
     const allRes = await sheetsApi.syncAllSheets();
     if (allRes.success) {

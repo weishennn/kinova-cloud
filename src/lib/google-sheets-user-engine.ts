@@ -2765,6 +2765,20 @@ export async function executeUserGoogleAction(
       return wrap(res);
     }
 
+    case 'syncMoomooFlows': {
+      return withUserDriveMutationLock(spreadsheetId, async () => {
+        const trades = await getTradesWithAutoHeal(spreadsheetId, accessToken, meta);
+        const result = await syncMoomooCashflowRowsUser(
+          spreadsheetId,
+          accessToken,
+          meta,
+          trades.rows,
+          false
+        );
+        return wrap({ success: true, ...result });
+      });
+    }
+
     case 'syncMoomooTrades': {
       const trades = Array.isArray(params.trades) ? (params.trades as Record<string, unknown>[]) : [];
       return withUserDriveMutationLock(spreadsheetId, async () =>
@@ -2939,19 +2953,32 @@ export async function executeUserGoogleAction(
     case 'syncOverview':
     case 'syncAll':
     case 'syncAllSheets': {
-      await syncPortfolioFromTradesUser(spreadsheetId, accessToken, meta);
-      // Auto-sanitize all monthly tabs so Google Sheet charts remain 100% complete
-      const months = getMonthListFromMeta(meta);
-      await Promise.all(
-        months.map(async (mName) => {
-          const values = await readSheetValues(spreadsheetId, accessToken, mName);
-          if (values.length > 1) {
-            await autoSanitizeSheetCategories(spreadsheetId, accessToken, mName, values, getDefaultHeadersForSheet(mName));
-          }
-        })
-      );
-      await syncOverviewSheetForMeta(spreadsheetId, accessToken, meta);
-      return wrap({ success: true, synced: true, message: 'All sheets synchronized successfully' });
+      return withUserDriveMutationLock(spreadsheetId, async () => {
+        await syncPortfolioFromTradesUser(spreadsheetId, accessToken, meta);
+        let moomooFlowResult: Record<string, unknown> = {};
+        if (action === 'syncAll' || action === 'syncAllSheets') {
+          const trades = await getTradesWithAutoHeal(spreadsheetId, accessToken, meta);
+          moomooFlowResult = await syncMoomooCashflowRowsUser(
+            spreadsheetId,
+            accessToken,
+            meta,
+            trades.rows,
+            false
+          );
+        }
+        // Auto-sanitize all monthly tabs so Google Sheet charts remain 100% complete
+        const months = getMonthListFromMeta(meta);
+        await Promise.all(
+          months.map(async (mName) => {
+            const values = await readSheetValues(spreadsheetId, accessToken, mName);
+            if (values.length > 1) {
+              await autoSanitizeSheetCategories(spreadsheetId, accessToken, mName, values, getDefaultHeadersForSheet(mName));
+            }
+          })
+        );
+        await syncOverviewSheetForMeta(spreadsheetId, accessToken, meta);
+        return wrap({ success: true, synced: true, ...moomooFlowResult, message: 'All sheets synchronized successfully' });
+      });
     }
 
     case 'getRecurringCommitments': {

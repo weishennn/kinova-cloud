@@ -670,6 +670,76 @@ export const sheetsData = {
   },
 
   /**
+   * Rebuilds Moomoo Flow entries from the already-saved Trade History before
+   * the slower broker history request starts. The local Flow rows and durable
+   * repair mutation are written before contacting Google Sheets.
+   */
+  async queueMoomooFlowRepair(
+    localTradeRows: SheetRow[]
+  ): Promise<{ success: boolean; pending: boolean; result?: Record<string, unknown> }> {
+    const flows = localTradeRows
+      .filter((trade) => /Moomoo Auto-Sync/i.test(String(trade.Notes || trade.notes || '')))
+      .map(normalizeTradeRow)
+      .map(buildTradeFlowRow)
+      .filter((flow): flow is SheetRow => Boolean(flow) && !isRecordTombstoned(String(flow?.Id || '')));
+
+    const flowRowsByMonth = new Map<string, SheetRow[]>();
+    for (const flow of flows) {
+      const month = String(flow.Date || '').slice(0, 7);
+      if (!/^\d{4}-\d{2}$/.test(month)) continue;
+      ensureMonthInLocalMonthList(month);
+      const rows = flowRowsByMonth.get(month) || [];
+      rows.push({ ...flow, _month: month });
+      flowRowsByMonth.set(month, rows);
+    }
+
+    flowRowsByMonth.forEach((incomingRows, month) => {
+      const entry = getSwrCachedEntry<{ success: boolean; data: SheetDataPayload }>('getSheetData', { sheetName: month });
+      const rows = new Map<string, SheetRow>();
+      for (const row of entry?.data?.data?.rows || []) {
+        const id = String(row.Id || row.id || '').trim();
+        if (id) rows.set(id, row);
+      }
+      for (const flow of incomingRows) rows.set(String(flow.Id), flow);
+      setSwrCachedData('getSheetData', { sheetName: month }, {
+        success: true,
+        data: {
+          headers: entry?.data?.data?.headers || [
+            'Id', 'Date', 'Type', 'Category', 'SubCategory', 'Description',
+            'Amount', 'Currency', 'TripTag', 'ReceiptUrl', 'Notes',
+          ],
+          rows: [...rows.values()],
+        },
+      });
+    });
+
+    const mutationId = `mut_moomoo_flow_repair_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const mutation = enqueuePendingMutation({
+      mutationId,
+      type: 'add',
+      sheetName: 'Trades',
+      rowId: mutationId,
+      rowData: { _queueOperation: 'moomooFlowReconcile', flows },
+    });
+
+    return trackActiveWrite('Trades', async () => {
+      try {
+        const response = await sheetsApi.syncMoomooFlows();
+        if (!response.success) throw new Error(response.message || 'Google Sheets did not confirm the Moomoo Flow repair.');
+        removePendingMutation(mutation.id);
+        const result = response.data?.result && typeof response.data.result === 'object'
+          ? response.data.result as Record<string, unknown>
+          : response.data || {};
+        return { success: true, pending: false, result };
+      } catch (error) {
+        markPendingMutationFailed(mutation.id, error instanceof Error ? error.message : String(error));
+        toast.info('Existing Moomoo Flow entries are saved on this phone. Google Sheets repair is queued.');
+        return { success: true, pending: true };
+      }
+    });
+  },
+
+  /**
    * Stores a Moomoo import and its Flow rows on-device first, then submits one
    * idempotent batch through the existing Sheets sync engine.
    */
@@ -1550,6 +1620,10 @@ export const sheetsData = {
               });
               ok = Boolean(res.success);
               if (!ok && res.message) errMessage = res.message;
+            } else if (item.rowData._queueOperation === 'moomooFlowReconcile') {
+              const res = await sheetsApi.syncMoomooFlows();
+              ok = Boolean(res.success);
+              if (!ok && res.message) errMessage = res.message;
             } else if (item.rowData._queueOperation === 'tradeUpsert') {
               const tradeData = { ...item.rowData };
               delete tradeData._queueOperation;
@@ -1788,6 +1862,16 @@ function applyPendingMutations(rows: SheetRow[], targetSheet?: string): SheetRow
     else result.unshift(pendingFlow);
   };
 
+  const applyPendingFlow = (rawFlow: SheetRow) => {
+    const id = String(rawFlow.Id || rawFlow.id || '').trim();
+    const month = String(rawFlow.Date || rawFlow.date || '').slice(0, 7);
+    if (!id || !month || isRecordTombstoned(id) || !matchesTargetSheet(month, month)) return;
+    const flow = { ...rawFlow, _pendingSync: true, _month: month };
+    const existingIndex = result.findIndex((row) => String(row.Id || row.id || '') === id);
+    if (existingIndex >= 0) result[existingIndex] = { ...result[existingIndex], ...flow };
+    else result.unshift(flow);
+  };
+
   for (const [, inflight] of inFlightOptimisticRows.entries()) {
     const mutDateStr = String(inflight.rowData?.Date || inflight.rowData?.date || '');
     const mutMonth =
@@ -1824,6 +1908,11 @@ function applyPendingMutations(rows: SheetRow[], targetSheet?: string): SheetRow
     if (m.rowData?._queueOperation === 'moomooSyncBatch') {
       const queuedTrades = Array.isArray(m.rowData.trades) ? m.rowData.trades as SheetRow[] : [];
       queuedTrades.forEach(applyPendingTrade);
+      continue;
+    }
+    if (m.rowData?._queueOperation === 'moomooFlowReconcile') {
+      const queuedFlows = Array.isArray(m.rowData.flows) ? m.rowData.flows as SheetRow[] : [];
+      queuedFlows.forEach(applyPendingFlow);
       continue;
     }
     if (m.rowData?._queueOperation === 'tradeUpsert') {

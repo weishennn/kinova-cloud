@@ -251,27 +251,16 @@ export async function POST(req: NextRequest) {
         config
       )));
 
-      const cashLogParams = {
-        begin_time: start,
-        end_time: end,
-      };
-
       const orders = orderPages.flat();
-      const [cashLogs, positions] = await Promise.all([
-        fetchAllPages(accountId, `/api/v1.0/accounts/${encodeURIComponent(accountId)}/cash_logs`, cashLogParams, ['cash_logs', 'list'], 20, config).catch((e) => {
-          console.warn(`[Moomoo Sync] Cash logs warning for ${accountId}:`, e);
+      const positions = await (async () => {
+        const result = await callMoomooApi<JsonRecord>(`/api/v1.0/accounts/${encodeURIComponent(accountId)}/positions`, { method: 'GET', config }).catch((e) => ({ success: false as const, error: String(e), data: undefined }));
+        if (!result.success) {
+          console.warn(`[Moomoo Sync] Positions warning for ${accountId}:`, result.error);
           return [];
-        }),
-        (async () => {
-          const result = await callMoomooApi<JsonRecord>(`/api/v1.0/accounts/${encodeURIComponent(accountId)}/positions`, { method: 'GET', config }).catch((e) => ({ success: false as const, error: String(e), data: undefined }));
-          if (!result.success) {
-            console.warn(`[Moomoo Sync] Positions warning for ${accountId}:`, result.error);
-            return [];
-          }
-          return recordsFromPage(unwrapData(result.data), ['positions', 'position_list', 'list']);
-        })(),
-      ]);
-      return { accountId, currency: getString(account.currency), orders, cashLogs, positions, previousAccountSyncAt };
+        }
+        return recordsFromPage(unwrapData(result.data), ['positions', 'position_list', 'list']);
+      })();
+      return { accountId, currency: getString(account.currency), orders, positions, previousAccountSyncAt };
     }));
 
     const accounts = accountPayloads.filter((account): account is NonNullable<typeof account> => Boolean(account));
@@ -302,8 +291,36 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const accountsNeedingCashLogs = new Set(
+      tradeCandidates.filter(({ order, existingIndex }) => {
+        const existing = existingIndex >= 0 ? existingRows[existingIndex] : null;
+        const notes = getString(existing?.Notes || existing?.notes);
+        const hasConfirmedStoredFee = notes.includes('Fee sync: confirmed') || notes.includes('Fee breakdown:');
+        const storedFee = parseAmount(existing?.Fees ?? existing?.fees);
+        const hasOrderFee = parseAmount(order.dealt_fee ?? order.fee ?? order.fees ?? order.total_fee ?? order.commission) !== null;
+        return !hasOrderFee && !(hasConfirmedStoredFee && storedFee !== null);
+      }).map((candidate) => candidate.accountId)
+    );
+    const accountsWithCashLogs = await Promise.all(accounts
+      .filter((account) => accountsNeedingCashLogs.has(account.accountId))
+      .map(async (account) => {
+        const previousAccountSyncAt = forceFullSync ? undefined : oldState?.accountLastSyncAt[account.accountId];
+        const beginMs = getMoomooSyncStartMs(previousAccountSyncAt);
+        const cashLogs = await fetchAllPages(
+          account.accountId,
+          `/api/v1.0/accounts/${encodeURIComponent(account.accountId)}/cash_logs`,
+          { begin_time: toMicroseconds(beginMs), end_time: toMicroseconds(Date.now() + 24 * 60 * 60 * 1000) },
+          ['cash_logs', 'list'],
+          20,
+          config
+        ).catch((error) => {
+          console.warn(`[Moomoo Sync] Cash logs warning for ${account.accountId}:`, error);
+          return [];
+        });
+        return { accountId: account.accountId, cashLogs };
+      }));
     const feeByOrderId = new Map<string, number>();
-    for (const account of accounts) {
+    for (const account of accountsWithCashLogs) {
       for (const [orderId, amount] of cashLogFeeByOrderId(account.cashLogs)) {
         feeByOrderId.set(`${account.accountId}:${orderId}`, amount);
       }
@@ -313,33 +330,36 @@ export async function POST(req: NextRequest) {
       const existing = existingIndex >= 0 ? existingRows[existingIndex] : null;
       const existingNotes = getString(existing?.Notes || existing?.notes);
       const hasPreviouslyConfirmedFees = existingNotes.includes('Fee sync: confirmed') || existingNotes.includes('Fee breakdown:');
-      let feeInfo: { totalFee: number; currency: string; items: Array<{ type: string; amount: number }> } | null = null;
-      let feeReadError = '';
-      try {
-        feeInfo = await readMoomooFee(accountId, orderId, config);
-      } catch (error) {
-        feeReadError = error instanceof Error ? error.message : 'Moomoo fee request failed.';
-      }
-
       const orderFeeFallback = parseAmount(order.dealt_fee ?? order.fee ?? order.fees ?? order.total_fee ?? order.commission);
       const storedFee = parseAmount(existing?.Fees ?? existing?.fees);
       const canUseStoredFee = hasPreviouslyConfirmedFees && storedFee !== null;
+      const exactCashFee = feeByOrderId.get(`${accountId}:${orderId}`);
+      let feeInfo: { totalFee: number; currency: string; items: Array<{ type: string; amount: number }> } | null = null;
+      let feeReadError = '';
+      if (orderFeeFallback === null && !canUseStoredFee && exactCashFee === undefined) {
+        try {
+          feeInfo = await readMoomooFee(accountId, orderId, config);
+        } catch (error) {
+          feeReadError = error instanceof Error ? error.message : 'Moomoo fee request failed.';
+        }
+      }
 
       const trade = normalizeMoomooOrder(order, accountId, feeInfo || undefined);
       if (!trade) return null;
 
-      if (!feeInfo && orderFeeFallback !== null) {
+      if (orderFeeFallback !== null) {
         trade.Fees = Math.abs(orderFeeFallback);
         trade['Net Total'] = calculateMoomooNetTotal(String(trade.Action), Number(trade.Quantity), Number(trade.Price), Number(trade.Fees));
-        trade.Notes = `${trade.Notes}; Fee sync: confirmed (order response)`;
-      } else if (!feeInfo && canUseStoredFee) {
+        trade.Notes = canUseStoredFee && storedFee === orderFeeFallback
+          ? existingNotes
+          : `${trade.Notes}; Fee sync: confirmed (order response)`;
+      } else if (canUseStoredFee) {
         trade.Fees = Math.abs(storedFee);
         trade['Net Total'] = calculateMoomooNetTotal(String(trade.Action), Number(trade.Quantity), Number(trade.Price), Number(trade.Fees));
         trade.Notes = existingNotes;
       } else if (!feeInfo) {
-        const exactCashFee = feeByOrderId.get(`${accountId}:${orderId}`);
         if (exactCashFee !== undefined) {
-          trade.Fees = exactCashFee;
+          trade.Fees = Math.abs(exactCashFee);
           trade['Net Total'] = calculateMoomooNetTotal(String(trade.Action), Number(trade.Quantity), Number(trade.Price), exactCashFee);
           trade.Notes = `${trade.Notes}; Fee sync: confirmed (cash log)`;
         } else {

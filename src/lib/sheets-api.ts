@@ -1188,6 +1188,11 @@ export const sheetsApi = {
       }
     ),
 
+  syncMoomooFlows: () =>
+    apiRequest<{ success: boolean; message?: string; data: Record<string, unknown> }>(
+      { action: 'syncMoomooFlows', method: 'POST' }
+    ),
+
   getPortfolio: () =>
     apiRequest<{ success: boolean; data: Record<string, unknown>[] }>(
       { action: 'getPortfolio' }
