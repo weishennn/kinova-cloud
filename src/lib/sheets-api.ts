@@ -1163,13 +1163,27 @@ export const sheetsApi = {
     ),
 
   addTrade: (tradeData: Record<string, unknown>) =>
-    apiRequest<{ success: boolean; data: { tradeId?: string } }>(
+    apiRequest<{ success: boolean; message?: string; data: { tradeId?: string } }>(
       {
         action: 'addTrade',
         params: {
           tradeData,
           mutationId: tradeData.Id || tradeData.id ? `add_trade_${String(tradeData.Id || tradeData.id)}` : undefined,
         },
+        method: 'POST',
+      }
+    ),
+
+  syncMoomooTrades: (options: {
+    trades: Array<Record<string, unknown>>;
+    restoreDeletedMoomooTrades?: boolean;
+    reconcileFlowHistory?: boolean;
+    cleanupLegacyDeposits?: boolean;
+  }) =>
+    apiRequest<{ success: boolean; message?: string; data: Record<string, unknown> }>(
+      {
+        action: 'syncMoomooTrades',
+        params: options,
         method: 'POST',
       }
     ),

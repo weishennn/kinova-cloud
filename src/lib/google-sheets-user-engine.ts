@@ -1065,6 +1065,56 @@ async function removeDeletedTombstone(
   }
 }
 
+async function deleteLinkedTradeFlowRowsUser(
+  spreadsheetId: string,
+  accessToken: string,
+  meta: SpreadsheetMetadata,
+  tradeId: string,
+  tradeDate: unknown,
+  mutationId?: string
+): Promise<void> {
+  const flowId = `tx_trade_${String(tradeId || '').replace(/[^A-Za-z0-9_-]/g, '_')}`;
+  if (!tradeId) return;
+  const tradeMonth = String(tradeDate || '').slice(0, 7);
+  const months = new Set(getMonthListFromMeta(meta));
+  if (/^\d{4}-\d{2}$/.test(tradeMonth)) months.add(tradeMonth);
+  const requests: Array<{ deleteDimension: { range: { sheetId: number; dimension: 'ROWS'; startIndex: number; endIndex: number } } }> = [];
+  let tombstoneMonth = tradeMonth;
+
+  for (const month of months) {
+    const sheetMeta = meta.sheets.find((sheet) => sheet.properties.title === month);
+    if (!sheetMeta) continue;
+    const values = await readSheetValues(spreadsheetId, accessToken, month);
+    const headers = (values[0] || []).map((header) => String(header || '').trim().toLowerCase());
+    const idIndex = headers.indexOf('id');
+    for (let i = values.length - 1; i >= 1; i--) {
+      if (String(values[i]?.[idIndex >= 0 ? idIndex : 0] ?? '').trim() !== flowId) continue;
+      tombstoneMonth = tombstoneMonth || month;
+      requests.push({
+        deleteDimension: {
+          range: {
+            sheetId: sheetMeta.properties.sheetId,
+            dimension: 'ROWS',
+            startIndex: i,
+            endIndex: i + 1,
+          },
+        },
+      });
+    }
+  }
+
+  await recordDeletedTombstone(spreadsheetId, accessToken, meta, flowId, tombstoneMonth || 'Transactions', mutationId);
+  if (requests.length > 0) {
+    const response = await googleApiFetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`,
+      accessToken,
+      { method: 'POST', body: JSON.stringify({ requests }) }
+    );
+    await ensureGoogleApiSuccess(response, 'linked trade Flow delete');
+  }
+  await syncOverviewSheetForMeta(spreadsheetId, accessToken, meta);
+}
+
 async function syncPortfolioFromTradesUser(
   spreadsheetId: string,
   accessToken: string,
@@ -1657,6 +1707,64 @@ async function syncMoomooCashflowRowsUser(
   return { flowAdded, flowUpdated, duplicateFlowRowsRemoved, removedDepositRows };
 }
 
+function findDuplicateMoomooTradeRows(idValues: unknown[][], noteValues: unknown[][]): number[] {
+  const parent = new Map<number, number>();
+  const firstRowByKey = new Map<string, number>();
+  const identities = new Map<number, { id: string; accountId: string; orderId: string }>();
+  const find = (row: number): number => {
+    const current = parent.get(row);
+    if (current === undefined || current === row) return row;
+    const root = find(current);
+    parent.set(row, root);
+    return root;
+  };
+  const union = (left: number, right: number) => {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+    if (leftRoot !== rightRoot) parent.set(rightRoot, leftRoot);
+  };
+
+  for (let index = 1; index < Math.max(idValues.length, noteValues.length); index++) {
+    const id = String(idValues[index]?.[0] || '').trim();
+    const notes = String(noteValues[index]?.[0] || '');
+    if (!/Moomoo Auto-Sync/i.test(notes)) continue;
+    const orderId = notes.match(/\bOrder:\s*([^;\s)]+)/i)?.[1] || '';
+    const accountId = notes.match(/\bAccount:\s*([^;\s)]+)/i)?.[1] || '';
+    if (!id || (!orderId && !id.startsWith('moo_'))) continue;
+
+    const rowNumber = index + 1;
+    parent.set(rowNumber, rowNumber);
+    identities.set(rowNumber, { id, accountId, orderId });
+    const keys = [`id:${id}`];
+    if (accountId && orderId) keys.push(`order:${accountId}:${orderId}`);
+    for (const key of keys) {
+      const previous = firstRowByKey.get(key);
+      if (previous === undefined) firstRowByKey.set(key, rowNumber);
+      else union(previous, rowNumber);
+    }
+  }
+
+  const groups = new Map<number, number[]>();
+  for (const row of identities.keys()) {
+    const root = find(row);
+    const group = groups.get(root) || [];
+    group.push(row);
+    groups.set(root, group);
+  }
+
+  const duplicateRows: number[] = [];
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const canonical = group.find((row) => {
+      const identity = identities.get(row)!;
+      return Boolean(identity.accountId && identity.orderId && identity.id === `moo_${identity.accountId}_${identity.orderId}`);
+    });
+    const keep = canonical ?? Math.max(...group);
+    duplicateRows.push(...group.filter((row) => row !== keep));
+  }
+  return duplicateRows.sort((a, b) => b - a);
+}
+
 async function syncMoomooTradesUser(
   spreadsheetId: string,
   accessToken: string,
@@ -1665,7 +1773,7 @@ async function syncMoomooTradesUser(
   restoreDeletedMoomooTrades = false,
   reconcileFlowHistory = false,
   cleanupLegacyDeposits = false
-): Promise<{ added: number; updated: number; changes: Array<Record<string, unknown>>; removedIds: string[]; restoredTombstones: number; flowAdded: number; flowUpdated: number; duplicateFlowRowsRemoved: number; removedDepositRows: number }> {
+): Promise<{ added: number; updated: number; changes: Array<Record<string, unknown>>; removedIds: string[]; restoredTombstones: number; duplicateTradeRowsRemoved: number; flowAdded: number; flowUpdated: number; duplicateFlowRowsRemoved: number; removedDepositRows: number }> {
   const tradesSheetMeta = meta.sheets.find((sheet) => sheet.properties.title.trim().toLowerCase() === 'trades');
   const sheetTitle = tradesSheetMeta?.properties.title || 'Trades';
   await ensureSheetExists(spreadsheetId, accessToken, meta, sheetTitle);
@@ -1793,6 +1901,30 @@ async function syncMoomooTradesUser(
     if (!response.ok) throw new Error('Could not append Moomoo trades to Google Sheets.');
   }
 
+  const duplicateTradeRowsRemoved = findDuplicateMoomooTradeRows(idValues, noteValues);
+  if (duplicateTradeRowsRemoved.length > 0) {
+    const requests = duplicateTradeRowsRemoved.map((rowNumber) => ({
+      deleteDimension: {
+        range: {
+          sheetId: tradesSheetMeta!.properties.sheetId,
+          dimension: 'ROWS' as const,
+          startIndex: rowNumber - 1,
+          endIndex: rowNumber,
+        },
+      },
+    }));
+    const response = await googleApiFetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`,
+      accessToken,
+      { method: 'POST', body: JSON.stringify({ requests }) }
+    );
+    await ensureGoogleApiSuccess(response, 'duplicate Moomoo trade cleanup');
+    // Removing duplicate source rows also means their formerly linked Flow
+    // rows must be reconciled across every month in the same operation.
+    reconcileFlowHistory = true;
+    cleanupLegacyDeposits = true;
+  }
+
   const restoredTombstones = restoreDeletedMoomooTrades
     ? await clearRestoredMoomooTradeTombstones(spreadsheetId, accessToken, meta, changes)
     : 0;
@@ -1814,7 +1946,7 @@ async function syncMoomooTradesUser(
     cleanupLegacyDeposits
   );
 
-  return { added: additions.length, updated: updatedCount, changes, removedIds, restoredTombstones, ...cashflowResult };
+  return { added: additions.length, updated: updatedCount, changes, removedIds, restoredTombstones, duplicateTradeRowsRemoved: duplicateTradeRowsRemoved.length, ...cashflowResult };
 }
 
 /**
@@ -2414,6 +2546,17 @@ export async function executeUserGoogleAction(
             const colId = idCol >= 0 ? String(r[idCol] ?? '').trim() : String(r[0] ?? '').trim();
             if (colId === targetId) {
               const matchedRow = i + 1;
+              if (sName === 'Trades') {
+                const dateCol = sHeaders.indexOf('date');
+                await deleteLinkedTradeFlowRowsUser(
+                  spreadsheetId,
+                  accessToken,
+                  meta,
+                  targetId,
+                  dateCol >= 0 ? r[dateCol] : '',
+                  mutationId
+                );
+              }
               await recordDeletedTombstone(spreadsheetId, accessToken, meta, targetId, sName, mutationId);
               const sheetMeta = meta.sheets.find((s) => s.properties.title === sName);
               if (!sheetMeta) throw new Error(`Could not locate the ${sName} sheet to delete the trade.`);
@@ -2593,6 +2736,11 @@ export async function executeUserGoogleAction(
       }
 
       if (targetId) {
+        if (rawSheetName === 'Trades') {
+          // Clean up the linked monthly row even if a partial sync already
+          // removed the Trade row before this delete was retried.
+          await deleteLinkedTradeFlowRowsUser(spreadsheetId, accessToken, meta, targetId, '', mutationId);
+        }
         await recordDeletedTombstone(spreadsheetId, accessToken, meta, targetId, rawSheetName || 'Transactions', mutationId);
         if (rawSheetName === 'Trades') {
           await syncPortfolioFromTradesUser(spreadsheetId, accessToken, meta);

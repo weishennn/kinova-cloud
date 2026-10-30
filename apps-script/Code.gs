@@ -1201,6 +1201,46 @@ function updateRow(sheetName, rowIndex, rowData, mutationId, options) {
   return updateResult;
 }
 
+function deleteLinkedTradeFlowRows(tradeId, tradeDate, mutationId) {
+  const flowId = 'tx_trade_' + String(tradeId || '').replace(/[^A-Za-z0-9_-]/g, '_');
+  if (!tradeId || !flowId) return 0;
+  const monthFromTrade = String(tradeDate || '').substring(0, 7);
+  const months = getMonthList();
+  if (/^\d{4}-\d{2}$/.test(monthFromTrade) && months.indexOf(monthFromTrade) < 0) months.push(monthFromTrade);
+  const matchesByMonth = new Map();
+
+  months.forEach(function(month) {
+    const sheet = getSheet(month, false);
+    if (!sheet || sheet.getLastRow() <= 1) return;
+    const values = sheet.getDataRange().getValues();
+    const headers = (values[0] || []).map(function(value) { return String(value || '').trim().toLowerCase(); });
+    const idIndex = headers.indexOf('id');
+    const rows = [];
+    for (let i = 1; i < values.length; i++) {
+      if (String(values[i][idIndex >= 0 ? idIndex : 0] || '').trim() === flowId) rows.push(i + 1);
+    }
+    if (rows.length > 0) matchesByMonth.set(month, rows);
+  });
+
+  const tombstoneMonth = monthFromTrade.match(/^\d{4}-\d{2}$/)
+    ? monthFromTrade
+    : (matchesByMonth.size > 0 ? matchesByMonth.keys().next().value : 'Transactions');
+  recordTombstone(flowId, tombstoneMonth, mutationId);
+
+  let removed = 0;
+  matchesByMonth.forEach(function(rowNumbers, month) {
+    const sheet = getSheet(month, false);
+    if (!sheet) return;
+    rowNumbers.sort(function(a, b) { return b - a; }).forEach(function(rowNumber) {
+      sheet.deleteRow(rowNumber);
+      removed++;
+    });
+    updateOverviewForMonth(month);
+  });
+  SpreadsheetApp.flush();
+  return removed;
+}
+
 function deleteRow(sheetName, rowIndex, id, mutationId) {
   if (mutationId) {
     const prev = getMutationFromLedger(mutationId);
@@ -1245,6 +1285,12 @@ function deleteRow(sheetName, rowIndex, id, mutationId) {
       if (foundCell) {
         const matchedRow = foundCell.getRow();
         const deletedSheetName = s.getName();
+        if (deletedSheetName === 'Trades') {
+          const tradeHeaders = getSheetSchema('Trades');
+          const tradeValues = s.getRange(matchedRow, 1, 1, tradeHeaders.length).getValues()[0];
+          const dateIndex = tradeHeaders.findIndex(function(header) { return String(header).trim().toLowerCase() === 'date'; });
+          deleteLinkedTradeFlowRows(targetId, dateIndex >= 0 ? tradeValues[dateIndex] : '', mutationId);
+        }
         // Persist the permanent marker before removing the row. If deletion fails,
         // stale devices still cannot recreate this stable ID.
         recordTombstone(targetId, deletedSheetName, mutationId);
@@ -1334,6 +1380,11 @@ function deleteRow(sheetName, rowIndex, id, mutationId) {
     }
 
     // Row with this ID is already absent (e.g. retried delete after timeout). Ensure tombstone exists and return verified idempotent success!
+    if (sheetName === 'Trades') {
+      // A prior partial write may have left Flow behind even though the Trade
+      // row is already absent. Remove the deterministic linked record too.
+      deleteLinkedTradeFlowRows(targetId, '', mutationId);
+    }
     recordTombstone(targetId, sheetName || 'Transactions', mutationId);
     if (sheetName === 'Trades') {
       syncPortfolioFromTrades();
@@ -2416,6 +2467,64 @@ function clearRestoredMoomooTradeTombstones(restoredTrades) {
   return matchingRows.length;
 }
 
+function findDuplicateMoomooTradeRows(existingIds, existingNotes) {
+  const parent = new Map();
+  const firstRowByKey = new Map();
+  const identities = new Map();
+  function find(rowNumber) {
+    const current = parent.get(rowNumber);
+    if (current === undefined || current === rowNumber) return rowNumber;
+    const root = find(current);
+    parent.set(rowNumber, root);
+    return root;
+  }
+  function union(left, right) {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+    if (leftRoot !== rightRoot) parent.set(rightRoot, leftRoot);
+  }
+
+  for (let index = 0; index < Math.max(existingIds.length, existingNotes.length); index++) {
+    const id = String(existingIds[index] && existingIds[index][0] || '').trim();
+    const notes = String(existingNotes[index] && existingNotes[index][0] || '');
+    if (!/Moomoo Auto-Sync/i.test(notes)) continue;
+    const orderMatch = notes.match(/\bOrder:\s*([^;\s)]+)/i);
+    const accountMatch = notes.match(/\bAccount:\s*([^;\s)]+)/i);
+    const orderId = orderMatch ? orderMatch[1] : '';
+    const accountId = accountMatch ? accountMatch[1] : '';
+    if (!id || (!orderId && id.indexOf('moo_') !== 0)) continue;
+
+    const rowNumber = index + 2;
+    parent.set(rowNumber, rowNumber);
+    identities.set(rowNumber, { id: id, accountId: accountId, orderId: orderId });
+    const keys = ['id:' + id];
+    if (accountId && orderId) keys.push('order:' + accountId + ':' + orderId);
+    keys.forEach(function(key) {
+      const previous = firstRowByKey.get(key);
+      if (previous === undefined) firstRowByKey.set(key, rowNumber);
+      else union(previous, rowNumber);
+    });
+  }
+
+  const groups = new Map();
+  identities.forEach(function(_, rowNumber) {
+    const root = find(rowNumber);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root).push(rowNumber);
+  });
+  const duplicateRows = [];
+  groups.forEach(function(group) {
+    if (group.length < 2) return;
+    const canonical = group.find(function(rowNumber) {
+      const identity = identities.get(rowNumber);
+      return identity.accountId && identity.orderId && identity.id === 'moo_' + identity.accountId + '_' + identity.orderId;
+    });
+    const keep = canonical || Math.max.apply(null, group);
+    group.forEach(function(rowNumber) { if (rowNumber !== keep) duplicateRows.push(rowNumber); });
+  });
+  return duplicateRows.sort(function(a, b) { return b - a; });
+}
+
 function buildMoomooCashflowRow(trade) {
   const tradeId = String(trade.Id || trade.id || '').trim();
   const notes = String(trade.Notes || trade.notes || '');
@@ -2717,6 +2826,15 @@ function syncMoomooTrades(incomingTrades, restoreDeletedMoomooTrades, reconcileF
     tradeSheet.getRange(appendAt, 1, newRows.length, 11).setValues(newRows);
   }
 
+  const duplicateTradeRows = findDuplicateMoomooTradeRows(existingIds, existingNotes);
+  duplicateTradeRows.forEach(function(rowNumber) { tradeSheet.deleteRow(rowNumber); });
+  if (duplicateTradeRows.length > 0) {
+    // Clean orphaned or duplicated monthly rows for the whole authoritative
+    // Trade ledger after removing duplicate source orders.
+    reconcileFlowHistory = true;
+    cleanupLegacyDeposits = true;
+  }
+
   const restoredTombstones = restoreDeletedMoomooTrades
     ? clearRestoredMoomooTradeTombstones(changes)
     : 0;
@@ -2740,7 +2858,7 @@ function syncMoomooTrades(incomingTrades, restoreDeletedMoomooTrades, reconcileF
   const cashflowResult = syncMoomooCashflowRows(flowTrades, cleanupLegacyDeposits);
   SpreadsheetApp.flush();
 
-  return Object.assign({ added: addedCount, updated: updatedCount, changes: changes, removedIds: removedIds, restoredTombstones: restoredTombstones }, cashflowResult);
+  return Object.assign({ added: addedCount, updated: updatedCount, changes: changes, removedIds: removedIds, restoredTombstones: restoredTombstones, duplicateTradeRowsRemoved: duplicateTradeRows.length }, cashflowResult);
 }
 
 function applyPortfolioTradeDeltas(trades) {

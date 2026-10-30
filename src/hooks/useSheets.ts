@@ -57,6 +57,9 @@ export async function addUnifiedRow(sheetName: string, rowData: Record<string, u
 }
 
 export async function updateUnifiedRow(sheetName: string, rowIndex: number, rowData: Record<string, unknown>) {
+  if (sheetName === 'Trades') {
+    return sheetsData.updateTrade(rowIndex, rowData);
+  }
   const targetSheetName = sheetName === 'Transactions' && typeof rowData._month === 'string'
     ? rowData._month
     : sheetName;
@@ -461,7 +464,7 @@ export function useSyncGoogleSheets() {
 export function useAddTrade() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (tradeData: Record<string, unknown>) => sheetsApi.addTrade(tradeData),
+    mutationFn: (tradeData: Record<string, unknown>) => sheetsData.addTrade(tradeData),
     onSuccess: async () => {
       clearAllSwrCache();
       await queryClient.invalidateQueries({ queryKey: ['sheet'] });

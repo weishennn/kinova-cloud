@@ -10,10 +10,10 @@ import {
 import dynamic from 'next/dynamic';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePortfolio, useTrades, useAddTrade, useUpdateRow, useDeleteRow } from '@/hooks/useSheets';
-import { clearAllSwrCache, setSwrCachedData } from '@/lib/sheets-api';
-import { runSerializedSheetMutation } from '@/lib/sheets-data';
+import { clearAllSwrCache, getActiveUserCacheScope, setSwrCachedData } from '@/lib/sheets-api';
+import { runSerializedSheetMutation, sheetsData } from '@/lib/sheets-data';
 import { discardPendingMoomooDeletes } from '@/lib/cache-manager';
-import { clearDeletedTombstone, recordDeletedTombstone } from '@/lib/data-integrity';
+import { recordDeletedTombstone } from '@/lib/data-integrity';
 import { 
   convertCurrency, 
   formatAssetCurrency, 
@@ -303,13 +303,23 @@ export default function InvestmentsPage() {
   const tradeFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const key = `cashflow_moomoo_sync_state_v2_${getActiveUserCacheScope()}`;
+    try {
+      const raw = localStorage.getItem(key);
+      const state = raw ? JSON.parse(raw) : null;
+      if (typeof state?.lastSyncAt === 'string') {
+        setLastMoomooSyncAt(state.lastSyncAt);
+        return;
+      }
+    } catch {
+      // The previous local checkpoint may be malformed; the next sync will safely start full.
+    }
     let active = true;
     fetch('/api/moomoo/sync')
       .then((res) => res.json())
       .then((data) => {
-        if (active && data?.success && typeof data.lastSyncAt === 'string') {
-          setLastMoomooSyncAt(data.lastSyncAt);
-        }
+        if (active && data?.success && typeof data.lastSyncAt === 'string') setLastMoomooSyncAt(data.lastSyncAt);
       })
       .catch(() => undefined);
     return () => { active = false; };
@@ -319,7 +329,7 @@ export default function InvestmentsPage() {
     if (forceFullSync) {
       const confirmed = await confirmAction({
         title: 'Run a full Moomoo re-sync?',
-        description: 'Fetch all available Moomoo order history and fee details for the authorized account(s), rebuild Portfolio, and reconcile linked Flow entries. Returned Moomoo orders marked as deleted will be restored. This may take longer than a light sync.',
+        description: 'Fetch all available Moomoo order history and fee details, save the trades on this phone first, then queue the linked trade, Portfolio, and Flow updates for Google Sheets.',
         confirmText: 'Full re-sync',
         cancelText: 'Cancel',
         variant: 'warning',
@@ -330,170 +340,147 @@ export default function InvestmentsPage() {
 
     setIsSyncingMoomoo(true);
     try {
-      const res = await runSerializedSheetMutation('Trades', () =>
-        fetch('/api/moomoo/sync', {
-          method: 'POST',
-          ...(forceFullSync ? {
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fullHistory: true }),
-          } : {}),
-        })
-      );
+      const tradeHeaders = ['Id', 'Date', 'Action', 'Ticker', 'Asset Name', 'Quantity', 'Price', 'Fees', 'Net Total', 'Currency', 'Notes'];
+      const sourceRows = Array.isArray(rawTradesData)
+        ? rawTradesData as Array<Record<string, unknown>>
+        : Array.isArray((rawTradesData as { rows?: unknown[] } | undefined)?.rows)
+          ? (rawTradesData as { rows: Array<Record<string, unknown>> }).rows
+          : [];
+      const existingRows: Array<Record<string, unknown>> = sourceRows.length > 0
+        ? sourceRows
+        : trades.map((trade) => ({
+            Id: trade.id,
+            Date: trade.date,
+            Action: trade.action,
+            Ticker: trade.ticker,
+            'Asset Name': trade.name,
+            Quantity: trade.quantity,
+            Price: trade.price,
+            Fees: trade.fees,
+            'Net Total': trade.netTotal,
+            Currency: trade.currency,
+            Notes: trade.notes,
+          }));
+      const syncStateKey = `cashflow_moomoo_sync_state_v2_${getActiveUserCacheScope()}`;
+      let localSyncState: Record<string, unknown> | null = null;
+      try {
+        const rawState = localStorage.getItem(syncStateKey);
+        const parsedState: unknown = rawState ? JSON.parse(rawState) : null;
+        if (parsedState && typeof parsedState === 'object') localSyncState = parsedState as Record<string, unknown>;
+      } catch {
+        // An invalid checkpoint safely falls back to a full-history import.
+      }
+
+      const res = await runSerializedSheetMutation('Trades', () => fetch('/api/moomoo/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fullHistory: forceFullSync, syncState: localSyncState, existingTrades: existingRows }),
+      }));
       const data = await res.json();
       if (!res.ok || !data.success) {
         toast.error(data.error || 'Failed to sync with Moomoo API');
         return;
       }
 
-      const tradeHeaders = [
-        'Id', 'Date', 'Action', 'Ticker', 'Asset Name',
-        'Quantity', 'Price', 'Fees', 'Net Total', 'Currency', 'Notes'
-      ];
-
-      let clearedMoomooPendingDeletes = 0;
-      if (forceFullSync && Array.isArray(data.trades)) {
-        try {
-          const restoredMoomooIds = new Set<string>();
-          for (const row of data.trades as Array<Record<string, unknown>>) {
-            const id = String(row.Id || row.id || '').trim();
-            const notes = String(row.Notes || row.notes || '');
-            if (!id.startsWith('moo_') || !/Moomoo Auto-Sync/i.test(notes)) continue;
-            restoredMoomooIds.add(id);
-            const orderId = notes.match(/\bOrder:\s*([^;\s)]+)/i)?.[1];
-            if (orderId) restoredMoomooIds.add(`moo_${orderId}`);
+      const importedTrades = Array.isArray(data.moomooTrades)
+        ? data.moomooTrades as Array<Record<string, unknown>>
+        : [];
+      const mergedById = new Map<string, Record<string, unknown>>();
+      for (const row of existingRows) {
+        const id = String(row.Id || row.id || '').trim();
+        if (id) mergedById.set(id, row);
+      }
+      const getOrderIdentity = (row: Record<string, unknown>) => {
+        const notes = String(row.Notes || row.notes || '');
+        const accountId = notes.match(/\bAccount:\s*([^;\s)]+)/i)?.[1] || '';
+        const orderId = notes.match(/\bOrder:\s*([^;\s)]+)/i)?.[1] || '';
+        return accountId && orderId ? `${accountId}:${orderId}` : '';
+      };
+      for (const incoming of importedTrades) {
+        const incomingIdentity = getOrderIdentity(incoming);
+        if (incomingIdentity) {
+          for (const [id, current] of mergedById) {
+            if (getOrderIdentity(current) === incomingIdentity) mergedById.delete(id);
           }
-          for (const id of restoredMoomooIds) clearDeletedTombstone(id);
+        }
+        const id = String(incoming.Id || incoming.id || '').trim();
+        if (id) mergedById.set(id, incoming);
+      }
+      const mergedRows = [...mergedById.values()];
+      let clearedMoomooPendingDeletes = 0;
+      if (forceFullSync) {
+        const restoredMoomooIds = new Set<string>();
+        for (const row of importedTrades) {
+          const id = String(row.Id || row.id || '').trim();
+          const notes = String(row.Notes || row.notes || '');
+          if (!id.startsWith('moo_') || !/Moomoo Auto-Sync/i.test(notes)) continue;
+          restoredMoomooIds.add(id);
+          const orderId = notes.match(/\bOrder:\s*([^;\s)]+)/i)?.[1];
+          if (orderId) restoredMoomooIds.add(`moo_${orderId}`);
+        }
+        try {
           clearedMoomooPendingDeletes = discardPendingMoomooDeletes([...restoredMoomooIds]);
         } catch (error) {
           console.warn('[Moomoo Sync] Could not reconcile local pending deletes after the full re-sync:', error);
-          toast.warning('Moomoo history synced, but local pending deletes could not be cleared. Review the pending queue in Settings.');
+          toast.warning('Moomoo history was fetched, but stale local delete markers could not be cleared. Review the pending queue in Settings.');
         }
       }
 
-      // Full sync returns the complete sheet; light sync returns only changed orders.
-      if (Array.isArray(data.trades)) {
-        const completeRows = data.trades as Array<Record<string, unknown>>;
-        if (typeof window !== 'undefined') {
-          try {
-            localStorage.setItem('cashflow_persistent_trades', JSON.stringify(completeRows));
-          } catch {
-            // ignore
-          }
+      const syncOptions = data.syncOptions && typeof data.syncOptions === 'object' ? data.syncOptions : {};
+      const sheetSync = await sheetsData.queueMoomooTradeSync(importedTrades, mergedRows, syncOptions);
+      if (data.syncState && typeof data.syncState === 'object') {
+        try {
+          localStorage.setItem(syncStateKey, JSON.stringify(data.syncState));
+        } catch {
+          toast.warning('The trades are saved locally, but the light-sync checkpoint could not be saved on this phone.');
         }
-        setSwrCachedData('getSheetData', { sheetName: 'Trades' }, {
-          success: true,
-          data: {
-            headers: tradeHeaders,
-            rows: completeRows,
-          },
-        });
-        queryClient.setQueryData(['sheet', 'Trades', 'active'], {
-          headers: tradeHeaders,
-          rows: completeRows,
-        });
-      } else if (Array.isArray(data.tradeChanges)) {
-        const getTradeRows = (value: unknown): Array<Record<string, unknown>> | null => {
-          if (Array.isArray(value)) {
-            return value.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === 'object');
-          }
-          if (value && typeof value === 'object' && 'rows' in value && Array.isArray(value.rows)) {
-            return value.rows.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === 'object');
-          }
-          return null;
-        };
-        let existingRows = getTradeRows(queryClient.getQueryData<unknown>(['sheet', 'Trades', 'active']));
-
-        if (!existingRows && typeof window !== 'undefined') {
-          try {
-            const stored = localStorage.getItem('cashflow_persistent_trades');
-            const parsed: unknown = stored ? JSON.parse(stored) : null;
-            existingRows = getTradeRows(parsed);
-          } catch {
-            // ignore corrupt cache and refetch the sheet below
-          }
-        }
-
-        if (existingRows && existingRows.length > 0) {
-          const removedIds = new Set<string>(Array.isArray(data.removedTradeIds) ? data.removedTradeIds.map(String) : []);
-          const mergedById = new Map<string, Record<string, unknown>>();
-          const rowsWithoutStableId: Array<Record<string, unknown>> = [];
-          for (const row of existingRows) {
-            const id = String(row?.Id || row?.id || '').trim();
-            if (id && !removedIds.has(id)) mergedById.set(id, row);
-            else if (!id) rowsWithoutStableId.push(row);
-          }
-          for (const row of data.tradeChanges as Array<Record<string, unknown>>) {
-            const id = String(row?.Id || row?.id || '').trim();
-            if (id) mergedById.set(id, row);
-          }
-          const mergedRows = [...mergedById.values(), ...rowsWithoutStableId];
-          if (typeof window !== 'undefined') {
-            try {
-              localStorage.setItem('cashflow_persistent_trades', JSON.stringify(mergedRows));
-            } catch {
-              // ignore
-            }
-          }
-          setSwrCachedData('getSheetData', { sheetName: 'Trades' }, {
-            success: true,
-            data: { headers: tradeHeaders, rows: mergedRows },
-          });
-          queryClient.setQueryData(['sheet', 'Trades', 'active'], {
-            headers: tradeHeaders,
-            rows: mergedRows,
-          });
-        } else {
-          // A delta cannot safely stand in for full Trade History when no base cache exists.
-          await queryClient.invalidateQueries({ queryKey: ['sheet', 'Trades', 'active'] });
-          await queryClient.refetchQueries({ queryKey: ['sheet', 'Trades', 'active'] });
-        }
-      }
-
-      if (Array.isArray(data.portfolio)) {
-        setSwrCachedData('getPortfolio', {}, data.portfolio);
-        queryClient.setQueryData(['portfolio'], data.portfolio);
       }
       if (typeof data.lastSyncAt === 'string') setLastMoomooSyncAt(data.lastSyncAt);
 
+      const initialTradeCache = sheetsData.getInitialSheetData('Trades');
+      const localTradeRows = Array.isArray(initialTradeCache?.data.rows)
+        ? initialTradeCache.data.rows
+        : mergedRows;
+      setSwrCachedData('getSheetData', { sheetName: 'Trades' }, {
+        success: true,
+        data: { headers: tradeHeaders, rows: localTradeRows },
+      });
+      queryClient.setQueryData(['sheet', 'Trades', 'active'], { headers: tradeHeaders, rows: localTradeRows });
+
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['portfolio'] }),
+        queryClient.invalidateQueries({ queryKey: ['trades'] }),
         queryClient.invalidateQueries({ queryKey: ['months'] }),
         queryClient.refetchQueries({ queryKey: ['months'] }),
         queryClient.invalidateQueries({ queryKey: ['overview'] }),
       ]);
-
-      // Switch to Trade History tab so the user immediately sees the trades table
       setActiveTab('trades');
 
-      const parts = [];
-      if (data.syncedTrades > 0) parts.push(`${data.syncedTrades} new trade${data.syncedTrades > 1 ? 's' : ''}`);
-      if (data.updatedTrades > 0) parts.push(`${data.updatedTrades} corrected trade${data.updatedTrades > 1 ? 's' : ''}`);
-      if (data.flowAdded > 0) parts.push(`${data.flowAdded} Flow entr${data.flowAdded === 1 ? 'y' : 'ies'} linked`);
-      if (data.flowUpdated > 0) parts.push(`${data.flowUpdated} Flow entr${data.flowUpdated === 1 ? 'y' : 'ies'} corrected`);
-      if (data.duplicateFlowRowsRemoved > 0) parts.push(`${data.duplicateFlowRowsRemoved} duplicate Flow entr${data.duplicateFlowRowsRemoved === 1 ? 'y' : 'ies'} removed`);
-      if (data.removedMoomooDepositRows > 0) parts.push(`${data.removedMoomooDepositRows} old Moomoo deposit entr${data.removedMoomooDepositRows === 1 ? 'y' : 'ies'} removed`);
-
-      if (parts.length === 0) {
-        const restoredMarkers = Number(data.restoredMoomooTombstones) || 0;
-        const syncDescription = forceFullSync
-          ? `Full Moomoo history checked${restoredMarkers > 0 ? `; restored ${restoredMarkers} deleted order marker${restoredMarkers === 1 ? '' : 's'}` : ''}`
-          : `${data.mode === 'full' ? 'Full history checked' : 'Light sync checked recent activity'}`;
-        toast.success(`Moomoo is up-to-date. ${syncDescription}. Switched to Trade History (${data.trades?.length ?? trades.length} trades recorded).`);
+      const result = sheetSync.result || {};
+      const parts: string[] = [];
+      if (data.syncedTrades > 0) parts.push(`${data.syncedTrades} new trade${data.syncedTrades === 1 ? '' : 's'}`);
+      if (data.updatedTrades > 0) parts.push(`${data.updatedTrades} refreshed trade${data.updatedTrades === 1 ? '' : 's'}`);
+      if (Number(result.flowAdded) > 0) parts.push(`${result.flowAdded} Flow entr${result.flowAdded === 1 ? 'y' : 'ies'} linked`);
+      if (Number(result.flowUpdated) > 0) parts.push(`${result.flowUpdated} Flow entr${result.flowUpdated === 1 ? 'y' : 'ies'} corrected`);
+      if (Number(result.duplicateTradeRowsRemoved) > 0) parts.push(`${result.duplicateTradeRowsRemoved} duplicate trade entr${result.duplicateTradeRowsRemoved === 1 ? 'y' : 'ies'} removed`);
+      if (Number(result.removedDepositRows) > 0) parts.push(`${result.removedDepositRows} old Moomoo deposit entr${result.removedDepositRows === 1 ? '' : 'ies'} removed`);
+      if (sheetSync.pending) {
+        toast.success(`Fetched ${parts.length > 0 ? parts.join(', ') : 'Moomoo history'} and saved it on this phone. Google Sheets sync is queued.`);
+      } else if (parts.length > 0) {
+        toast.success(`Synced from Moomoo: ${parts.join(', ')}.`);
       } else {
-        toast.success(`Synced from Moomoo: ${parts.join(', ')}. Switched to Trade History.`);
+        toast.success(`Moomoo is up-to-date. ${data.mode === 'full' ? 'Full history' : 'Recent activity'} checked; ${localTradeRows.length} trades are in Trade History.`);
       }
       if (clearedMoomooPendingDeletes > 0) {
         toast.info(`Removed ${clearedMoomooPendingDeletes} stale pending delete${clearedMoomooPendingDeletes === 1 ? '' : 's'} for restored Moomoo orders.`);
       }
-      if (data.feeDetailsUnavailable > 0) {
-        toast.warning(`${data.feeDetailsUnavailable} Moomoo order(s) had no fee details available; check their Notes in Trade History.`);
-      }
-    } catch {
-      toast.error('Network error connecting to Moomoo sync API');
+    } catch (error) {
+      console.error('[Moomoo Sync] Failed:', error);
+      toast.error(error instanceof Error ? error.message : 'Network error connecting to Moomoo sync API');
     } finally {
       setIsSyncingMoomoo(false);
     }
   };
-
   const handleScanTradeFile = async (file: File) => {
     if (!file) return;
     setIsScanningTrade(true);

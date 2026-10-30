@@ -57,6 +57,122 @@ function trackActiveWrite<T>(sheetName: string, operation: () => Promise<T>): Pr
 type SheetRow = Record<string, unknown>;
 type SheetDataPayload = { headers: string[]; rows: SheetRow[] };
 
+function getTradeId(trade: SheetRow): string {
+  return String(trade.Id || trade.id || '').trim();
+}
+
+function normalizeTradeRow(trade: SheetRow): SheetRow {
+  const id = getTradeId(trade);
+  const date = String(trade.Date || trade.date || '').trim().slice(0, 10);
+  const action = String(trade.Action || trade.action || 'BUY').trim().toUpperCase();
+  const ticker = String(trade.Ticker || trade.ticker || '').trim().toUpperCase();
+  const quantity = Number(trade.Quantity ?? trade.quantity) || 0;
+  const price = Number(trade.Price ?? trade.price) || 0;
+  const fees = Math.abs(Number(trade.Fees ?? trade.fees) || 0);
+  const netTotal = Number(trade['Net Total'] ?? trade.NetTotal ?? trade.total) ||
+    Number((quantity * price + (action === 'SELL' ? -fees : fees)).toFixed(2));
+  const currency = String(trade.Currency || trade.currency || 'USD').trim().toUpperCase();
+  const name = String(trade['Asset Name'] || trade.AssetName || trade.name || ticker).trim();
+  const notes = String(trade.Notes || trade.notes || '');
+  return {
+    ...trade,
+    Id: id,
+    Date: date,
+    Action: action,
+    Ticker: ticker,
+    'Asset Name': name,
+    Quantity: quantity,
+    Price: price,
+    Fees: fees,
+    'Net Total': netTotal,
+    Currency: currency,
+    Notes: notes,
+  };
+}
+
+function buildTradeFlowRow(trade: SheetRow): SheetRow | null {
+  const id = getTradeId(trade);
+  const date = String(trade.Date || trade.date || '').trim().slice(0, 10);
+  const action = String(trade.Action || trade.action || 'BUY').trim().toUpperCase();
+  const ticker = String(trade.Ticker || trade.ticker || '').trim().toUpperCase();
+  const quantity = Number(trade.Quantity ?? trade.quantity) || 0;
+  const price = Number(trade.Price ?? trade.price) || 0;
+  const fees = Math.abs(Number(trade.Fees ?? trade.fees) || 0);
+  const currency = String(trade.Currency || trade.currency || 'USD').trim().toUpperCase();
+  const netTotal = Number(trade['Net Total'] ?? trade.NetTotal ?? trade.total) ||
+    Number((quantity * price + (action === 'SELL' ? -fees : fees)).toFixed(2));
+  if (!id || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !ticker || quantity <= 0 || price <= 0) return null;
+
+  const costInMyr = Number(trade.CostInMyr ?? trade.costInMyr) || 0;
+  const rateToMyr = Number(trade.RateToMyr ?? trade.rateToMyr) || 0;
+  const originalNotes = String(trade.Notes || trade.notes || '');
+  const notes = costInMyr > 0
+    ? `Cost: RM ${costInMyr.toFixed(2)}${rateToMyr > 0 ? ` (Rate: ${rateToMyr.toFixed(4)})` : ''}`
+    : /^moo_/i.test(id)
+      ? `${originalNotes}${originalNotes ? '; ' : ''}Fees: ${fees.toFixed(2)} ${currency}; Net total: ${netTotal.toFixed(2)} ${currency}`
+      : originalNotes;
+  return {
+    Id: `tx_trade_${id.replace(/[^A-Za-z0-9_-]/g, '_')}`,
+    Date: date,
+    Type: action === 'SELL' ? 'Income' : 'Investment',
+    Category: 'Stocks & Crypto',
+    SubCategory: action,
+    Description: `${action} ${quantity} ${ticker} @ ${price} ${currency}`,
+    Amount: costInMyr > 0 ? Number(costInMyr.toFixed(2)) : netTotal,
+    Currency: costInMyr > 0 ? 'MYR' : currency,
+    PaymentMethod: 'Investment Account',
+    Notes: notes,
+  };
+}
+
+function persistTradeCache(rows: SheetRow[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem('cashflow_persistent_trades', JSON.stringify(rows));
+  } catch {
+    // Local SWR cache and pending queue remain authoritative if the browser quota is full.
+  }
+}
+
+function getCachedTradeRows(): SheetRow[] {
+  const entry = getSwrCachedEntry<{ success: boolean; data: SheetDataPayload }>('getSheetData', { sheetName: 'Trades' });
+  const rows = entry?.data?.data?.rows;
+  if (Array.isArray(rows)) return rows;
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('cashflow_persistent_trades');
+      const parsed: unknown = stored ? JSON.parse(stored) : null;
+      if (Array.isArray(parsed)) return parsed as SheetRow[];
+    } catch {
+      // Ignore malformed stale cache data.
+    }
+  }
+  return [];
+}
+
+function getPersistentTradeRow(id: string): SheetRow | undefined {
+  if (typeof window === 'undefined' || !id) return undefined;
+  try {
+    const stored = localStorage.getItem('cashflow_persistent_trades');
+    const parsed: unknown = stored ? JSON.parse(stored) : null;
+    if (!Array.isArray(parsed)) return undefined;
+    return (parsed as SheetRow[]).find((row) => getTradeId(row) === id);
+  } catch {
+    return undefined;
+  }
+}
+
+function tradeTicker(trade: SheetRow): string {
+  return String(trade.Ticker || trade.ticker || '').trim().toUpperCase();
+}
+
+function clearTradeHoldingTombstone(trade: SheetRow): void {
+  const ticker = tradeTicker(trade);
+  if (!ticker) return;
+  clearDeletedTombstone(ticker);
+  clearDeletedTombstone(`moo_holding_${ticker.toLowerCase()}_0`);
+}
+
 function recordTransactionUpdateConflict(
   clientRow: SheetRow,
   serverRow: SheetRow,
@@ -473,6 +589,189 @@ export const sheetsData = {
     }
 
     return undefined;
+  },
+
+  /**
+   * Adds a trade and its linked monthly Flow row to this device immediately,
+   * then sends the same combined addTrade operation used by Trade History.
+   */
+  async addTrade(tradeData: SheetRow): Promise<{ success: boolean; id: string; pending: boolean }> {
+    const trade = normalizeTradeRow(tradeData);
+    const id = getTradeId(trade);
+    if (!id) throw new Error('A trade needs a stable ID before it can be saved.');
+    if (!trade.Date || !trade.Ticker || Number(trade.Quantity) <= 0 || Number(trade.Price) <= 0) {
+      throw new Error('Trade date, ticker, quantity, and price are required.');
+    }
+
+    const flow = buildTradeFlowRow(trade);
+    const month = String(trade.Date).slice(0, 7);
+    if (!flow || !/^\d{4}-\d{2}$/.test(month)) throw new Error('Could not build the linked investment Flow entry.');
+    clearTradeHoldingTombstone(trade);
+    this.optimisticAddRow('Trades', trade);
+    this.optimisticAddRow(month, flow);
+    persistTradeCache(getCachedTradeRows());
+
+    const mutation = enqueuePendingMutation({
+      mutationId: `mut_trade_${id}_${Date.now()}`,
+      type: 'add',
+      sheetName: 'Trades',
+      rowId: id,
+      rowData: { ...trade, _queueOperation: 'tradeUpsert' },
+    });
+
+    return trackActiveWrite('Trades', async () => {
+      try {
+        const response = await sheetsApi.addTrade(trade);
+        if (!response.success) throw new Error('Google Sheets did not confirm the trade.');
+        removePendingMutation(mutation.id);
+        return { success: true, id, pending: false };
+      } catch (error) {
+        markPendingMutationFailed(mutation.id, error instanceof Error ? error.message : String(error));
+        toast.info('Trade saved on this phone. It will sync to Google Sheets when connected.');
+        return { success: true, id, pending: true };
+      }
+    });
+  },
+
+  /** Locally updates the trade and linked Flow row before queuing one upsert. */
+  async updateTrade(rowIndex: number, tradeData: SheetRow): Promise<{ success: boolean; pending: boolean }> {
+    const trade = normalizeTradeRow(tradeData);
+    const id = getTradeId(trade);
+    if (!id) throw new Error('A trade needs a stable ID before it can be updated.');
+    const flow = buildTradeFlowRow(trade);
+    if (!flow) throw new Error('Could not build the linked investment Flow entry.');
+
+    clearTradeHoldingTombstone(trade);
+    this.optimisticAddRow('Trades', trade);
+    const month = String(trade.Date).slice(0, 7);
+    this.optimisticAddRow(month, flow);
+    persistTradeCache(getCachedTradeRows());
+
+    const mutation = enqueuePendingMutation({
+      mutationId: `mut_trade_update_${id}_${Date.now()}`,
+      type: 'update',
+      sheetName: 'Trades',
+      rowIndex,
+      rowId: id,
+      rowData: { ...trade, _queueOperation: 'tradeUpsert' },
+    });
+    return trackActiveWrite('Trades', async () => {
+      try {
+        const response = await sheetsApi.addTrade(trade);
+        if (!response.success) throw new Error('Google Sheets did not confirm the trade update.');
+        removePendingMutation(mutation.id);
+        return { success: true, pending: false };
+      } catch (error) {
+        markPendingMutationFailed(mutation.id, error instanceof Error ? error.message : String(error));
+        toast.info('Trade update saved on this phone. It will sync to Google Sheets when connected.');
+        return { success: true, pending: true };
+      }
+    });
+  },
+
+  /**
+   * Stores a Moomoo import and its Flow rows on-device first, then submits one
+   * idempotent batch through the existing Sheets sync engine.
+   */
+  async queueMoomooTradeSync(
+    incomingTrades: SheetRow[],
+    fullLocalTrades: SheetRow[],
+    options: { restoreDeletedMoomooTrades?: boolean; reconcileFlowHistory?: boolean; cleanupLegacyDeposits?: boolean }
+  ): Promise<{ success: boolean; pending: boolean; result?: Record<string, unknown> }> {
+    const stagedTrades = incomingTrades
+      .map(normalizeTradeRow)
+      .filter((trade) => {
+        const id = getTradeId(trade);
+        if (!id || !/^moo_/i.test(id)) return false;
+        clearTradeHoldingTombstone(trade);
+        if (options.restoreDeletedMoomooTrades) {
+          clearDeletedTombstone(id);
+          const flowId = buildTradeFlowRow(trade)?.Id;
+          if (flowId) clearDeletedTombstone(String(flowId));
+        }
+        return options.restoreDeletedMoomooTrades || !isRecordTombstoned(id);
+      });
+
+    const merged = new Map<string, SheetRow>();
+    for (const row of fullLocalTrades) {
+      const id = getTradeId(row);
+      if (id && !isRecordTombstoned(id)) merged.set(id, row);
+    }
+    for (const trade of stagedTrades) merged.set(getTradeId(trade), trade);
+    const localRows = [...merged.values()];
+    const tradeHeaders = ['Id', 'Date', 'Action', 'Ticker', 'Asset Name', 'Quantity', 'Price', 'Fees', 'Net Total', 'Currency', 'Notes'];
+
+    const flowRowsByMonth = new Map<string, SheetRow[]>();
+    for (const trade of stagedTrades) {
+      const flow = buildTradeFlowRow(trade);
+      if (!flow || isRecordTombstoned(String(flow.Id))) continue;
+      const month = String(flow.Date).slice(0, 7);
+      ensureMonthInLocalMonthList(month);
+      const monthRows = flowRowsByMonth.get(month) || [];
+      monthRows.push(flow);
+      flowRowsByMonth.set(month, monthRows);
+    }
+
+    setSwrCachedData('getSheetData', { sheetName: 'Trades' }, {
+      success: true,
+      data: { headers: tradeHeaders, rows: localRows },
+    });
+    flowRowsByMonth.forEach((incomingRows, month) => {
+      const entry = getSwrCachedEntry<{ success: boolean; data: SheetDataPayload }>('getSheetData', { sheetName: month });
+      const rows = new Map<string, SheetRow>();
+      for (const row of entry?.data?.data?.rows || []) {
+        const id = String(row.Id || row.id || '').trim();
+        if (id) rows.set(id, row);
+      }
+      for (const row of incomingRows) rows.set(String(row.Id), { ...row, _month: month });
+      setSwrCachedData('getSheetData', { sheetName: month }, {
+        success: true,
+        data: {
+          headers: entry?.data?.data?.headers || [
+            'Id', 'Date', 'Type', 'Category', 'SubCategory', 'Description',
+            'Amount', 'Currency', 'TripTag', 'ReceiptUrl', 'Notes',
+          ],
+          rows: [...rows.values()],
+        },
+      });
+    });
+    persistTradeCache(localRows);
+
+    const mutationId = `mut_moomoo_sync_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const mutation = enqueuePendingMutation({
+      mutationId,
+      type: 'add',
+      sheetName: 'Trades',
+      rowId: mutationId,
+      rowData: {
+        _queueOperation: 'moomooSyncBatch',
+        trades: stagedTrades,
+        restoreDeletedMoomooTrades: options.restoreDeletedMoomooTrades === true,
+        reconcileFlowHistory: options.reconcileFlowHistory === true,
+        cleanupLegacyDeposits: options.cleanupLegacyDeposits === true,
+      },
+    });
+
+    return trackActiveWrite('Trades', async () => {
+      try {
+        const response = await sheetsApi.syncMoomooTrades({
+          trades: stagedTrades,
+          restoreDeletedMoomooTrades: options.restoreDeletedMoomooTrades === true,
+          reconcileFlowHistory: options.reconcileFlowHistory === true,
+          cleanupLegacyDeposits: options.cleanupLegacyDeposits === true,
+        });
+        if (!response.success) throw new Error('Google Sheets did not confirm the Moomoo trade batch.');
+        removePendingMutation(mutation.id);
+        const result = response.data?.result && typeof response.data.result === 'object'
+          ? response.data.result as Record<string, unknown>
+          : response.data || {};
+        return { success: true, pending: false, result };
+      } catch (error) {
+        markPendingMutationFailed(mutation.id, error instanceof Error ? error.message : String(error));
+        toast.info('Moomoo trades saved on this phone. They will sync to Google Sheets when connected.');
+        return { success: true, pending: true };
+      }
+    });
   },
 
   /**
@@ -1111,6 +1410,12 @@ export const sheetsData = {
    */
   async deleteRow(sheetName: string, rowIndex?: number, id?: string): Promise<{ success: boolean; pending?: boolean }> {
     const mutationId = `mut_del_${id || rowIndex}_${Date.now()}`;
+    const normalizedId = String(id || '').trim();
+    const deletedTrade = sheetName === 'Trades' && normalizedId
+      ? getCachedTradeRows().find((row) => getTradeId(row) === normalizedId) ||
+        (!isRecordTombstoned(normalizedId) ? getPersistentTradeRow(normalizedId) : undefined)
+      : undefined;
+    const linkedFlow = deletedTrade ? buildTradeFlowRow(deletedTrade) : null;
     const pendingForId = id
       ? getPendingMutations().filter((m) => (m.type === 'add' || m.type === 'update') && m.rowId === id)
       : [];
@@ -1120,6 +1425,53 @@ export const sheetsData = {
 
     // Immediately record tombstone and remove from local SWR cache in 0ms
     this.optimisticDeleteRow(sheetName, rowIndex, id);
+    if (sheetName === 'Trades' && normalizedId) {
+      const flowId = linkedFlow
+        ? String(linkedFlow.Id)
+        : `tx_trade_${normalizedId.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+      const cachedMonths = collectLocallyKnownMonths();
+      const month = linkedFlow
+        ? String(linkedFlow.Date).slice(0, 7)
+        : cachedMonths.find((candidate) =>
+            getSwrCachedEntry<{ success: boolean; data: SheetDataPayload }>('getSheetData', { sheetName: candidate })
+              ?.data?.data?.rows?.some((row) => String(row.Id || row.id || '') === flowId)
+          ) || '';
+      inFlightOptimisticRows.delete(flowId);
+      recordDeletedTombstone(flowId, 'transaction', month || 'Transactions');
+      this.optimisticDeleteRow(month || 'Transactions', undefined, flowId);
+      for (const cachedMonth of cachedMonths) {
+        const entry = getSwrCachedEntry<{ success: boolean; data: SheetDataPayload }>('getSheetData', { sheetName: cachedMonth });
+        const rows = entry?.data?.data?.rows;
+        if (!Array.isArray(rows)) continue;
+        const nextRows = rows.filter((row) => String(row.Id || row.id || '') !== flowId);
+        if (nextRows.length !== rows.length) {
+          setSwrCachedData('getSheetData', { sheetName: cachedMonth }, {
+            success: true,
+            data: { headers: entry?.data?.data?.headers || [], rows: nextRows },
+          });
+        }
+      }
+      if (deletedTrade) {
+        const ticker = tradeTicker(deletedTrade);
+        const remainingTickerTrades = getCachedTradeRows().some((trade) =>
+          tradeTicker(trade) === ticker && !isRecordTombstoned(getTradeId(trade))
+        );
+        if (ticker && !remainingTickerTrades) {
+          const holdingId = `moo_holding_${ticker.toLowerCase()}_0`;
+          recordDeletedTombstone(holdingId, 'trade', 'Portfolio');
+          const portfolioEntry = getSwrCachedEntry<Record<string, unknown>[] | { success: boolean; data: Record<string, unknown>[] }>('getPortfolio', {});
+          const portfolioRows = Array.isArray(portfolioEntry?.data)
+            ? portfolioEntry.data
+            : portfolioEntry?.data && 'data' in portfolioEntry.data
+              ? portfolioEntry.data.data
+              : null;
+          if (portfolioRows) {
+            setSwrCachedData('getPortfolio', {}, portfolioRows.filter((row) => tradeTicker(row) !== ticker));
+          }
+        }
+      }
+      persistTradeCache(getCachedTradeRows());
+    }
     const pendingMutation = enqueuePendingMutation({
       mutationId,
       type: 'delete',
@@ -1186,6 +1538,24 @@ export const sheetsData = {
           if (item.type === 'add') {
             if (!item.rowData) {
               ok = true;
+            } else if (item.rowData._queueOperation === 'moomooSyncBatch') {
+              const queuedTrades = Array.isArray(item.rowData.trades)
+                ? (item.rowData.trades as SheetRow[]).filter((trade) => !isRecordTombstoned(getTradeId(trade)))
+                : [];
+              const res = await sheetsApi.syncMoomooTrades({
+                trades: queuedTrades,
+                restoreDeletedMoomooTrades: item.rowData.restoreDeletedMoomooTrades === true,
+                reconcileFlowHistory: item.rowData.reconcileFlowHistory === true,
+                cleanupLegacyDeposits: item.rowData.cleanupLegacyDeposits === true,
+              });
+              ok = Boolean(res.success);
+              if (!ok && res.message) errMessage = res.message;
+            } else if (item.rowData._queueOperation === 'tradeUpsert') {
+              const tradeData = { ...item.rowData };
+              delete tradeData._queueOperation;
+              const res = await sheetsApi.addTrade(tradeData);
+              ok = Boolean(res.success);
+              if (!ok && res.message) errMessage = res.message;
             } else {
               // Check if this row was subsequently deleted by the user and is not in the local SWR cache
               const swrEntry = getSwrCachedEntry<{ success: boolean; data: SheetDataPayload }>('getSheetData', {
@@ -1215,6 +1585,12 @@ export const sheetsData = {
             );
             if (!item.rowData || (rowId && (isRecordTombstoned(rowId) || hasQueuedDelete))) {
               ok = true;
+            } else if (item.rowData._queueOperation === 'tradeUpsert') {
+              const tradeData = { ...item.rowData };
+              delete tradeData._queueOperation;
+              const res = await sheetsApi.addTrade(tradeData);
+              ok = Boolean(res.success);
+              if (!ok && res.message) errMessage = res.message;
             } else {
               const handleNotFoundUpdate = async (): Promise<boolean> => {
                 if (!rowId && (!item.rowIndex || item.rowIndex <= 1)) {
@@ -1386,6 +1762,32 @@ function applyPendingMutations(rows: SheetRow[], targetSheet?: string): SheetRow
     return sheetName === targetSheet || mutMonth === targetSheet;
   };
 
+  const applyPendingTrade = (rawTrade: SheetRow) => {
+    const trade = normalizeTradeRow(rawTrade);
+    delete trade._queueOperation;
+    const tradeId = getTradeId(trade);
+    if (!tradeId || isRecordTombstoned(tradeId)) return;
+
+    // Trade History is its own sheet. Only the linked Flow record belongs in
+    // month/year/Transactions reads, otherwise a trade is counted twice.
+    if (targetSheet === 'Trades') {
+      const existingTradeIndex = result.findIndex((row) => getTradeId(row) === tradeId);
+      const pendingTrade = { ...trade, _pendingSync: true };
+      if (existingTradeIndex >= 0) result[existingTradeIndex] = { ...result[existingTradeIndex], ...pendingTrade };
+      else result.unshift(pendingTrade);
+    }
+
+    const flow = buildTradeFlowRow(trade);
+    if (!flow || isRecordTombstoned(String(flow.Id))) return;
+    const flowMonth = String(flow.Date).slice(0, 7);
+    if (!matchesTargetSheet(flowMonth, flowMonth)) return;
+
+    const pendingFlow = { ...flow, _pendingSync: true, _month: flowMonth };
+    const existingFlowIndex = result.findIndex((row) => String(row.Id || row.id || '') === String(flow.Id));
+    if (existingFlowIndex >= 0) result[existingFlowIndex] = { ...result[existingFlowIndex], ...pendingFlow };
+    else result.unshift(pendingFlow);
+  };
+
   for (const [, inflight] of inFlightOptimisticRows.entries()) {
     const mutDateStr = String(inflight.rowData?.Date || inflight.rowData?.date || '');
     const mutMonth =
@@ -1419,6 +1821,15 @@ function applyPendingMutations(rows: SheetRow[], targetSheet?: string): SheetRow
   }
 
   for (const m of pending) {
+    if (m.rowData?._queueOperation === 'moomooSyncBatch') {
+      const queuedTrades = Array.isArray(m.rowData.trades) ? m.rowData.trades as SheetRow[] : [];
+      queuedTrades.forEach(applyPendingTrade);
+      continue;
+    }
+    if (m.rowData?._queueOperation === 'tradeUpsert') {
+      applyPendingTrade(m.rowData);
+      continue;
+    }
     const mutDateStr = String(m.rowData?.Date || m.rowData?.date || '');
     const mutMonth =
       /^\d{4}-\d{2}/.test(mutDateStr)
@@ -1434,8 +1845,10 @@ function applyPendingMutations(rows: SheetRow[], targetSheet?: string): SheetRow
     if (m.type === 'add' && m.rowData) {
       const alreadyHas = result.some((r) => (r.Id || r.id) === (m.rowData!.Id || m.rowData!.id));
       if (!alreadyHas) {
+        const rowData = { ...m.rowData };
+        delete rowData._queueOperation;
         result.unshift({
-          ...m.rowData,
+          ...rowData,
           _pendingSync: true,
           _month: mutMonth || m.sheetName,
         });
