@@ -4,6 +4,7 @@ import { normalizeToCanonicalCategory } from '@/lib/canonical-categories';
 import { getValidGoogleSession } from '@/lib/google-auth';
 import { recordUserAiCall } from '@/lib/admin-registry';
 import { generateGeminiContent } from '@/lib/gemini-key-pool';
+import { getReceiptReasoningReasons } from '@/lib/receipt-reasoning';
 
 const VALID_CURRENCIES = new Set(['MYR', 'USD', 'SGD', 'EUR', 'GBP', 'JPY', 'AUD', 'IDR', 'THB', 'CNY', 'HKD']);
 
@@ -38,7 +39,9 @@ function reconcileKinovaReceiptItems(
 
   const prepared = rawItems.map((raw) => {
     let name = raw.name.trim();
-    let qty = Math.max(1, Math.round(raw.quantity || 1));
+    let qty = Number.isFinite(raw.quantity) && raw.quantity > 0
+      ? Number(raw.quantity.toFixed(3))
+      : 1;
     const prefixMatch = name.match(/^(\d{1,2})\s*[xX×]\s+(.+)$/) || name.match(/^[Qq]ty\s*:?\s*(\d{1,2})\s+(.+)$/);
     if (prefixMatch) {
       const parsedQty = Number(prefixMatch[1]);
@@ -142,6 +145,20 @@ function reconcileKinovaReceiptItems(
   return prepared;
 }
 
+function parseReceiptJson(text: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+    try {
+      return JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { session } = await getValidGoogleSession(req);
@@ -200,6 +217,12 @@ CRITICAL INSTRUCTIONS:
 4. TAX, SERVICE CHARGE & ROUNDING:
    - Calculate or extract net subtotal, SST, and service charges.
    - Do not mistake cash rounding adjustments (e.g. 1-5 cents) for tax.
+   - Distinguish tax already included in item prices from tax added after the subtotal. If tax is printed separately, capture each tax/service-charge amount and whether it is included in the total.
+5. CONFIDENCE AND ITEM AUDIT:
+   - Extract the merchant/store name, each visible item name, quantity, unit price, and extended line amount. Check whether quantity × unit price matches the printed line amount.
+   - Check that item totals, subtotal, discounts, separate taxes/service charges, and final amount paid reconcile. Do not force totals to match by changing a printed value.
+   - Set "needsReasoning" to true only when visual evidence or conflicting receipt arithmetic leaves a material field uncertain (merchant, item name, quantity, line amount, tax inclusion/separation, or amount paid). Multiple clearly printed tax lines alone do not require reasoning.
+   - When needsReasoning is true, list concise uncertainty types in "ambiguities". Otherwise return an empty array. Do not guess; preserve the best candidate values for the review pass.
 
 Return ONLY this JSON shape:
 {
@@ -215,13 +238,17 @@ Return ONLY this JSON shape:
   "taxIncluded": boolean,
   "taxLabel": string,
   "items": [{"name": string, "quantity": number, "unitPrice": number, "amount": number, "brand": string | null, "productType": string | null, "category": string}],
+  "needsReasoning": boolean,
+  "ambiguities": string[],
   "notes": string
 }`;
 
-    let cleanJson = '';
     let usedModel = 'gemini-2.5-flash';
+    let parsed: Record<string, unknown> | null = null;
+    let fastPassError: unknown = null;
+    let fastResult: Awaited<ReturnType<typeof generateGeminiContent>> | null = null;
     try {
-      const result = await generateGeminiContent({
+      fastResult = await generateGeminiContent({
         prompt,
         imageBase64,
         mimeType,
@@ -230,30 +257,119 @@ Return ONLY this JSON shape:
         thinkingBudget: 0,
         temperature: 0.1,
         maxOutputTokens: 4096,
-        timeoutMs: 25_000,
-        totalTimeoutMs: 35_000,
+        timeoutMs: 8_000,
+        totalTimeoutMs: 10_000,
       });
-      cleanJson = result.text;
-      usedModel = result.model;
+      parsed = parseReceiptJson(fastResult.text);
+      if (!parsed) fastPassError = new Error('Gemini OCR returned invalid JSON');
+      else usedModel = fastResult.model;
     } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : 'Gemini OCR failed';
-      return NextResponse.json({ success: false, error: errorMsg }, { status: 502 });
+      fastPassError = err;
     }
 
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = JSON.parse(cleanJson) as Record<string, unknown>;
-    } catch {
-      const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
+    let initialReasoningReasons = parsed ? getReceiptReasoningReasons(parsed) : ['fast_ocr_unavailable'];
+    let finalReasoningReasons = initialReasoningReasons;
+    const reasoningAttempted = !parsed || initialReasoningReasons.length > 0;
+    let reasoningUsed = false;
+    let reasoningFallback = false;
+
+    // If the fast OCR call itself fails, try one bounded reasoning-enabled read
+    // so a difficult photo can still produce a usable draft.
+    if (!parsed) {
+      const recoveryPrompt = `${prompt}\n\nRECOVERY READ:\nThe fast OCR extraction did not return usable JSON. Read the image carefully and produce the best evidence-based transaction draft. Pay special attention to the merchant, quantities, item line totals, and whether tax is included or added separately. Set needsReasoning=true and describe any details that remain unclear. Do not expose private chain-of-thought.`;
+      let recovered: Awaited<ReturnType<typeof generateGeminiContent>>;
+      try {
+        recovered = await generateGeminiContent({
+          prompt: recoveryPrompt,
+          imageBase64,
+          mimeType,
+          responseMimeType: 'application/json',
+          thinking: true,
+          thinkingBudget: 128,
+          temperature: 0.1,
+          maxOutputTokens: 4096,
+          timeoutMs: 5_000,
+          totalTimeoutMs: 5_000,
+          preferredKeySlot: 0,
+          onlyPreferredKey: true,
+          models: [process.env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash'],
+        });
+      } catch (err: unknown) {
         try {
-          parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
-        } catch {
-          return NextResponse.json({ success: false, error: 'Gemini OCR returned invalid JSON' }, { status: 502 });
+          recovered = await generateGeminiContent({
+            prompt: recoveryPrompt,
+            imageBase64,
+            mimeType,
+            responseMimeType: 'application/json',
+            thinking: true,
+            thinkingBudget: 128,
+            temperature: 0.1,
+            maxOutputTokens: 4096,
+            timeoutMs: 8_000,
+            totalTimeoutMs: 10_000,
+          });
+        } catch (fallbackErr: unknown) {
+          const errorMsg = fallbackErr instanceof Error
+            ? fallbackErr.message
+            : (err instanceof Error ? err.message : (fastPassError instanceof Error ? fastPassError.message : 'Gemini OCR failed'));
+          return NextResponse.json({ success: false, error: errorMsg }, { status: 502 });
         }
-      } else {
+      }
+      parsed = parseReceiptJson(recovered.text);
+      if (!parsed) {
         return NextResponse.json({ success: false, error: 'Gemini OCR returned invalid JSON' }, { status: 502 });
       }
+      usedModel = recovered.model;
+      reasoningUsed = true;
+      finalReasoningReasons = getReceiptReasoningReasons(parsed);
+    }
+
+    if (reasoningAttempted) {
+      const reasoningPrompt = !reasoningUsed && parsed && fastResult
+        ? `Review the attached receipt image against this first-pass candidate. Re-read the merchant name, each item name and quantity, unit price versus extended line amount, subtotal, discount, tax/service-charge lines, and final paid amount. The first pass flagged: ${initialReasoningReasons.join(', ')}.
+
+Treat the candidate as unverified. Correct a field only when the image supports it. Reconcile quantity × unit price and the printed totals. Decide from the receipt whether tax is included in the listed prices or added after the subtotal. If a detail remains unreadable, retain the best candidate and list the uncertainty; do not invent a value. Do not provide chain-of-thought.
+
+Return only valid JSON with this exact structure:
+{"merchant":string,"date":"YYYY-MM-DD","amount":number,"currency":string,"category":string,"description":string,"subtotal":number|null,"taxAmount":number|null,"taxRate":number|null,"taxIncluded":boolean,"taxLabel":string,"items":[{"name":string,"quantity":number,"unitPrice":number,"amount":number,"brand":string|null,"productType":string|null,"category":string}],"needsReasoning":boolean,"ambiguities":string[],"notes":string}
+
+Candidate to verify:
+${JSON.stringify(parsed)}`
+        : '';
+      if (reasoningPrompt) {
+        try {
+          const reviewed = await generateGeminiContent({
+            prompt: reasoningPrompt,
+            imageBase64,
+            mimeType,
+            responseMimeType: 'application/json',
+            thinking: true,
+            thinkingBudget: 128,
+            temperature: 0.1,
+            maxOutputTokens: 4096,
+            timeoutMs: 8_000,
+            totalTimeoutMs: 8_000,
+            preferredKeySlot: fastResult?.keySlot,
+            onlyPreferredKey: true,
+          });
+          const reviewedJson = parseReceiptJson(reviewed.text);
+          if (!reviewedJson) {
+            reasoningFallback = true;
+          } else {
+            parsed = reviewedJson;
+            usedModel = reviewed.model;
+            reasoningUsed = true;
+            finalReasoningReasons = getReceiptReasoningReasons(parsed);
+          }
+        } catch {
+          // Keep the fast result usable if the optional deep review times out or fails.
+          reasoningFallback = true;
+        }
+      }
+    }
+
+    if (!parsed) {
+      return NextResponse.json({ success: false, error: 'Gemini OCR returned invalid JSON' }, { status: 502 });
     }
 
       try {
@@ -261,8 +377,8 @@ Return ONLY this JSON shape:
           ? parsed.items
             .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
             .map((item) => {
-              const qty = typeof item.quantity === 'number' && Number.isFinite(item.quantity) && item.quantity >= 1
-                ? Math.round(item.quantity)
+              const qty = typeof item.quantity === 'number' && Number.isFinite(item.quantity) && item.quantity > 0
+                ? Number(item.quantity.toFixed(3))
                 : 1;
               const unitPrice = typeof item.unitPrice === 'number' && Number.isFinite(item.unitPrice) && item.unitPrice > 0
                 ? Number(item.unitPrice.toFixed(2))
@@ -577,6 +693,13 @@ Return ONLY this JSON shape:
               notes: finalNotes || (description ? `Scanned from ${description}` : 'Scanned receipt'),
             },
             items,
+            ocrReasoning: {
+              attempted: reasoningAttempted,
+              used: reasoningUsed,
+              reasons: initialReasoningReasons,
+              unresolved: finalReasoningReasons,
+              fallback: reasoningFallback,
+            },
           },
           model: usedModel,
         });

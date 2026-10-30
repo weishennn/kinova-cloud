@@ -6,6 +6,7 @@ import {
   getLoadBalancedGeminiKeys,
   reportGeminiKeyFailure,
   resetGeminiKeyPoolStateForTests,
+  generateGeminiContent,
 } from '../src/lib/gemini-key-pool.ts';
 import { runShortcutGeminiOcrWithFastFail } from '../src/lib/shortcut-draft-store.ts';
 
@@ -38,6 +39,42 @@ test('getLoadBalancedGeminiKeys rotates starting key in round-robin order across
   assert.deepEqual(secondCall, ['key-2', 'key-3', 'key-1']);
   assert.deepEqual(thirdCall, ['key-3', 'key-1', 'key-2']);
   assert.deepEqual(fourthCall, ['key-1', 'key-2', 'key-3']);
+});
+
+test('multi-stage Gemini calls can reuse the same healthy key slot', async () => {
+  resetGeminiKeyPoolStateForTests();
+  const env = {
+    GEMINI_API_KEY_1: 'key-one',
+    GEMINI_API_KEY_2: 'key-two',
+    GEMINI_MODEL: 'gemini-2.5-flash',
+  };
+  const usedKeys = [];
+  const fetchFn = async (_url, init) => {
+    usedKeys.push(init?.headers?.['x-goog-api-key']);
+    return new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }],
+    }), { status: 200 });
+  };
+  const first = await generateGeminiContent({
+    prompt: 'test',
+    thinking: false,
+    models: ['gemini-2.5-flash'],
+    env,
+    fetchFn,
+  });
+  const second = await generateGeminiContent({
+    prompt: 'review',
+    thinking: false,
+    models: ['gemini-2.5-flash'],
+    env,
+    fetchFn,
+    preferredKeySlot: first.keySlot,
+    onlyPreferredKey: true,
+  });
+
+  assert.equal(first.keySlot, 0);
+  assert.equal(second.keySlot, 0);
+  assert.deepEqual(usedKeys, ['key-one', 'key-one']);
 });
 
 test('reportGeminiKeyFailure deprioritizes 429 rate-limited keys while keeping healthy keys first', () => {

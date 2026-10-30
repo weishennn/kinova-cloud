@@ -975,7 +975,11 @@ export function SmartQuickInput() {
         body: JSON.stringify({ imageBase64: base64, mimeType, today: getLocalDateString() }),
       });
       const json = await res.json();
-      const payload = json.success ? (json.data as (AiCommand & { items?: AiReceiptItem[]; rawText?: string })) : null;
+      const payload = json.success ? (json.data as (AiCommand & {
+        items?: AiReceiptItem[];
+        rawText?: string;
+        ocrReasoning?: { attempted: boolean; used: boolean; reasons: string[]; unresolved: string[]; fallback: boolean };
+      })) : null;
       if (!res.ok || !payload || payload.intent !== 'transaction' || !payload.data) {
         throw new Error(json?.error || 'Could not read this receipt');
       }
@@ -1079,9 +1083,14 @@ export function SmartQuickInput() {
       const discountSuffix = tx.discountAmount && tx.discountAmount > 0
         ? ` · Saved ${tx.currency} ${tx.discountAmount.toFixed(2)} with Deals & Offers!`
         : '';
-      toast.success(`✨ Receipt read: ${tx.currency} ${tx.amount.toFixed(2)} (${tx.description})${discountSuffix}`, { id: toastId });
+      const reviewedSuffix = payload.ocrReasoning?.used
+        ? ' · details reviewed'
+        : payload.ocrReasoning?.attempted
+          ? ' · please review details'
+          : '';
+      toast.success(`✨ Receipt read${reviewedSuffix}: ${tx.currency} ${tx.amount.toFixed(2)} (${tx.description})${discountSuffix}`, { id: toastId });
 
-      // Generate intelligent assistant context note (duplicate check, tax relief, category/median comparison)
+      // Use local ledger facts for duplicate and category context; OCR reasoning is handled in the receipt scan.
       try {
         const facts = computeDeterministicLedgerFacts(transactions, profile, tx.description, getLocalDateString(), {
           amount: tx.amount,
@@ -1089,7 +1098,9 @@ export function SmartQuickInput() {
           date: tx.date,
         });
         let note = '';
-        if (facts.potentialDuplicate) {
+        if (payload.ocrReasoning?.unresolved?.length) {
+          note = '⚠️ Please confirm the merchant, items, quantities, and tax details before saving';
+        } else if (facts.potentialDuplicate) {
           note = `⚠️ Matches another ${tx.currency} ${facts.potentialDuplicate.amount.toFixed(2)} on ${facts.potentialDuplicate.date}`;
         } else {
           const catMedian = facts.categoryMedians[tx.category];
@@ -1100,30 +1111,6 @@ export function SmartQuickInput() {
           }
         }
         setReceiptAssistantNote(note);
-
-        // Pass 2: Thinking assistant pass interprets LHDN tax relief, duplicates, and proposed action
-        void (async () => {
-          try {
-            const turn = await runKinovaTurn({
-              text: `Interpret receipt from ${tx.description} for ${tx.currency} ${tx.amount.toFixed(2)}, subtotal ${tx.currency} ${(tx.subtotal || tx.amount).toFixed(2)}, SST ${tx.currency} ${(tx.taxAmount || 0).toFixed(2)}. Check tax relief, duplicate, and category.`,
-              today: getLocalDateString(),
-              profile,
-              transactions,
-              forceAssistant: true,
-              factQuery: tx.description,
-              pendingReceipt: { amount: tx.amount, merchant: tx.description, date: tx.date },
-            });
-            if (turn.source === 'assistant') {
-              setAssistantResult(turn.assistantResult);
-              const reliefTag = turn.assistantResult.receiptAnalysis?.taxReliefCategory;
-              if (reliefTag) {
-                setReceiptAssistantNote(`${note} · 🇲🇾 LHDN ${reliefTag}`);
-              }
-            }
-          } catch (e) {
-            console.warn('[Pass2 Receipt] Non-fatal thinking error:', e);
-          }
-        })();
       } catch (err) {
         console.warn('Receipt interpretation non-fatal:', err);
       }

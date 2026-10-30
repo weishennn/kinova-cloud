@@ -190,6 +190,10 @@ export interface GenerateGeminiOptions {
   timeoutMs?: number;
   /** Hard deadline across all model and API-key retries. */
   totalTimeoutMs?: number;
+  /** Prefer the same configured key slot as a preceding call in one multi-stage task. */
+  preferredKeySlot?: number;
+  /** Restrict a stage to its preferred healthy key; ignored if that key is cooling down. */
+  onlyPreferredKey?: boolean;
   models?: string[];
   fetchFn?: typeof fetch;
   env?: Record<string, string | undefined>;
@@ -199,6 +203,8 @@ export interface GenerateGeminiResult {
   text: string;
   rawText: string;
   model: string;
+  /** Stable, zero-based slot in the configured key list; never contains key material. */
+  keySlot?: number;
   candidates?: unknown[];
 }
 
@@ -217,9 +223,24 @@ export async function generateGeminiContent(
   options: GenerateGeminiOptions
 ): Promise<GenerateGeminiResult> {
   const env = options.env || process.env;
+  const configuredKeys = parseGeminiApiKeys(env);
   const apiKeys = getLoadBalancedGeminiKeys(env);
   if (apiKeys.length === 0) {
     throw new Error('GEMINI_API_KEY is not configured in server environment');
+  }
+  if (options.preferredKeySlot != null && Number.isInteger(options.preferredKeySlot)) {
+    const preferredKey = configuredKeys[options.preferredKeySlot];
+    const preferredIndex = preferredKey ? apiKeys.indexOf(preferredKey) : -1;
+    const isHealthy = preferredKey && (keyCooldownUntil.get(preferredKey) || 0) <= Date.now();
+    if (preferredIndex >= 0 && isHealthy) {
+      if (preferredIndex > 0) {
+        apiKeys.splice(preferredIndex, 1);
+        apiKeys.unshift(preferredKey);
+      }
+      if (options.onlyPreferredKey) {
+        apiKeys.splice(1);
+      }
+    }
   }
 
   const models = options.models && options.models.length > 0
@@ -377,6 +398,7 @@ export async function generateGeminiContent(
           text: cleanText,
           rawText,
           model,
+          keySlot: configuredKeys.indexOf(apiKey) >= 0 ? configuredKeys.indexOf(apiKey) : undefined,
           candidates: responseData.candidates,
         };
       } catch (err: unknown) {
