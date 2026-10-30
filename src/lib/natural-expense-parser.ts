@@ -231,14 +231,6 @@ function hasUnparsedTemporalContext(text: string, matchedDateText: string): bool
   return UNPARSED_TEMPORAL_CONTEXT_PATTERNS.some((pattern) => pattern.test(unparsedText));
 }
 
-/** Remove the broad relative-date wording the quick parser deliberately leaves for the assistant. */
-export function stripUnparsedTemporalContext(text: string): string {
-  return UNPARSED_TEMPORAL_CONTEXT_PATTERNS.reduce(
-    (cleaned, pattern) => cleaned.replace(pattern, ' '),
-    text,
-  ).replace(/\s+/g, ' ').trim();
-}
-
 /**
  * Parses natural language input string into structured expense data.
  * Examples:

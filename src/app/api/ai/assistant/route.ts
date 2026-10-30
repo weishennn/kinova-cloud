@@ -4,9 +4,8 @@ import { recordUserAiCall } from '@/lib/admin-registry';
 import { generateGeminiContent } from '@/lib/gemini-key-pool';
 import { getLocalDateString } from '@/lib/date-helper';
 import { normalizeToCanonicalCategory } from '@/lib/canonical-categories';
-import { parseAssistantJsonResponse } from '@/lib/kinova-assistant';
+import { parseAssistantJsonResponse, type AssistantPendingContext } from '@/lib/kinova-assistant';
 import { requiresExtendedReasoning } from '@/lib/intent-router';
-import { buildAssistantExpenseDraft, restoreDateOnlyClarification, restoreKnownExpenseFields } from '@/lib/assistant-expense-draft';
 
 export interface AssistantTurn {
   role: 'user' | 'assistant';
@@ -15,14 +14,7 @@ export interface AssistantTurn {
 
 export interface AssistantRequestBody {
   text?: string;
-  expenseDraft?: {
-    amount?: number;
-    currency?: string;
-    category?: string;
-    type?: 'Expense' | 'Income';
-    description?: string;
-    dateNeedsResolution?: boolean;
-  };
+  pendingContext?: AssistantPendingContext | null;
   imageBase64?: string;
   mimeType?: string;
   today?: string;
@@ -67,6 +59,41 @@ export interface AssistantRequestBody {
   }>;
 }
 
+const PENDING_INTENTS = new Set<AssistantPendingContext['intent']>([
+  'transaction', 'installment', 'trade', 'trip',
+]);
+
+function normalizePendingContext(value: unknown): AssistantPendingContext | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.intent !== 'string' ||
+    !PENDING_INTENTS.has(candidate.intent as AssistantPendingContext['intent']) ||
+    typeof candidate.originalRequest !== 'string' ||
+    !candidate.originalRequest.trim() ||
+    !candidate.knownFields ||
+    typeof candidate.knownFields !== 'object' ||
+    Array.isArray(candidate.knownFields) ||
+    !Array.isArray(candidate.missingFields)
+  ) return null;
+
+  const knownFields = candidate.knownFields as Record<string, unknown>;
+  try {
+    if (JSON.stringify(knownFields).length > 6000) return null;
+  } catch {
+    return null;
+  }
+
+  return {
+    intent: candidate.intent as AssistantPendingContext['intent'],
+    originalRequest: candidate.originalRequest.trim().slice(0, 1200),
+    knownFields,
+    missingFields: candidate.missingFields
+      .filter((field): field is string => typeof field === 'string' && Boolean(field.trim()))
+      .slice(0, 12),
+  };
+}
+
 const ASSISTANT_SYSTEM_PROMPT = `You are Kinova, this user's personal financial assistant in Malaysia. You help them think and act. You are not a receipt OCR bot.
 
 Today is {{TODAY}}. Default currency MYR. Reply in the language of this turn (Chinese, English, Malay, or Manglish). Use profile.language when it is zh, en, or ms.
@@ -88,9 +115,14 @@ Decide exactly one mode:
 - clarify: two intents are close, or a required field is missing. Ask one question. Offer at most 2 choices.
 - unknown: you cannot tell. Ask one question.
 
-If KNOWN EXPENSE FIELDS are provided in the request, they were extracted from the user's exact message. Preserve their amount, currency, category, and description; never ask the user to repeat a field already provided. If the only unresolved part is an imprecise date expression, ask only which date to use and restate the amount you understood.
 For a recording request, treat an explicit bare number as the amount in the default currency unless the message clearly identifies it as a date, time, quantity, percentage, or calculation. Never ask for an amount already present in the original message.
 When the user names a merchant or purpose, put those words in transaction data.description, excluding the amount and date phrase. A simple expense phrase with a merchant/purpose and amount is a record request. Do not leave description null.
+
+Clarification state:
+- When a record request is missing required information, return pendingContext with the intent, the original request, every field you understand with its value, and only the required fields still missing.
+- When pendingContext is supplied, interpret the new user message in the context of the unresolved fields. Merge an answer into knownFields, preserve all previously understood fields, keep originalRequest as the initial request, and recompute missingFields. Do not ask the user to repeat a field already known.
+- If the new message completes the request, return the complete command and set pendingContext to null. If it clearly starts an unrelated request, handle it as a new request.
+- Do not guess uncertain values. A clarification response must preserve the current state in pendingContext so the next reply can continue from it.
 
 Rules:
 - If the ledger has no matching records, say clearly that no records exist in their personal ledger (e.g. "在你的个人账本中暂无此记录" / "No matching records found in your personal ledger"). NEVER invent or hallucinate market prices when there is no match. Missing data must be explicitly reported as missing.
@@ -116,6 +148,12 @@ Rules:
   "clarification": {
     "question": string,
     "options": [string, string]
+  } | null,
+  "pendingContext": {
+    "intent": "transaction" | "installment" | "trade" | "trip",
+    "originalRequest": string,
+    "knownFields": object,
+    "missingFields": string[]
   } | null,
   "receiptAnalysis": {
     "merchant": string,
@@ -149,21 +187,7 @@ export async function POST(req: NextRequest) {
     const text = typeof body.text === 'string' ? body.text.trim() : '';
     const imageBase64 = typeof body.imageBase64 === 'string' ? body.imageBase64.trim() : '';
     const mimeType = body.mimeType || 'image/jpeg';
-    const rawExpenseDraft = body.expenseDraft;
-    const requestExpenseDraft = rawExpenseDraft &&
-      typeof rawExpenseDraft.amount === 'number' && Number.isFinite(rawExpenseDraft.amount) && rawExpenseDraft.amount > 0 &&
-      typeof rawExpenseDraft.description === 'string' && rawExpenseDraft.description.trim() &&
-      rawExpenseDraft.dateNeedsResolution === true
-      ? {
-          amount: rawExpenseDraft.amount,
-          currency: typeof rawExpenseDraft.currency === 'string' ? rawExpenseDraft.currency : 'MYR',
-          category: typeof rawExpenseDraft.category === 'string' ? rawExpenseDraft.category : 'Other',
-          type: rawExpenseDraft.type === 'Income' ? 'Income' as const : 'Expense' as const,
-          description: rawExpenseDraft.description.trim(),
-          dateNeedsResolution: true as const,
-        }
-      : null;
-    const expenseDraft = requestExpenseDraft || (!imageBase64 ? buildAssistantExpenseDraft(text) : null);
+    const pendingContext = normalizePendingContext(body.pendingContext);
 
     if (!text && !imageBase64) {
       return NextResponse.json(
@@ -181,8 +205,8 @@ export async function POST(req: NextRequest) {
       ? `\n【DETERMINISTIC FACTS ACROSS FULL LEDGER】: ${JSON.stringify(body.deterministicFacts, null, 2)}\n`
       : '';
 
-    const expenseDraftBlock = expenseDraft
-      ? `\n【KNOWN EXPENSE FIELDS — already stated by user】: ${JSON.stringify(expenseDraft, null, 2)}\nKeep the amount ${expenseDraft.currency} ${expenseDraft.amount.toFixed(2)}. The original message contains a date phrase that still needs interpretation; do not treat the parser's fallback date as the user's intended date. Ask only about the date if the phrase cannot be mapped to a single day.\n`
+    const pendingContextBlock = pendingContext
+      ? `\n【PENDING CLARIFICATION STATE】: ${JSON.stringify(pendingContext, null, 2)}\n`
       : '';
 
     const actionsBlock = Array.isArray(body.recentActions) && body.recentActions.length > 0
@@ -200,7 +224,7 @@ export async function POST(req: NextRequest) {
     const userPrompt = [
       text ? `User message: "${text}"` : 'Analyze this attached receipt or payment screenshot.',
       profileBlock,
-      expenseDraftBlock,
+      pendingContextBlock,
       factsBlock,
       actionsBlock,
       turnsBlock,
@@ -234,10 +258,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (expenseDraft) {
-      restoreKnownExpenseFields(parsedResult, expenseDraft);
-      restoreDateOnlyClarification(parsedResult, expenseDraft);
-    }
+    parsedResult.pendingContext = parsedResult.mode === 'clarify'
+      ? normalizePendingContext(parsedResult.pendingContext)
+      : null;
 
     // Sanitize category if command is present
     if (parsedResult.command && typeof parsedResult.command === 'object') {

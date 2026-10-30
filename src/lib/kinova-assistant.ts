@@ -14,7 +14,6 @@
  */
 
 import { requiresExtendedReasoning, routeLocalIntent, type LocalRouteResult } from './intent-router.ts';
-import { buildAssistantExpenseDraft, type AssistantExpenseDraft } from './assistant-expense-draft.ts';
 import { getUserMoneyProfile, type UserMoneyProfile } from './user-money-profile.ts';
 import { getLocalDateString } from './date-helper.ts';
 import type { AiCommand } from '../types/ai-command.ts';
@@ -27,6 +26,30 @@ import { mineUserHabitSuggestions } from './habit-suggestions.ts';
 export interface AssistantTurnMessage {
   role: 'user' | 'assistant';
   text: string;
+}
+
+export interface AssistantPendingContext {
+  intent: 'transaction' | 'installment' | 'trade' | 'trip';
+  originalRequest: string;
+  knownFields: Record<string, unknown>;
+  missingFields: string[];
+}
+
+export function updateAssistantConversation(
+  currentTurns: AssistantTurnMessage[],
+  userText: string,
+  response: AssistantApiResponse,
+): { turns: AssistantTurnMessage[]; pendingContext: AssistantPendingContext | null } {
+  const assistantText = response.clarification?.question || response.answer || response.reasoning || '';
+  const turns: AssistantTurnMessage[] = [
+    ...currentTurns,
+    { role: 'user' as const, text: userText },
+    { role: 'assistant' as const, text: assistantText },
+  ].slice(-6);
+  return {
+    turns,
+    pendingContext: response.mode === 'clarify' ? response.pendingContext || null : null,
+  };
 }
 
 export interface DeterministicLedgerFacts {
@@ -66,6 +89,7 @@ export interface AssistantApiResponse {
     question: string;
     options: [string, string];
   } | null;
+  pendingContext: AssistantPendingContext | null;
   receiptAnalysis: {
     merchant: string;
     netAmount: number;
@@ -251,10 +275,10 @@ export interface RunKinovaTurnOptions {
   profile?: UserMoneyProfile;
   transactions?: Array<any>;
   sessionTurns?: AssistantTurnMessage[];
+  pendingContext?: AssistantPendingContext | null;
   forceAssistant?: boolean;
   factQuery?: string;
   pendingReceipt?: { amount: number; merchant?: string; date?: string };
-  expenseDraft?: AssistantExpenseDraft;
   signal?: AbortSignal;
 }
 
@@ -269,8 +293,6 @@ export async function runKinovaTurn(
   const today = options.today || getLocalDateString();
   const profile = options.profile || getUserMoneyProfile(options.transactions);
   const text = (options.text || '').trim();
-  const expenseDraft = options.imageBase64 ? null : buildAssistantExpenseDraft(text);
-
   // If text-only and not forced to assistant, check local router first (0ms latency)
   if (text && !options.imageBase64 && !options.forceAssistant) {
     const localMatch = routeLocalIntent(text, profile, today);
@@ -321,7 +343,6 @@ export async function runKinovaTurn(
     signal: options.signal || AbortSignal.timeout(useExtendedReasoning ? 50_000 : 20_000),
     body: JSON.stringify({
       text: text || undefined,
-      ...(expenseDraft ? { expenseDraft } : {}),
       imageBase64: options.imageBase64 || undefined,
       mimeType: options.mimeType || undefined,
       today,
@@ -342,6 +363,7 @@ export async function runKinovaTurn(
       },
       recentActions: profile.recentActions,
       sessionTurns: options.sessionTurns,
+      ...(options.pendingContext ? { pendingContext: options.pendingContext } : {}),
       ...(deterministicFacts ? { deterministicFacts } : {}),
       ...(ledgerSample ? { ledgerSample } : {}),
     }),

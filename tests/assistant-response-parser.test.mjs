@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { computeDeterministicLedgerFacts, parseAssistantJsonResponse, runKinovaTurn } from '../src/lib/kinova-assistant.ts';
+import { computeDeterministicLedgerFacts, parseAssistantJsonResponse, runKinovaTurn, updateAssistantConversation } from '../src/lib/kinova-assistant.ts';
 
 const mockProfile = {
   language: 'auto',
@@ -105,42 +105,86 @@ test('runKinovaTurn forwards receipt facts and merchant query to the assistant p
   assert.equal(sentBody.deterministicFacts.potentialDuplicate.description, 'Shell Petrol');
 });
 
-test('runKinovaTurn sends parsed amount and merchant when only the relative date is unresolved', async () => {
+test('runKinovaTurn forwards structured clarification state without local phrase extraction', async () => {
   const originalFetch = globalThis.fetch;
   let sentBody;
+  const clarification = {
+    mode: 'clarify',
+    reasoning: 'The period does not identify one day.',
+    answer: 'Which day in that period?',
+    proposedAction: null,
+    command: null,
+    clarification: { question: 'Which day in that period?', options: [] },
+    pendingContext: {
+      intent: 'transaction',
+      originalRequest: 'lunch 15 last week',
+      knownFields: { amount: 15, description: 'lunch', currency: 'MYR' },
+      missingFields: ['date'],
+    },
+    receiptAnalysis: null,
+  };
+  const firstConversation = updateAssistantConversation([], 'lunch 15 last week', clarification);
+  assert.equal(firstConversation.turns.at(-1).text, clarification.clarification.question);
+  assert.deepEqual(firstConversation.pendingContext, clarification.pendingContext);
+
   globalThis.fetch = async (_url, init) => {
     sentBody = JSON.parse(String(init?.body || '{}'));
     return new Response(JSON.stringify({
       success: true,
       model: 'mock-model',
       data: {
-        mode: 'clarify',
-        reasoning: 'The date is not precise.',
-        answer: 'Which date should I use?',
+        mode: 'record',
+        reasoning: 'The reply resolves the missing date.',
+        answer: 'Ready to review the transaction.',
         proposedAction: null,
-        command: null,
-        clarification: { question: 'Which date should I use?', options: [] },
+        command: {
+          intent: 'transaction',
+          confidence: 0.99,
+          data: {
+            amount: 15,
+            currency: 'MYR',
+            type: 'Expense',
+            category: 'Food & Dining',
+            description: 'lunch',
+            date: '2026-10-22',
+          },
+        },
+        clarification: null,
+        pendingContext: null,
         receiptAnalysis: null,
       },
     }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   };
 
   try {
-    await runKinovaTurn({
-      text: 'mamak lunch 15 last week',
+    const completedTurn = await runKinovaTurn({
+      text: 'last week Thursday',
       today: '2026-10-30',
       profile: mockProfile,
       transactions,
       forceAssistant: true,
+      sessionTurns: firstConversation.turns,
+      pendingContext: firstConversation.pendingContext,
     });
+    assert.equal(completedTurn.source, 'assistant');
+    assert.equal(completedTurn.assistantResult.mode, 'record');
+    assert.equal(
+      updateAssistantConversation(firstConversation.turns, 'last week Thursday', completedTurn.assistantResult).pendingContext,
+      null,
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
 
-  assert.equal(sentBody.expenseDraft.amount, 15);
-  assert.equal(sentBody.expenseDraft.currency, 'MYR');
-  assert.equal(sentBody.expenseDraft.dateNeedsResolution, true);
-  assert.equal('date' in sentBody.expenseDraft, false);
+  assert.deepEqual(sentBody.pendingContext, {
+    intent: 'transaction',
+    originalRequest: 'lunch 15 last week',
+    knownFields: { amount: 15, description: 'lunch', currency: 'MYR' },
+    missingFields: ['date'],
+  });
+  assert.deepEqual(sentBody.sessionTurns, firstConversation.turns);
+  assert.equal(sentBody.text, 'last week Thursday');
+  assert.equal('expenseDraft' in sentBody, false);
 });
 
 test('runKinovaTurn skips full-ledger work for a simple conversational message', async () => {

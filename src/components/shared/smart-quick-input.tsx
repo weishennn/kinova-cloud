@@ -16,7 +16,9 @@ import {
 import {
   runKinovaTurn,
   computeDeterministicLedgerFacts,
+  updateAssistantConversation,
   type AssistantApiResponse,
+  type AssistantPendingContext,
   type AssistantTurnMessage,
 } from '@/lib/kinova-assistant';
 import { routeLocalIntent, type LocalRouteResult } from '@/lib/intent-router';
@@ -130,6 +132,7 @@ export function SmartQuickInput() {
   // Assistant states
   const [sessionTurns, setSessionTurns] = useState<AssistantTurnMessage[]>([]);
   const sessionTurnsRef = useRef<AssistantTurnMessage[]>([]);
+  const pendingAssistantContextRef = useRef<AssistantPendingContext | null>(null);
   const [assistantResult, setAssistantResult] = useState<AssistantApiResponse | null>(null);
   const [isAssistantThinking, setIsAssistantThinking] = useState(false);
   const assistantRequestInFlightRef = useRef(false);
@@ -184,7 +187,9 @@ export function SmartQuickInput() {
 
   const activeCommand = useMemo<AiCommand | null>(() => {
     if (aiParsed) return aiParsed;
-    if (assistantResult?.command) return assistantResult.command;
+    if (assistantResult?.command && !['clarify', 'unknown'].includes(assistantResult.mode)) {
+      return assistantResult.command;
+    }
     if (localRoute?.mode === 'quick_parse') return localRoute.command;
     if (localParsed?.hasUnparsedTemporalContext) return null;
     return localCommand;
@@ -461,25 +466,21 @@ export function SmartQuickInput() {
           profile,
           transactions,
           sessionTurns: sessionTurnsRef.current,
+          pendingContext: pendingAssistantContextRef.current,
           forceAssistant: true,
         });
 
         if (turnResult.source === 'assistant') {
-          setAssistantResult(turnResult.assistantResult);
-          if (turnResult.assistantResult.command) {
-            setAiParsed(turnResult.assistantResult.command);
+          const result = turnResult.assistantResult;
+          const conversation = updateAssistantConversation(sessionTurnsRef.current, trimmed, result);
+          pendingAssistantContextRef.current = conversation.pendingContext;
+          sessionTurnsRef.current = conversation.turns;
+          setSessionTurns(conversation.turns);
+          setAssistantResult(result);
+          if (result.command && !['clarify', 'unknown'].includes(result.mode)) {
+            setAiParsed(result.command);
             setIsAiEnhanced(true);
           }
-          setSessionTurns((prev) =>
-            [
-              ...prev,
-              { role: 'user' as const, text: trimmed },
-              {
-                role: 'assistant' as const,
-                text: turnResult.assistantResult.answer || turnResult.assistantResult.reasoning || '',
-              },
-            ].slice(-6)
-          );
         }
       } catch (err) {
         const msg = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
