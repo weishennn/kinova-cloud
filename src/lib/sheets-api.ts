@@ -1188,9 +1188,15 @@ export const sheetsApi = {
       }
     ),
 
+  // Keep Flow-only repairs on the established Moomoo batch action so already
+  // deployed Apps Script bridges can reconcile the ledger without a new action.
   syncMoomooFlows: () =>
     apiRequest<{ success: boolean; message?: string; data: Record<string, unknown> }>(
-      { action: 'syncMoomooFlows', method: 'POST' }
+      {
+        action: 'syncMoomooTrades',
+        params: { trades: [], reconcileFlowHistory: true },
+        method: 'POST',
+      }
     ),
 
   getPortfolio: () =>
