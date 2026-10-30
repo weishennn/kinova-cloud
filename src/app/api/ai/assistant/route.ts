@@ -6,7 +6,7 @@ import { getLocalDateString } from '@/lib/date-helper';
 import { normalizeToCanonicalCategory } from '@/lib/canonical-categories';
 import { parseAssistantJsonResponse } from '@/lib/kinova-assistant';
 import { requiresExtendedReasoning } from '@/lib/intent-router';
-import { restoreDateOnlyClarification } from '@/lib/assistant-expense-draft';
+import { buildAssistantExpenseDraft, restoreDateOnlyClarification, restoreKnownExpenseFields } from '@/lib/assistant-expense-draft';
 
 export interface AssistantTurn {
   role: 'user' | 'assistant';
@@ -90,11 +90,14 @@ Decide exactly one mode:
 
 If KNOWN EXPENSE FIELDS are provided in the request, they were extracted from the user's exact message. Preserve their amount, currency, category, and description; never ask the user to repeat a field already provided. If the only unresolved part is an imprecise date expression, ask only which date to use and restate the amount you understood.
 For a recording request, treat an explicit bare number as the amount in the default currency unless the message clearly identifies it as a date, time, quantity, percentage, or calculation. Never ask for an amount already present in the original message.
+When the user names a merchant or purpose, put those words in transaction data.description, excluding the amount and date phrase. A simple expense phrase with a merchant/purpose and amount is a record request. Do not leave description null.
 
 Rules:
 - If the ledger has no matching records, say clearly that no records exist in their personal ledger (e.g. "在你的个人账本中暂无此记录" / "No matching records found in your personal ledger"). NEVER invent or hallucinate market prices when there is no match. Missing data must be explicitly reported as missing.
 - For receipts or screenshots: extract the net out-of-pocket amount, items, tax, and deductions. Then interpret: tax relief hint (e.g. LHDN Lifestyle RM2,500, Medical RM10,000), duplicate check against facts, comparison to user median, and one proposed action button.
 - Always provide reasoning: 1-2 concise user-facing sentences citing evidence (e.g. "6 weekday lunches, median RM 15.50" or "receipt net RM 42.30 after SST, not the pre-discount bill"). Never dump raw chain of thought.
+- For mode "record" with a transaction, command.data must include amount (number), currency, type, category, description (non-empty string), and date (YYYY-MM-DD). Use the merchant/purpose words from the user's message for description; never return null when those words are present.
+- Resolve relative date language against Today and return a YYYY-MM-DD date; never replace a named past/future period with today. If the period does not identify the transaction's exact day, ask only for the date.
 - Return ONLY valid JSON matching this schema:
 {
   "mode": "record" | "advise" | "correct" | "repeat" | "undo" | "set_preference" | "navigate" | "clarify" | "unknown",
@@ -108,7 +111,7 @@ Rules:
   "command": {
     "intent": "transaction" | "installment" | "trade" | "trip",
     "confidence": 0.0 - 1.0,
-    "data": { ... }
+    "data": object
   } | null,
   "clarification": {
     "question": string,
@@ -147,7 +150,7 @@ export async function POST(req: NextRequest) {
     const imageBase64 = typeof body.imageBase64 === 'string' ? body.imageBase64.trim() : '';
     const mimeType = body.mimeType || 'image/jpeg';
     const rawExpenseDraft = body.expenseDraft;
-    const expenseDraft = rawExpenseDraft &&
+    const requestExpenseDraft = rawExpenseDraft &&
       typeof rawExpenseDraft.amount === 'number' && Number.isFinite(rawExpenseDraft.amount) && rawExpenseDraft.amount > 0 &&
       typeof rawExpenseDraft.description === 'string' && rawExpenseDraft.description.trim() &&
       rawExpenseDraft.dateNeedsResolution === true
@@ -160,6 +163,7 @@ export async function POST(req: NextRequest) {
           dateNeedsResolution: true as const,
         }
       : null;
+    const expenseDraft = requestExpenseDraft || (!imageBase64 ? buildAssistantExpenseDraft(text) : null);
 
     if (!text && !imageBase64) {
       return NextResponse.json(
@@ -230,7 +234,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (expenseDraft) restoreDateOnlyClarification(parsedResult, expenseDraft);
+    if (expenseDraft) {
+      restoreKnownExpenseFields(parsedResult, expenseDraft);
+      restoreDateOnlyClarification(parsedResult, expenseDraft);
+    }
 
     // Sanitize category if command is present
     if (parsedResult.command && typeof parsedResult.command === 'object') {

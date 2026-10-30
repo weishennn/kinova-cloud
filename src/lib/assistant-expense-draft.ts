@@ -1,5 +1,5 @@
 import { isQuestionOrAdviceRequest } from './intent-router.ts';
-import { parseNaturalExpense } from './natural-expense-parser.ts';
+import { parseNaturalExpense, stripUnparsedTemporalContext } from './natural-expense-parser.ts';
 
 export interface AssistantExpenseDraft {
   amount: number;
@@ -27,19 +27,54 @@ export function buildAssistantExpenseDraft(text: string): AssistantExpenseDraft 
   ) {
     return null;
   }
+  const description = stripUnparsedTemporalContext(parsed.description);
+  if (!description) return null;
 
   return {
     amount: parsed.amount,
     currency: parsed.currency || 'MYR',
     category: parsed.category,
     type: parsed.type,
-    description: parsed.description,
+    description,
     dateNeedsResolution: true,
   };
 }
 
 export function isAmountClarificationQuestion(question: string): boolean {
   return /\b(?:amount|how\s+much|price|cost|total|sum|berapa|jumlah|harga|wang|duit)\b|(?:金额|金額|多少|价钱|價格|價錢)/i.test(question);
+}
+
+/** Restore fields already extracted from the user's expense wording onto the AI record. */
+export function restoreKnownExpenseFields(
+  response: Record<string, unknown>,
+  draft: AssistantExpenseDraft,
+): boolean {
+  if (response.mode !== 'record') return false;
+
+  const knownFields = {
+    amount: draft.amount,
+    currency: draft.currency,
+    type: draft.type,
+    category: draft.category,
+    description: draft.description,
+  };
+  let restored = false;
+  const command = response.command && typeof response.command === 'object'
+    ? response.command as Record<string, unknown>
+    : null;
+  if (command?.intent === 'transaction' && command.data && typeof command.data === 'object') {
+    Object.assign(command.data, knownFields);
+    restored = true;
+  }
+
+  const proposedAction = response.proposedAction && typeof response.proposedAction === 'object'
+    ? response.proposedAction as Record<string, unknown>
+    : null;
+  if (proposedAction?.type === 'save_transaction' && proposedAction.payload && typeof proposedAction.payload === 'object') {
+    Object.assign(proposedAction.payload, knownFields);
+    restored = true;
+  }
+  return restored;
 }
 
 /** Replace a model's redundant amount question with the only unresolved field. */
