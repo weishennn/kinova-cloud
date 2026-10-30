@@ -184,7 +184,7 @@ function doGet(e) {
       case 'deleteRow':
         return createResponse(true, withScriptLock(() => deleteRow(params.sheetName, params.rowIndex, params.id, params.mutationId)));
       case 'batchSyncTrades': {
-        const rawTrades = (body && body.trades) ? body.trades : params.trades;
+        const rawTrades = params.trades;
         const trades = rawTrades ? (typeof rawTrades === 'string' ? JSON.parse(rawTrades) : rawTrades) : [];
         return createResponse(true, withScriptLock(() => batchSyncTrades(trades)));
       }
@@ -255,12 +255,14 @@ function doPost(e) {
 
   let body;
   try {
-    body = JSON.parse(e.postData.contents);
+    body = JSON.parse(e && e.postData && e.postData.contents ? e.postData.contents : '{}');
   } catch (error) {
     return createResponse(false, null, "Invalid JSON payload");
   }
+  body = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  const params = e && e.parameter ? e.parameter : {};
 
-  const action = body.action || e.parameter.action;
+  const action = body.action || params.action;
 
   try {
     switch (action) {
@@ -312,12 +314,12 @@ function doPost(e) {
       case 'createDriveSnapshot':
         return createResponse(true, createCashFlowMigrationBackup());
       case 'batchSyncTrades': {
-        const rawTrades = (body && body.trades) ? body.trades : params.trades;
+        const rawTrades = body.trades !== undefined ? body.trades : params.trades;
         const trades = rawTrades ? (typeof rawTrades === 'string' ? JSON.parse(rawTrades) : rawTrades) : [];
         return createResponse(true, withScriptLock(() => batchSyncTrades(trades)));
       }
       case 'syncMoomooTrades': {
-        const rawTrades = (body && body.trades) ? body.trades : params.trades;
+        const rawTrades = body.trades !== undefined ? body.trades : params.trades;
         const trades = rawTrades ? (typeof rawTrades === 'string' ? JSON.parse(rawTrades) : rawTrades) : [];
         const restoreDeletedMoomooTrades = body.restoreDeletedMoomooTrades === true || String(params.restoreDeletedMoomooTrades || '').toLowerCase() === 'true';
         const reconcileFlowHistory = body.reconcileFlowHistory === true || String(params.reconcileFlowHistory || '').toLowerCase() === 'true';

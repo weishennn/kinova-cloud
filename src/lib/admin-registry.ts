@@ -68,14 +68,15 @@ export function getAdminAppsScriptEndpoint(): { targetUrl: string; apiKey: strin
 export async function fetchAdminAppsScript(
   method: 'GET' | 'POST',
   action: string,
-  params: Record<string, unknown> = {}
+  params: Record<string, unknown> = {},
+  timeoutMs = 15000
 ): Promise<unknown> {
   const endpoint = getAdminAppsScriptEndpoint();
   if (!endpoint) return null;
 
   const { targetUrl, apiKey } = endpoint;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const url = new URL(targetUrl);

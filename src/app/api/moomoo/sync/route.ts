@@ -108,7 +108,8 @@ async function syncTradesToLedger(
   trades: Array<Record<string, unknown>>,
   restoreDeletedMoomooTrades = false,
   reconcileFlowHistory = false,
-  cleanupLegacyDeposits = false
+  cleanupLegacyDeposits = false,
+  appsScriptTimeoutMs = 55_000
 ): Promise<{ added: number; updated: number; rows?: Array<Record<string, unknown>>; changes: Array<Record<string, unknown>>; removedIds: string[]; restoredTombstones: number; flowAdded: number; flowUpdated: number; duplicateFlowRowsRemoved: number; removedDepositRows: number }> {
   // The deployed Apps Script may lag the repository and not recognize
   // batchSyncTrades. Moomoo's purpose-built upsert supports both first and
@@ -120,7 +121,10 @@ async function syncTradesToLedger(
       restoreDeletedMoomooTrades,
       reconcileFlowHistory,
       cleanupLegacyDeposits,
-    }) as JsonRecord | null;
+    }, appsScriptTimeoutMs) as JsonRecord | null;
+    if (!response) {
+      throw new Error('Google Apps Script did not return a response before the Moomoo write timed out. The trade write may still be finishing; retry sync to safely complete it.');
+    }
     if (!response?.success) {
       const message = response?.message || 'Could not write Moomoo trades to Google Sheets.';
       if (/unknown action/i.test(message)) {
@@ -293,6 +297,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const requestStartedAt = Date.now();
   try {
     const { session, refreshed } = await getValidGoogleSession(req);
     if (!session) {
@@ -379,6 +384,7 @@ export async function POST(req: NextRequest) {
     const fullSync = forceFullSync || accounts.some((account) => !account.previousAccountSyncAt);
     const reconcileFlowHistory = fullSync || oldState?.flowSyncVersion !== 1;
     const cleanupLegacyDeposits = reconcileFlowHistory;
+    const appsScriptTimeoutMs = Math.max(1_000, Math.min(55_000, 55_000 - (Date.now() - requestStartedAt)));
     const rawExistingRows = fullSync ? await getExistingTrades(session) : [];
     const existingRows = [...rawExistingRows];
     const feeLookupErrors: Array<{ orderId: string; message: string }> = [];
@@ -454,8 +460,8 @@ export async function POST(req: NextRequest) {
       );
     }
     const ledgerResult = tradesToSync.length > 0
-      ? await syncTradesToLedger(session, tradesToSync, forceFullSync, reconcileFlowHistory, cleanupLegacyDeposits)
-      : await syncTradesToLedger(session, [], forceFullSync, reconcileFlowHistory, cleanupLegacyDeposits);
+      ? await syncTradesToLedger(session, tradesToSync, forceFullSync, reconcileFlowHistory, cleanupLegacyDeposits, appsScriptTimeoutMs)
+      : await syncTradesToLedger(session, [], forceFullSync, reconcileFlowHistory, cleanupLegacyDeposits, appsScriptTimeoutMs);
     if (tradesToSync.length === 0) await rebuildPortfolio(session);
 
     let fullTradesAfterSync: Array<Record<string, unknown>> | undefined;
