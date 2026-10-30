@@ -482,7 +482,11 @@ export function SmartQuickInput() {
           );
         }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Kinova Assistant thinking failed';
+        const msg = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
+          ? 'Kinova took too long to respond. Please try again.'
+          : err instanceof Error
+            ? err.message
+            : 'Kinova Assistant request failed';
         setAssistantError(msg);
       } finally {
         assistantRequestInFlightRef.current = false;
@@ -1862,6 +1866,22 @@ export function SmartQuickInput() {
           )}
         </div>
       )}
+
+      {assistantResult &&
+        !['advise', 'clarify', 'unknown'].includes(assistantResult.mode) &&
+        !assistantResult.command &&
+        (assistantResult.answer || assistantResult.reasoning) && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="rounded-2xl border border-indigo-500/25 bg-indigo-500/10 p-3 text-sm text-slate-900 dark:text-white leading-relaxed animate-in fade-in duration-200"
+          >
+            <div className="flex items-start gap-2">
+              <Sparkles aria-hidden="true" className="h-4 w-4 shrink-0 mt-0.5 text-indigo-600 dark:text-indigo-400" />
+              <p>{assistantResult.answer || assistantResult.reasoning}</p>
+            </div>
+          </div>
+        )}
 
       {/* Command Preview & Receipt Item Selector */}
       <AnimatePresence>

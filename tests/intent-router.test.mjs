@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { routeLocalIntent, isQuestionOrAdviceRequest } from '../src/lib/intent-router.ts';
+import { routeLocalIntent, isQuestionOrAdviceRequest, requiresExtendedReasoning } from '../src/lib/intent-router.ts';
 
 const mockProfile = {
   language: 'auto',
@@ -132,4 +132,12 @@ test('routeLocalIntent delegates questions and advice to Gemini (returns null)',
   assert.equal(routeLocalIntent('can I afford dinner?', mockProfile, TODAY), null);
   assert.equal(routeLocalIntent('哪家超市比较便宜', mockProfile, TODAY), null);
   assert.equal(routeLocalIntent('这笔有扣税吗？', mockProfile, TODAY), null);
+});
+
+test('requiresExtendedReasoning keeps ordinary messages fast and reserves thinking for analysis', () => {
+  assert.equal(requiresExtendedReasoning('hello Kinova'), false);
+  assert.equal(requiresExtendedReasoning('mamak 12.4 last month'), false);
+  assert.equal(requiresExtendedReasoning('I spent RM 12.4 at Mamak last month'), false);
+  assert.equal(requiresExtendedReasoning('how much did I spend last month'), true);
+  assert.equal(requiresExtendedReasoning('hello Kinova', true), true);
 });

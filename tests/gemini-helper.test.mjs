@@ -101,6 +101,28 @@ test('generateGeminiContent retries without thinkingConfig when model returns 40
   assert.equal(result.text, '{"answer": "Retried successfully"}');
 });
 
+test('generateGeminiContent explicitly disables Gemini 2.5 Flash thinking for fast turns', async () => {
+  resetGeminiKeyPoolStateForTests();
+  let requestBody;
+  const mockFetch = async (_url, init) => {
+    requestBody = JSON.parse(init.body);
+    return new Response(
+      JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"answer":"Hi"}' }] } }] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  };
+
+  await generateGeminiContent({
+    prompt: 'Hello Kinova',
+    thinking: false,
+    models: ['gemini-2.5-flash'],
+    env: { GEMINI_API_KEY: 'test-key' },
+    fetchFn: mockFetch,
+  });
+
+  assert.deepEqual(requestBody.generationConfig.thinkingConfig, { thinkingBudget: 0 });
+});
+
 test('generateGeminiContent fails over to next key on 429', async () => {
   resetGeminiKeyPoolStateForTests();
   const env = { GEMINI_API_KEY: 'key-1,key-2' };
@@ -136,4 +158,29 @@ test('generateGeminiContent fails over to next key on 429', async () => {
 
   assert.deepEqual(usedKeys, ['key-1', 'key-2']);
   assert.equal(result.text, '{"status": "ok"}');
+});
+
+test('generateGeminiContent stops retrying at the total request deadline', async () => {
+  resetGeminiKeyPoolStateForTests();
+  let attempts = 0;
+  const hangingFetch = async (_url, init) => {
+    attempts += 1;
+    return new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    });
+  };
+
+  await assert.rejects(
+    generateGeminiContent({
+      prompt: 'Hello',
+      thinking: false,
+      timeoutMs: 100,
+      totalTimeoutMs: 40,
+      models: ['test-model'],
+      env: { GEMINI_API_KEY: 'test-key-1,test-key-2' },
+      fetchFn: hangingFetch,
+    }),
+    /total timeout/
+  );
+  assert.equal(attempts, 1);
 });

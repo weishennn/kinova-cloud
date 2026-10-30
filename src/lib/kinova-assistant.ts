@@ -13,7 +13,7 @@
  *    - Receipt & payment screenshot interpretation
  */
 
-import { routeLocalIntent, type LocalRouteResult } from './intent-router.ts';
+import { requiresExtendedReasoning, routeLocalIntent, type LocalRouteResult } from './intent-router.ts';
 import { getUserMoneyProfile, type UserMoneyProfile } from './user-money-profile.ts';
 import { getLocalDateString } from './date-helper.ts';
 import type { AiCommand } from '../types/ai-command.ts';
@@ -281,33 +281,41 @@ export async function runKinovaTurn(
 
   // Assistant path (Gemini)
   const allTx = options.transactions || [];
-  const deterministicFacts = computeDeterministicLedgerFacts(
-    allTx,
-    profile,
-    options.factQuery || text,
-    today,
-    options.pendingReceipt
-  );
+  const useExtendedReasoning = requiresExtendedReasoning(text, Boolean(options.imageBase64));
+  const includeLedgerContext =
+    useExtendedReasoning ||
+    Boolean(options.factQuery || options.pendingReceipt);
+  const deterministicFacts = includeLedgerContext
+    ? computeDeterministicLedgerFacts(
+        allTx,
+        profile,
+        options.factQuery || text,
+        today,
+        options.pendingReceipt
+      )
+    : undefined;
 
   // Take small sample of matching or recent transactions
-  const ledgerSample = deterministicFacts.relevantTransactionsSample && deterministicFacts.relevantTransactionsSample.length > 0
-    ? deterministicFacts.relevantTransactionsSample.slice(0, 20)
-    : allTx
-        .slice(0, 20)
-        .map((t) => ({
+  const ledgerSample = deterministicFacts
+    ? deterministicFacts.relevantTransactionsSample && deterministicFacts.relevantTransactionsSample.length > 0
+      ? deterministicFacts.relevantTransactionsSample.slice(0, 20)
+      : allTx.slice(0, 20).map((t) => ({
           date: String(t.date || ''),
           description: String(t.description || ''),
           category: String(t.category || ''),
           amount: Number(t.amount) || 0,
           type: String(t.type || 'Expense'),
-        }));
+        }))
+    : undefined;
 
-  const habits = mineUserHabitSuggestions(allTx as any, undefined, undefined, profile.rejectedChips).slice(0, 5);
+  const habits = includeLedgerContext
+    ? mineUserHabitSuggestions(allTx as any, undefined, undefined, profile.rejectedChips).slice(0, 5)
+    : [];
 
   const res = await fetch('/api/ai/assistant', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    signal: options.signal,
+    signal: options.signal || AbortSignal.timeout(useExtendedReasoning ? 50_000 : 20_000),
     body: JSON.stringify({
       text: text || undefined,
       imageBase64: options.imageBase64 || undefined,
@@ -328,10 +336,10 @@ export async function runKinovaTurn(
           source: h.isPersonalized ? 'learned_habit' : 'default',
         })),
       },
-      deterministicFacts,
       recentActions: profile.recentActions,
       sessionTurns: options.sessionTurns,
-      ledgerSample,
+      ...(deterministicFacts ? { deterministicFacts } : {}),
+      ...(ledgerSample ? { ledgerSample } : {}),
     }),
   });
 

@@ -64,12 +64,31 @@ const QUESTION_OR_ADVICE_WORDS = [
   'bila', 'boleh ke', 'kenapa', 'why', 'what is', 'analysis', '分析',
 ];
 
+const EXTENDED_REASONING_HINTS = [
+  'should i', 'can i afford', 'how much', 'how many', 'worth it', 'afford', 'over budget', 'budget',
+  'expense history', 'transaction history', 'what did i spend', 'what have i spent', 'my spending',
+  'my expenses', 'my ledger', 'show me', 'list my', 'summary', 'summarize', 'summarise',
+  'trend', 'forecast', 'compare', 'cheaper', 'cheapest', 'which store', 'expensive', 'too much',
+  'tax', 'sst', 'relief', 'analysis', 'analyze', 'analyse', 'recommend', 'advice',
+  'portfolio performance', 'stock analysis', 'investment advice',
+  'what about', 'how about', '怎么看', '能不能', '贵不贵', '值得', '超支', '扣税', '减税',
+  '比较', '哪家', '多少', '预算', '税务', '建议', '分析', '统计', '总结', '旅行预算',
+  '分期预算', '股票分析', '投资建议', 'pelaburan mana bagus', 'berapa', 'bajet', 'cukai', 'banding',
+];
+
 /**
  * Checks if the text asks a question or requests advice/analysis.
  */
 export function isQuestionOrAdviceRequest(text: string): boolean {
   const lower = text.toLowerCase().trim();
   return QUESTION_OR_ADVICE_WORDS.some((w) => lower.includes(w));
+}
+
+/** Use extended model reasoning only when the message calls for financial judgment or analysis. */
+export function requiresExtendedReasoning(text: string, hasImage = false): boolean {
+  if (hasImage) return true;
+  const lower = text.toLowerCase().trim();
+  return EXTENDED_REASONING_HINTS.some((hint) => lower.includes(hint));
 }
 
 /**

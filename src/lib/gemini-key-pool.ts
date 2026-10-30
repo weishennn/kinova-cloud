@@ -188,6 +188,8 @@ export interface GenerateGeminiOptions {
   maxOutputTokens?: number;
   responseMimeType?: string;
   timeoutMs?: number;
+  /** Hard deadline across all model and API-key retries. */
+  totalTimeoutMs?: number;
   models?: string[];
   fetchFn?: typeof fetch;
   env?: Record<string, string | undefined>;
@@ -228,6 +230,8 @@ export async function generateGeminiContent(
   const isThinkingTurn = options.thinking !== false;
   const defaultTimeout = isThinkingTurn ? 45_000 : 20_000;
   const timeoutMs = options.timeoutMs ?? defaultTimeout;
+  const totalTimeoutMs = options.totalTimeoutMs;
+  const deadline = totalTimeoutMs && totalTimeoutMs > 0 ? Date.now() + totalTimeoutMs : Infinity;
 
   const defaultTemp = isThinkingTurn ? 0.4 : 0.1;
   const temperature = options.temperature ?? defaultTemp;
@@ -244,13 +248,18 @@ export async function generateGeminiContent(
 
   let lastError = 'No response from model';
 
-  for (const model of models) {
+  modelsLoop: for (const model of models) {
     let shouldTryNextModel = false;
 
     for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx += 1) {
+      if (Date.now() >= deadline) {
+        lastError = `Gemini request exceeded its ${totalTimeoutMs}ms total timeout`;
+        break modelsLoop;
+      }
+
       const apiKey = apiKeys[keyIdx];
 
-      const callModel = async (withThinking: boolean) => {
+      const callModel = async (withThinking: boolean, omitThinkingConfig = false) => {
         const parts: Array<Record<string, unknown>> = [];
         if (cleanBase64) {
           parts.push({
@@ -269,10 +278,20 @@ export async function generateGeminiContent(
         if (options.responseMimeType) {
           generationConfig.responseMimeType = options.responseMimeType;
         }
-        if (withThinking && thinkingBudget > 0) {
-          generationConfig.thinkingConfig = {
-            thinkingBudget,
-          };
+        if (!omitThinkingConfig) {
+          if (withThinking && thinkingBudget > 0) {
+            generationConfig.thinkingConfig = { thinkingBudget };
+          } else if (!withThinking) {
+            const normalizedModel = model.toLowerCase();
+            if (normalizedModel.includes('gemini-2.5-pro')) {
+              generationConfig.thinkingConfig = { thinkingBudget: 128 };
+            } else if (/gemini-(?:3|4)|flash-latest/.test(normalizedModel)) {
+              generationConfig.thinkingConfig = { thinkingLevel: 'low' };
+            } else {
+              // Gemini 2.5 Flash supports zero to disable its dynamic default thinking.
+              generationConfig.thinkingConfig = { thinkingBudget: 0 };
+            }
+          }
         }
 
         const reqBody: Record<string, unknown> = {
@@ -287,6 +306,9 @@ export async function generateGeminiContent(
         }
 
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+        const remainingTimeoutMs = Number.isFinite(deadline)
+          ? Math.max(1, Math.min(timeoutMs, deadline - Date.now()))
+          : timeoutMs;
         return fetchImpl(url, {
           method: 'POST',
           headers: {
@@ -294,7 +316,7 @@ export async function generateGeminiContent(
             'x-goog-api-key': apiKey,
           },
           body: JSON.stringify(reqBody),
-          signal: AbortSignal.timeout(timeoutMs),
+          signal: AbortSignal.timeout(remainingTimeoutMs),
         });
       };
 
@@ -310,9 +332,9 @@ export async function generateGeminiContent(
         if (res.status === 400) {
           const errBody = await res.text().catch(() => '');
           console.warn(`[Gemini] Model ${model} returned 400:`, errBody.slice(0, 300));
-          if (isThinkingTurn && (errBody.includes('thinkingConfig') || errBody.includes('thinkingBudget'))) {
+          if (errBody.includes('thinkingConfig') || errBody.includes('thinkingBudget') || errBody.includes('thinkingLevel')) {
             console.warn(`[Gemini] Retrying ${model} without thinkingConfig...`);
-            const retryRes = await callModel(false);
+            const retryRes = await callModel(false, true);
             if (retryRes.ok) {
               res = retryRes;
             } else {
@@ -361,6 +383,10 @@ export async function generateGeminiContent(
         const errorMsg = err instanceof Error ? err.message : String(err);
         lastError = errorMsg;
         console.warn(`[Gemini] Attempt with model ${model} failed:`, errorMsg);
+        if (Date.now() >= deadline) {
+          lastError = `Gemini request exceeded its ${totalTimeoutMs}ms total timeout`;
+          break modelsLoop;
+        }
       }
     }
 

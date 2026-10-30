@@ -5,6 +5,7 @@ import { generateGeminiContent } from '@/lib/gemini-key-pool';
 import { getLocalDateString } from '@/lib/date-helper';
 import { normalizeToCanonicalCategory } from '@/lib/canonical-categories';
 import { parseAssistantJsonResponse } from '@/lib/kinova-assistant';
+import { requiresExtendedReasoning } from '@/lib/intent-router';
 
 export interface AssistantTurn {
   role: 'user' | 'assistant';
@@ -173,17 +174,19 @@ export async function POST(req: NextRequest) {
       .filter(Boolean)
       .join('\n');
 
+    const useExtendedReasoning = requiresExtendedReasoning(text, Boolean(imageBase64));
     const result = await generateGeminiContent({
       prompt: userPrompt,
       systemInstruction: ASSISTANT_SYSTEM_PROMPT.replace('{{TODAY}}', today),
       imageBase64: imageBase64 || undefined,
       mimeType: imageBase64 ? mimeType : undefined,
       responseMimeType: 'application/json',
-      thinking: true,
-      thinkingBudget: 2048,
-      temperature: 0.4,
-      maxOutputTokens: 4096,
-      timeoutMs: 45_000,
+      thinking: useExtendedReasoning,
+      thinkingBudget: useExtendedReasoning ? 2048 : 0,
+      temperature: useExtendedReasoning ? 0.4 : 0.1,
+      maxOutputTokens: useExtendedReasoning ? 4096 : 1536,
+      timeoutMs: useExtendedReasoning ? 30_000 : 10_000,
+      totalTimeoutMs: useExtendedReasoning ? 45_000 : 15_000,
     });
 
     let parsedResult: Record<string, unknown>;

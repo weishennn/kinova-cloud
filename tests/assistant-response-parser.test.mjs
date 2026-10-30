@@ -105,6 +105,43 @@ test('runKinovaTurn forwards receipt facts and merchant query to the assistant p
   assert.equal(sentBody.deterministicFacts.potentialDuplicate.description, 'Shell Petrol');
 });
 
+test('runKinovaTurn skips full-ledger work for a simple conversational message', async () => {
+  const originalFetch = globalThis.fetch;
+  let sentBody;
+  globalThis.fetch = async (_url, init) => {
+    sentBody = JSON.parse(String(init?.body || '{}'));
+    return new Response(JSON.stringify({
+      success: true,
+      model: 'mock-model',
+      data: {
+        mode: 'unknown',
+        reasoning: 'A simple greeting needs no ledger context.',
+        answer: 'Hi! How can I help?',
+        proposedAction: null,
+        command: null,
+        clarification: null,
+        receiptAnalysis: null,
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+
+  try {
+    await runKinovaTurn({
+      text: 'hello Kinova',
+      today: '2026-10-29',
+      profile: mockProfile,
+      transactions,
+      forceAssistant: true,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(sentBody.deterministicFacts, undefined);
+  assert.equal(sentBody.ledgerSample, undefined);
+  assert.deepEqual(sentBody.profile.habits, []);
+});
+
 test('parseAssistantJsonResponse parses plain valid JSON', () => {
   const json = JSON.stringify({
     mode: 'record',
