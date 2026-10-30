@@ -14,6 +14,7 @@
  */
 
 import { requiresExtendedReasoning, routeLocalIntent, type LocalRouteResult } from './intent-router.ts';
+import { buildAssistantExpenseDraft, type AssistantExpenseDraft } from './assistant-expense-draft.ts';
 import { getUserMoneyProfile, type UserMoneyProfile } from './user-money-profile.ts';
 import { getLocalDateString } from './date-helper.ts';
 import type { AiCommand } from '../types/ai-command.ts';
@@ -253,6 +254,7 @@ export interface RunKinovaTurnOptions {
   forceAssistant?: boolean;
   factQuery?: string;
   pendingReceipt?: { amount: number; merchant?: string; date?: string };
+  expenseDraft?: AssistantExpenseDraft;
   signal?: AbortSignal;
 }
 
@@ -267,6 +269,7 @@ export async function runKinovaTurn(
   const today = options.today || getLocalDateString();
   const profile = options.profile || getUserMoneyProfile(options.transactions);
   const text = (options.text || '').trim();
+  const expenseDraft = options.imageBase64 ? null : buildAssistantExpenseDraft(text);
 
   // If text-only and not forced to assistant, check local router first (0ms latency)
   if (text && !options.imageBase64 && !options.forceAssistant) {
@@ -318,6 +321,7 @@ export async function runKinovaTurn(
     signal: options.signal || AbortSignal.timeout(useExtendedReasoning ? 50_000 : 20_000),
     body: JSON.stringify({
       text: text || undefined,
+      ...(expenseDraft ? { expenseDraft } : {}),
       imageBase64: options.imageBase64 || undefined,
       mimeType: options.mimeType || undefined,
       today,

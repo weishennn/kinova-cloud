@@ -105,6 +105,44 @@ test('runKinovaTurn forwards receipt facts and merchant query to the assistant p
   assert.equal(sentBody.deterministicFacts.potentialDuplicate.description, 'Shell Petrol');
 });
 
+test('runKinovaTurn sends parsed amount and merchant when only the relative date is unresolved', async () => {
+  const originalFetch = globalThis.fetch;
+  let sentBody;
+  globalThis.fetch = async (_url, init) => {
+    sentBody = JSON.parse(String(init?.body || '{}'));
+    return new Response(JSON.stringify({
+      success: true,
+      model: 'mock-model',
+      data: {
+        mode: 'clarify',
+        reasoning: 'The date is not precise.',
+        answer: 'Which date should I use?',
+        proposedAction: null,
+        command: null,
+        clarification: { question: 'Which date should I use?', options: [] },
+        receiptAnalysis: null,
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+
+  try {
+    await runKinovaTurn({
+      text: 'mamak lunch 15 last week',
+      today: '2026-10-30',
+      profile: mockProfile,
+      transactions,
+      forceAssistant: true,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(sentBody.expenseDraft.amount, 15);
+  assert.equal(sentBody.expenseDraft.currency, 'MYR');
+  assert.equal(sentBody.expenseDraft.dateNeedsResolution, true);
+  assert.equal('date' in sentBody.expenseDraft, false);
+});
+
 test('runKinovaTurn skips full-ledger work for a simple conversational message', async () => {
   const originalFetch = globalThis.fetch;
   let sentBody;

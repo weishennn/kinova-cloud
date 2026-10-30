@@ -6,6 +6,7 @@ import { getLocalDateString } from '@/lib/date-helper';
 import { normalizeToCanonicalCategory } from '@/lib/canonical-categories';
 import { parseAssistantJsonResponse } from '@/lib/kinova-assistant';
 import { requiresExtendedReasoning } from '@/lib/intent-router';
+import { restoreDateOnlyClarification } from '@/lib/assistant-expense-draft';
 
 export interface AssistantTurn {
   role: 'user' | 'assistant';
@@ -14,6 +15,14 @@ export interface AssistantTurn {
 
 export interface AssistantRequestBody {
   text?: string;
+  expenseDraft?: {
+    amount?: number;
+    currency?: string;
+    category?: string;
+    type?: 'Expense' | 'Income';
+    description?: string;
+    dateNeedsResolution?: boolean;
+  };
   imageBase64?: string;
   mimeType?: string;
   today?: string;
@@ -79,6 +88,9 @@ Decide exactly one mode:
 - clarify: two intents are close, or a required field is missing. Ask one question. Offer at most 2 choices.
 - unknown: you cannot tell. Ask one question.
 
+If KNOWN EXPENSE FIELDS are provided in the request, they were extracted from the user's exact message. Preserve their amount, currency, category, and description; never ask the user to repeat a field already provided. If the only unresolved part is an imprecise date expression, ask only which date to use and restate the amount you understood.
+For a recording request, treat an explicit bare number as the amount in the default currency unless the message clearly identifies it as a date, time, quantity, percentage, or calculation. Never ask for an amount already present in the original message.
+
 Rules:
 - If the ledger has no matching records, say clearly that no records exist in their personal ledger (e.g. "在你的个人账本中暂无此记录" / "No matching records found in your personal ledger"). NEVER invent or hallucinate market prices when there is no match. Missing data must be explicitly reported as missing.
 - For receipts or screenshots: extract the net out-of-pocket amount, items, tax, and deductions. Then interpret: tax relief hint (e.g. LHDN Lifestyle RM2,500, Medical RM10,000), duplicate check against facts, comparison to user median, and one proposed action button.
@@ -134,6 +146,20 @@ export async function POST(req: NextRequest) {
     const text = typeof body.text === 'string' ? body.text.trim() : '';
     const imageBase64 = typeof body.imageBase64 === 'string' ? body.imageBase64.trim() : '';
     const mimeType = body.mimeType || 'image/jpeg';
+    const rawExpenseDraft = body.expenseDraft;
+    const expenseDraft = rawExpenseDraft &&
+      typeof rawExpenseDraft.amount === 'number' && Number.isFinite(rawExpenseDraft.amount) && rawExpenseDraft.amount > 0 &&
+      typeof rawExpenseDraft.description === 'string' && rawExpenseDraft.description.trim() &&
+      rawExpenseDraft.dateNeedsResolution === true
+      ? {
+          amount: rawExpenseDraft.amount,
+          currency: typeof rawExpenseDraft.currency === 'string' ? rawExpenseDraft.currency : 'MYR',
+          category: typeof rawExpenseDraft.category === 'string' ? rawExpenseDraft.category : 'Other',
+          type: rawExpenseDraft.type === 'Income' ? 'Income' as const : 'Expense' as const,
+          description: rawExpenseDraft.description.trim(),
+          dateNeedsResolution: true as const,
+        }
+      : null;
 
     if (!text && !imageBase64) {
       return NextResponse.json(
@@ -151,6 +177,10 @@ export async function POST(req: NextRequest) {
       ? `\n【DETERMINISTIC FACTS ACROSS FULL LEDGER】: ${JSON.stringify(body.deterministicFacts, null, 2)}\n`
       : '';
 
+    const expenseDraftBlock = expenseDraft
+      ? `\n【KNOWN EXPENSE FIELDS — already stated by user】: ${JSON.stringify(expenseDraft, null, 2)}\nKeep the amount ${expenseDraft.currency} ${expenseDraft.amount.toFixed(2)}. The original message contains a date phrase that still needs interpretation; do not treat the parser's fallback date as the user's intended date. Ask only about the date if the phrase cannot be mapped to a single day.\n`
+      : '';
+
     const actionsBlock = Array.isArray(body.recentActions) && body.recentActions.length > 0
       ? `\n【RECENT SESSION ACTIONS (LATEST FIRST)】: ${JSON.stringify(body.recentActions.slice(0, 8), null, 2)}\n`
       : '';
@@ -166,6 +196,7 @@ export async function POST(req: NextRequest) {
     const userPrompt = [
       text ? `User message: "${text}"` : 'Analyze this attached receipt or payment screenshot.',
       profileBlock,
+      expenseDraftBlock,
       factsBlock,
       actionsBlock,
       turnsBlock,
@@ -198,6 +229,8 @@ export async function POST(req: NextRequest) {
         { status: 502 }
       );
     }
+
+    if (expenseDraft) restoreDateOnlyClarification(parsedResult, expenseDraft);
 
     // Sanitize category if command is present
     if (parsedResult.command && typeof parsedResult.command === 'object') {
