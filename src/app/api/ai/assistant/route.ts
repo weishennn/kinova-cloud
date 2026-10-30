@@ -4,7 +4,12 @@ import { recordUserAiCall } from '@/lib/admin-registry';
 import { generateGeminiContent } from '@/lib/gemini-key-pool';
 import { getLocalDateString } from '@/lib/date-helper';
 import { normalizeToCanonicalCategory } from '@/lib/canonical-categories';
-import { parseAssistantJsonResponse, type AssistantPendingContext } from '@/lib/kinova-assistant';
+import {
+  parseAssistantJsonResponse,
+  type AssistantParserCandidate,
+  type AssistantPendingContext,
+  shouldUseTransactionCapturePrompt,
+} from '@/lib/kinova-assistant';
 import { requiresExtendedReasoning } from '@/lib/intent-router';
 
 export interface AssistantTurn {
@@ -15,6 +20,7 @@ export interface AssistantTurn {
 export interface AssistantRequestBody {
   text?: string;
   pendingContext?: AssistantPendingContext | null;
+  parserCandidate?: AssistantParserCandidate | null;
   imageBase64?: string;
   mimeType?: string;
   today?: string;
@@ -94,6 +100,28 @@ function normalizePendingContext(value: unknown): AssistantPendingContext | null
   };
 }
 
+function normalizeParserCandidate(value: unknown): AssistantParserCandidate | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.amount !== 'number' || !Number.isFinite(candidate.amount) || candidate.amount <= 0 ||
+    typeof candidate.currency !== 'string' || !candidate.currency.trim() ||
+    (candidate.type !== 'Expense' && candidate.type !== 'Income') ||
+    typeof candidate.category !== 'string' || !candidate.category.trim() ||
+    !Array.isArray(candidate.unresolvedFields)
+  ) return null;
+
+  return {
+    amount: candidate.amount,
+    currency: candidate.currency.trim().slice(0, 8),
+    type: candidate.type,
+    category: candidate.category.trim().slice(0, 80),
+    unresolvedFields: candidate.unresolvedFields
+      .filter((field): field is string => typeof field === 'string' && Boolean(field.trim()))
+      .slice(0, 8),
+  };
+}
+
 const ASSISTANT_SYSTEM_PROMPT = `You are Kinova, this user's personal financial assistant in Malaysia. You help them think and act. You are not a receipt OCR bot.
 
 Today is {{TODAY}}. Default currency MYR. Reply in the language of this turn (Chinese, English, Malay, or Manglish). Use profile.language when it is zh, en, or ms.
@@ -117,6 +145,8 @@ Decide exactly one mode:
 
 For a recording request, treat an explicit bare number as the amount in the default currency unless the message clearly identifies it as a date, time, quantity, percentage, or calculation. Never ask for an amount already present in the original message.
 When the user names a merchant or purpose, put those words in transaction data.description, excluding the amount and date phrase. A simple expense phrase with a merchant/purpose and amount is a record request. Do not leave description null.
+
+If a LOCAL PARSER CANDIDATE is provided, it is supporting evidence extracted from the same message, not a final decision. Check it against the original wording and use values that the wording supports. For a clear recording request, carry a supported candidate amount into the command and pendingContext; do not ask the user to repeat it. Never use a candidate for a field listed as unresolvedFields, and use the original wording to resolve those fields.
 
 Clarification state:
 - When a record request is missing required information, return pendingContext with the intent, the original request, every field you understand with its value, and only the required fields still missing.
@@ -164,6 +194,29 @@ Rules:
   } | null
 }`;
 
+const TRANSACTION_CAPTURE_SYSTEM_PROMPT = `You are Kinova's transaction capture assistant.
+Today is {{TODAY}}. The default currency is MYR. Read the full user message and return either a complete transaction command or one clarification.
+
+The LOCAL PARSER CANDIDATE, when present, contains syntactically recognized fields from the same message. Validate it against the original wording. If the wording supports the candidate amount as the purchase amount, use it; do not ask for that amount again. Treat it as a candidate, not as permission to invent other fields. Do not use any field listed in unresolvedFields.
+
+For an ordinary transaction with no explicit date, use Today. Resolve any date the user names against Today. If their date expression identifies a period but not a specific transaction day, ask only for the missing date. When the user answers a clarification, use PENDING CLARIFICATION STATE and the recent turns to complete the original request, preserving its known fields. Do not ask again for a known field.
+
+Use the user's merchant or purpose as description. Use canonical categories and MYR unless another currency is stated. Do not invent an amount, date, merchant, or tax. If the user explicitly describes tax, calculate only what the provided information supports and preserve tax details in the transaction data.
+
+For mode record, command.data must contain amount, currency, type, category, non-empty description, and date (YYYY-MM-DD). For mode clarify, return the known fields and only unresolved required fields in pendingContext. Keep originalRequest as the initial request across clarification turns. Set command and proposedAction to null for clarify; set clarification to null and pendingContext to null for record.
+
+Return ONLY valid JSON with this shape:
+{
+  "mode": "record" | "clarify",
+  "reasoning": string,
+  "answer": string,
+  "proposedAction": object | null,
+  "command": { "intent": "transaction", "confidence": number, "data": object } | null,
+  "clarification": { "question": string, "options": string[] } | null,
+  "pendingContext": { "intent": "transaction", "originalRequest": string, "knownFields": object, "missingFields": string[] } | null,
+  "receiptAnalysis": null
+}`;
+
 export async function POST(req: NextRequest) {
   try {
     const { session } = await getValidGoogleSession(req);
@@ -188,6 +241,7 @@ export async function POST(req: NextRequest) {
     const imageBase64 = typeof body.imageBase64 === 'string' ? body.imageBase64.trim() : '';
     const mimeType = body.mimeType || 'image/jpeg';
     const pendingContext = normalizePendingContext(body.pendingContext);
+    const parserCandidate = normalizeParserCandidate(body.parserCandidate);
 
     if (!text && !imageBase64) {
       return NextResponse.json(
@@ -209,6 +263,10 @@ export async function POST(req: NextRequest) {
       ? `\n【PENDING CLARIFICATION STATE】: ${JSON.stringify(pendingContext, null, 2)}\n`
       : '';
 
+    const parserCandidateBlock = parserCandidate
+      ? `\n【LOCAL PARSER CANDIDATE — validate against the original message】: ${JSON.stringify(parserCandidate, null, 2)}\n`
+      : '';
+
     const actionsBlock = Array.isArray(body.recentActions) && body.recentActions.length > 0
       ? `\n【RECENT SESSION ACTIONS (LATEST FIRST)】: ${JSON.stringify(body.recentActions.slice(0, 8), null, 2)}\n`
       : '';
@@ -225,6 +283,7 @@ export async function POST(req: NextRequest) {
       text ? `User message: "${text}"` : 'Analyze this attached receipt or payment screenshot.',
       profileBlock,
       pendingContextBlock,
+      parserCandidateBlock,
       factsBlock,
       actionsBlock,
       turnsBlock,
@@ -234,9 +293,16 @@ export async function POST(req: NextRequest) {
       .join('\n');
 
     const useExtendedReasoning = requiresExtendedReasoning(text, Boolean(imageBase64));
+    const useTransactionCapturePrompt = shouldUseTransactionCapturePrompt(
+      text,
+      Boolean(imageBase64),
+      parserCandidate,
+    );
     const result = await generateGeminiContent({
       prompt: userPrompt,
-      systemInstruction: ASSISTANT_SYSTEM_PROMPT.replace('{{TODAY}}', today),
+      systemInstruction: (useTransactionCapturePrompt
+        ? TRANSACTION_CAPTURE_SYSTEM_PROMPT
+        : ASSISTANT_SYSTEM_PROMPT).replace('{{TODAY}}', today),
       imageBase64: imageBase64 || undefined,
       mimeType: imageBase64 ? mimeType : undefined,
       responseMimeType: 'application/json',

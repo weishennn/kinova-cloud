@@ -13,7 +13,13 @@
  *    - Receipt & payment screenshot interpretation
  */
 
-import { requiresExtendedReasoning, routeLocalIntent, type LocalRouteResult } from './intent-router.ts';
+import {
+  isQuestionOrAdviceRequest,
+  requiresExtendedReasoning,
+  routeLocalIntent,
+  type LocalRouteResult,
+} from './intent-router.ts';
+import { parseNaturalExpense } from './natural-expense-parser.ts';
 import { getUserMoneyProfile, type UserMoneyProfile } from './user-money-profile.ts';
 import { getLocalDateString } from './date-helper.ts';
 import type { AiCommand } from '../types/ai-command.ts';
@@ -33,6 +39,35 @@ export interface AssistantPendingContext {
   originalRequest: string;
   knownFields: Record<string, unknown>;
   missingFields: string[];
+}
+
+export interface AssistantParserCandidate {
+  amount: number;
+  currency: string;
+  type: 'Expense' | 'Income';
+  category: string;
+  unresolvedFields: string[];
+}
+
+export function buildAssistantParserCandidate(text: string): AssistantParserCandidate | null {
+  const parsed = parseNaturalExpense(text);
+  if (!parsed || !Number.isFinite(parsed.amount) || parsed.amount <= 0) return null;
+
+  return {
+    amount: parsed.amount,
+    currency: parsed.currency || 'MYR',
+    type: parsed.type,
+    category: parsed.category,
+    unresolvedFields: parsed.hasUnparsedTemporalContext ? ['date'] : [],
+  };
+}
+
+export function shouldUseTransactionCapturePrompt(
+  text: string,
+  hasImage: boolean,
+  candidate: AssistantParserCandidate | null,
+): boolean {
+  return Boolean(candidate && text.trim() && !hasImage && !isQuestionOrAdviceRequest(text));
 }
 
 export function updateAssistantConversation(
@@ -276,6 +311,7 @@ export interface RunKinovaTurnOptions {
   transactions?: Array<any>;
   sessionTurns?: AssistantTurnMessage[];
   pendingContext?: AssistantPendingContext | null;
+  parserCandidate?: AssistantParserCandidate | null;
   forceAssistant?: boolean;
   factQuery?: string;
   pendingReceipt?: { amount: number; merchant?: string; date?: string };
@@ -293,6 +329,7 @@ export async function runKinovaTurn(
   const today = options.today || getLocalDateString();
   const profile = options.profile || getUserMoneyProfile(options.transactions);
   const text = (options.text || '').trim();
+  const parserCandidate = options.imageBase64 ? null : buildAssistantParserCandidate(text);
   // If text-only and not forced to assistant, check local router first (0ms latency)
   if (text && !options.imageBase64 && !options.forceAssistant) {
     const localMatch = routeLocalIntent(text, profile, today);
@@ -364,6 +401,7 @@ export async function runKinovaTurn(
       recentActions: profile.recentActions,
       sessionTurns: options.sessionTurns,
       ...(options.pendingContext ? { pendingContext: options.pendingContext } : {}),
+      ...(parserCandidate ? { parserCandidate } : {}),
       ...(deterministicFacts ? { deterministicFacts } : {}),
       ...(ledgerSample ? { ledgerSample } : {}),
     }),

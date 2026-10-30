@@ -1,7 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { computeDeterministicLedgerFacts, parseAssistantJsonResponse, runKinovaTurn, updateAssistantConversation } from '../src/lib/kinova-assistant.ts';
+import {
+  buildAssistantParserCandidate,
+  computeDeterministicLedgerFacts,
+  parseAssistantJsonResponse,
+  runKinovaTurn,
+  shouldUseTransactionCapturePrompt,
+  updateAssistantConversation,
+} from '../src/lib/kinova-assistant.ts';
 
 const mockProfile = {
   language: 'auto',
@@ -22,6 +29,20 @@ const transactions = [
   { id: '4', date: '2026-10-04', type: 'Expense', category: 'Transport', description: 'Shell Petrol', amount: 80.0 },
   { id: '5', date: '2026-09-15', type: 'Expense', category: 'Food & Dining', description: 'Nasi Lemak', amount: 10.0 },
 ];
+
+test('assistant parser candidate carries supported amount fields without inventing an unresolved date', () => {
+  const candidate = buildAssistantParserCandidate('mamak lunch 15 last week');
+  assert.deepEqual(candidate, {
+    amount: 15,
+    currency: 'MYR',
+    type: 'Expense',
+    category: 'Food & Dining',
+    unresolvedFields: ['date'],
+  });
+  assert.equal(shouldUseTransactionCapturePrompt('mamak lunch 15 last week', false, candidate), true);
+  assert.equal(shouldUseTransactionCapturePrompt('Should I pay 15 for lunch?', false, candidate), false);
+  assert.equal(shouldUseTransactionCapturePrompt('mamak lunch 15 last week', true, candidate), false);
+});
 
 test('computeDeterministicLedgerFacts correctly aggregates whole-ledger totals without arithmetic hallucinations', () => {
   const facts = computeDeterministicLedgerFacts(transactions, mockProfile, 'Chicken', '2026-10-29');
@@ -185,6 +206,54 @@ test('runKinovaTurn forwards structured clarification state without local phrase
   assert.deepEqual(sentBody.sessionTurns, firstConversation.turns);
   assert.equal(sentBody.text, 'last week Thursday');
   assert.equal('expenseDraft' in sentBody, false);
+});
+
+test('runKinovaTurn sends parsed amount evidence with the original sentence', async () => {
+  const originalFetch = globalThis.fetch;
+  let sentBody;
+  globalThis.fetch = async (_url, init) => {
+    sentBody = JSON.parse(String(init?.body || '{}'));
+    return new Response(JSON.stringify({
+      success: true,
+      model: 'mock-model',
+      data: {
+        mode: 'clarify',
+        reasoning: 'The date needs clarification.',
+        answer: 'Which date should I use?',
+        proposedAction: null,
+        command: null,
+        clarification: { question: 'Which date should I use?', options: [] },
+        pendingContext: {
+          intent: 'transaction',
+          originalRequest: 'mamak lunch 15 last week',
+          knownFields: { amount: 15, currency: 'MYR', type: 'Expense' },
+          missingFields: ['date'],
+        },
+        receiptAnalysis: null,
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+
+  try {
+    await runKinovaTurn({
+      text: 'mamak lunch 15 last week',
+      today: '2026-10-30',
+      profile: mockProfile,
+      transactions,
+      forceAssistant: true,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(sentBody.text, 'mamak lunch 15 last week');
+  assert.deepEqual(sentBody.parserCandidate, {
+    amount: 15,
+    currency: 'MYR',
+    type: 'Expense',
+    category: 'Food & Dining',
+    unresolvedFields: ['date'],
+  });
 });
 
 test('runKinovaTurn skips full-ledger work for a simple conversational message', async () => {
