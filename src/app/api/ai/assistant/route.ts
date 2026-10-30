@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getValidGoogleSession } from '@/lib/google-auth';
 import { recordUserAiCall } from '@/lib/admin-registry';
 import { generateGeminiContent } from '@/lib/gemini-key-pool';
-import { getLocalDateString } from '@/lib/date-helper';
+import { getLocalDateString, parseLocalDate } from '@/lib/date-helper';
 import { normalizeToCanonicalCategory } from '@/lib/canonical-categories';
 import {
   parseAssistantJsonResponse,
@@ -307,9 +307,14 @@ export async function POST(req: NextRequest) {
     );
     const result = await generateGeminiContent({
       prompt: userPrompt,
-      systemInstruction: (useTransactionCapturePrompt
-        ? TRANSACTION_CAPTURE_SYSTEM_PROMPT
-        : ASSISTANT_SYSTEM_PROMPT).replace('{{TODAY}}', today),
+      systemInstruction: (() => {
+        const todayDate = parseLocalDate(today);
+        const weekdayName = todayDate.toLocaleDateString('en-US', { weekday: 'long' });
+        const todayWithWeekday = `${today} (${weekdayName})`;
+        return (useTransactionCapturePrompt
+          ? TRANSACTION_CAPTURE_SYSTEM_PROMPT
+          : ASSISTANT_SYSTEM_PROMPT).replace('{{TODAY}}', todayWithWeekday);
+      })(),
       imageBase64: imageBase64 || undefined,
       mimeType: imageBase64 ? mimeType : undefined,
       responseMimeType: 'application/json',

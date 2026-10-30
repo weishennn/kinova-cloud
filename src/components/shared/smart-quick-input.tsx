@@ -480,8 +480,10 @@ export function SmartQuickInput() {
           if (result.command && !['clarify', 'unknown'].includes(result.mode)) {
             setAiParsed(result.command);
             setIsAiEnhanced(true);
+            return result.command;
           }
         }
+        return null;
       } catch (err) {
         const msg = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
           ? 'Kinova took too long to respond. Please try again.'
@@ -1109,31 +1111,35 @@ export function SmartQuickInput() {
     if (e) e.preventDefault();
     if (isSubmitting || isAssistantThinking) return;
 
+    let commandToProcess = activeCommand;
     // If no local transaction command is resolved, send to Kinova Assistant
-    if (!activeCommand) {
+    if (!commandToProcess) {
       const trimmed = input.trim();
-      if (trimmed) {
-        await triggerAssistantTurn(trimmed);
+      if (!trimmed) return;
+      const assistantCmd = await triggerAssistantTurn(trimmed);
+      if (assistantCmd && assistantCmd.intent === 'transaction' && assistantCmd.data) {
+        commandToProcess = assistantCmd;
+      } else {
+        return;
       }
-      return;
     }
 
-    if (activeCommand.intent !== 'transaction') {
-      if (!activeCommand.data) {
+    if (commandToProcess.intent !== 'transaction') {
+      if (!commandToProcess.data) {
         toast.error('Gemini needs more details before opening a form');
         return;
       }
 
-      if (activeCommand.intent === 'installment') {
-        setAiPrefill({ kind: 'installment', data: activeCommand.data });
+      if (commandToProcess.intent === 'installment') {
+        setAiPrefill({ kind: 'installment', data: commandToProcess.data });
         setQuickAddOpen(true);
         toast.info('Review the installment details before saving');
-      } else if (activeCommand.intent === 'trade') {
-        setAiPrefill({ kind: 'trade', data: activeCommand.data });
+      } else if (commandToProcess.intent === 'trade') {
+        setAiPrefill({ kind: 'trade', data: commandToProcess.data });
         router.push('/investments');
         toast.info('Review the trade details before saving');
-      } else if (activeCommand.intent === 'trip') {
-        setAiPrefill({ kind: 'trip', data: activeCommand.data });
+      } else if (commandToProcess.intent === 'trip') {
+        setAiPrefill({ kind: 'trip', data: commandToProcess.data });
         router.push('/trips');
         toast.info('Review the trip details before saving');
       } else {
@@ -1148,7 +1154,7 @@ export function SmartQuickInput() {
       return;
     }
 
-    const activeParsed = activeCommand.data as AiTransactionData;
+    const activeParsed = commandToProcess.data as AiTransactionData;
     if (!activeParsed) return;
     if (!isSafeTransactionAmount(activeParsed.amount)) {
       toast.error('The parsed amount must be greater than zero and have at most two decimal places.');
