@@ -15,6 +15,11 @@ export interface ParsedExpense {
   isInstallment?: boolean;
   installmentMonths?: number;
   interestRate?: number;
+  subtotal?: number;
+  taxAmount?: number;
+  taxRate?: number;
+  taxLabel?: string;
+  discountAmount?: number;
   formula?: string;
   habitMatch?: {
     rawPattern: string;
@@ -294,18 +299,72 @@ export function parseNaturalExpense(input: string): ParsedExpense | null {
     else if (rawCurr === '£' || rawCurr === 'GBP') detectedCurrency = 'GBP';
   }
 
-  // Find math expression first (e.g. "15 + 8.50", "50 + 6%", "120 / 3", "100 - 15 + 6%")
+  // Natural tax/service phrase: e.g. "14 with 6% tax", "14 witrh 6% tax", "14 + 6% sst", "14 plus 6% tax", "14含6%税", "14 with 10% service charge"
+  const naturalTaxRegex = /(?:(?:RM|MYR|USD|\$|SGD|S\$|CNY|RMB|¥|EUR|€|GBP|£)\s*)?(\d+(?:,\d{3})*(?:\.\d+)?)\s*(?:\+|plus|with|witrh|w\/|and|&|加|含|dengan)\s*(\d+(?:\.\d+)?)\s*%\s*(?:tax|taxes|sst|gst|service\s*tax|service\s*charge|svc|cukai|税)?(?!\s*(?:discount|off|diskaun|rebate|less|折))(?:\s*(?:RM|MYR|USD|SGD|CNY|RMB|EUR|GBP))?/i;
+
+  // Natural discount phrase: e.g. "100 with 10% discount", "200 20% off", "50 - 10% rebate"
+  const naturalDiscountRegex = /(?:(?:RM|MYR|USD|\$|SGD|S\$|CNY|RMB|¥|EUR|€|GBP|£)\s*)?(\d+(?:,\d{3})*(?:\.\d+)?)\s*(?:-|less|minus|with|witrh|w\/)?\s*(\d+(?:\.\d+)?)\s*%\s*(?:discount|off|diskaun|rebate|折)(?:\s*(?:RM|MYR|USD|SGD|CNY|RMB|EUR|GBP))?/i;
+
+  // Find math expression (e.g. "15 + 8.50", "50 + 6%", "120 / 3", "100 - 15 + 6%")
   const mathExprRegex = /(?:(?:RM|MYR|USD|\$|SGD|S\$|CNY|RMB|¥|EUR|€|GBP|£)\s*)?(\d+(?:,\d{3})*(?:\.\d+)?(?:\s*[+\-*/×÷]\s*\d+(?:,\d{3})*(?:\.\d+)?%?)+)(?:\s*(?:RM|MYR|USD|SGD|CNY|RMB|EUR|GBP))?/i;
   const amountRegex = /(?:(?:RM|MYR|USD|\$|SGD|S\$|CNY|RMB|¥|EUR|€|GBP|£)\s*)?(\d+(?:,\d{3})*(?:\.\d{1,2})?)(?!\s*%)(?:\s*(?:RM|MYR|USD|SGD|CNY|RMB|EUR|GBP))?/i;
 
+  const taxMatch = textForAmount.match(naturalTaxRegex);
+  const discMatch = textForAmount.match(naturalDiscountRegex);
   const mathMatch = textForAmount.match(mathExprRegex);
   const singleMatch = textForAmount.match(amountRegex) || text.match(amountRegex);
 
   let matchedToken = '';
   let parsedAmount = NaN;
   let detectedFormula: string | undefined;
+  let detectedSubtotal: number | undefined;
+  let detectedTaxAmount: number | undefined;
+  let detectedTaxRate: number | undefined;
+  let detectedTaxLabel: string | undefined;
+  let detectedDiscountAmount: number | undefined;
 
-  if (mathMatch && mathMatch[1]) {
+  // Prefer multi-operator math expressions if longer than tax/discount match
+  const chooseMath = Boolean(
+    mathMatch &&
+    mathMatch[1] &&
+    (!taxMatch || mathMatch[0].length > taxMatch[0].length) &&
+    (!discMatch || mathMatch[0].length > discMatch[0].length)
+  );
+
+  if (chooseMath && mathMatch && mathMatch[1]) {
+    const evalRes = evaluateMoneyExpression(mathMatch[1]);
+    if (evalRes.value !== null && evalRes.value > 0) {
+      matchedToken = mathMatch[0];
+      parsedAmount = evalRes.value;
+      detectedFormula = mathMatch[1].trim();
+    }
+  } else if (discMatch && discMatch[1] && discMatch[2]) {
+    const baseVal = parseFloat(discMatch[1].replace(/,/g, ''));
+    const rateVal = parseFloat(discMatch[2]);
+    if (Number.isFinite(baseVal) && baseVal > 0 && Number.isFinite(rateVal) && rateVal > 0 && rateVal <= 100) {
+      const discAmt = Number(((baseVal * rateVal) / 100).toFixed(2));
+      parsedAmount = Number((baseVal - discAmt).toFixed(2));
+      matchedToken = discMatch[0];
+      detectedSubtotal = baseVal;
+      detectedDiscountAmount = discAmt;
+      detectedFormula = `${baseVal} - ${rateVal}% = ${parsedAmount.toFixed(2)}`;
+    }
+  } else if (taxMatch && taxMatch[1] && taxMatch[2]) {
+    const baseVal = parseFloat(taxMatch[1].replace(/,/g, ''));
+    const rateVal = parseFloat(taxMatch[2]);
+    if (Number.isFinite(baseVal) && baseVal > 0 && Number.isFinite(rateVal) && rateVal > 0 && rateVal <= 100) {
+      const taxAmt = Number(((baseVal * rateVal) / 100).toFixed(2));
+      parsedAmount = Number((baseVal + taxAmt).toFixed(2));
+      matchedToken = taxMatch[0];
+      detectedSubtotal = baseVal;
+      detectedTaxRate = rateVal;
+      detectedTaxAmount = taxAmt;
+      const lowerToken = taxMatch[0].toLowerCase();
+      const isSst = lowerToken.includes('sst') || lowerToken.includes('service') || lowerToken.includes('svc');
+      detectedTaxLabel = isSst ? `SST (${rateVal}%)` : `Tax (${rateVal}%)`;
+      detectedFormula = `${baseVal} + ${rateVal}% = ${parsedAmount.toFixed(2)}`;
+    }
+  } else if (mathMatch && mathMatch[1]) {
     const evalRes = evaluateMoneyExpression(mathMatch[1]);
     if (evalRes.value !== null && evalRes.value > 0) {
       matchedToken = mathMatch[0];
@@ -412,6 +471,11 @@ export function parseNaturalExpense(input: string): ParsedExpense | null {
     isInstallment,
     installmentMonths,
     interestRate: detectedInterestRate,
+    subtotal: detectedSubtotal,
+    taxAmount: detectedTaxAmount,
+    taxRate: detectedTaxRate,
+    taxLabel: detectedTaxLabel,
+    discountAmount: detectedDiscountAmount,
     formula: detectedFormula,
     habitMatch: habitMatchMeta,
   };

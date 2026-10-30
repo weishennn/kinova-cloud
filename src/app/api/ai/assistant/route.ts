@@ -160,7 +160,7 @@ Rules:
 - For receipts or screenshots: extract the net out-of-pocket amount, items, tax, and deductions. Then interpret: tax relief hint (e.g. LHDN Lifestyle RM2,500, Medical RM10,000), duplicate check against facts, comparison to user median, and one proposed action button.
 - Always provide reasoning: 1-2 concise user-facing sentences citing evidence (e.g. "6 weekday lunches, median RM 15.50" or "receipt net RM 42.30 after SST, not the pre-discount bill"). Never dump raw chain of thought.
 - For mode "record" with a transaction, command.data must include amount (number), currency, type, category, description (non-empty string), and date (YYYY-MM-DD). Use the merchant/purpose words from the user's message for description; never return null when those words are present.
-- Resolve relative date language against Today and return a YYYY-MM-DD date; never replace a named past/future period with today. If the period does not identify the transaction's exact day, ask only for the date.
+- Resolve relative date language against Today and return a YYYY-MM-DD date; never replace a named past/future period with today. If the period names a broader timeframe rather than an exact day (e.g. 'last week', 'last month', '上周', 'past few days'), resolve it to a reasonable representative date in that period (e.g. 7 days before Today for 'last week', or same day last month) and record the transaction directly rather than interrogating the user with an extra clarification question.
 - Return ONLY valid JSON matching this schema:
 {
   "mode": "record" | "advise" | "correct" | "repeat" | "undo" | "set_preference" | "navigate" | "clarify" | "unknown",
@@ -200,7 +200,7 @@ Today is {{TODAY}}. The default currency is MYR. Read the full user message and 
 
 The LOCAL PARSER CANDIDATE, when present, contains syntactically recognized fields from the same message. Validate it against the original wording. If the wording supports the candidate amount as the purchase amount, use it; do not ask for that amount again. Treat it as a candidate, not as permission to invent other fields. Do not use any field listed in unresolvedFields.
 
-For an ordinary transaction with no explicit date, use Today. Resolve any date the user names against Today. If their date expression identifies a period but not a specific transaction day, ask only for the missing date. When the user answers a clarification, use PENDING CLARIFICATION STATE and the recent turns to complete the original request, preserving its known fields. Do not ask again for a known field.
+For an ordinary transaction with no explicit date, use Today. Resolve any date the user names against Today. If their date expression identifies a broader timeframe rather than a specific transaction day (such as 'last week', '上周', 'last month'), do not interrogate the user with a clarification question; resolve it to a reasonable representative date within that period (e.g. 7 days before Today for 'last week') and record the transaction directly. When the user answers a clarification, use PENDING CLARIFICATION STATE and the recent turns to complete the original request, preserving its known fields. Do not ask again for a known field.
 
 Use the user's merchant or purpose as description. Use canonical categories and MYR unless another currency is stated. Do not invent an amount, date, merchant, or tax. If the user explicitly describes tax, calculate only what the provided information supports and preserve tax details in the transaction data.
 

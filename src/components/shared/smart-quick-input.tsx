@@ -1425,9 +1425,25 @@ export function SmartQuickInput() {
           className="relative flex items-center gap-2"
         >
           <div className="relative flex-1">
-            <Sparkles className={`absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 shrink-0 pointer-events-none transition-colors ${
-              isAssistantThinking || isAiParsing ? 'text-indigo-600 dark:text-indigo-400 animate-spin' : isAiEnhanced ? 'text-purple-600 dark:text-purple-400' : 'text-slate-400'
-            }`} />
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const trimmed = input.trim();
+                if (trimmed) {
+                  void triggerAssistantTurn(trimmed);
+                }
+              }}
+              disabled={!input.trim() || isAssistantThinking || isSubmitting}
+              title={input.trim() ? "Ask Kinova to interpret / think (Ctrl+Enter)" : "Kinova Assistant"}
+              aria-label="Ask Kinova Assistant"
+              className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-xl hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all cursor-pointer disabled:cursor-default disabled:hover:bg-transparent disabled:opacity-40"
+            >
+              <Sparkles className={`h-4 w-4 shrink-0 transition-colors ${
+                isAssistantThinking || isAiParsing ? 'text-indigo-600 dark:text-indigo-400 animate-spin' : isAiEnhanced ? 'text-purple-600 dark:text-purple-400' : 'hover:text-indigo-600'
+              }`} />
+            </button>
           <input
             ref={inputRef}
             type="text"
@@ -1447,6 +1463,15 @@ export function SmartQuickInput() {
             }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
+                if (e.ctrlKey || e.metaKey) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const trimmed = input.trim();
+                  if (trimmed) {
+                    void triggerAssistantTurn(trimmed);
+                  }
+                  return;
+                }
                 e.preventDefault();
                 e.stopPropagation();
                 void handleQuickSubmit(e);
@@ -2360,6 +2385,21 @@ export function SmartQuickInput() {
                             ⚠️ Not LHDN Deductible
                           </span>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const trimmed = input.trim();
+                            if (trimmed) {
+                              void triggerAssistantTurn(trimmed);
+                            }
+                          }}
+                          disabled={isAssistantThinking || isSubmitting}
+                          title="Bypass quick parse and ask Kinova AI to interpret (Ctrl+Enter)"
+                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/25 text-[10px] font-medium hover:bg-purple-500/20 transition-colors cursor-pointer"
+                        >
+                          <Sparkles className="h-3 w-3" />
+                          <span>Ask Kinova</span>
+                        </button>
                       </>
                     )}
 

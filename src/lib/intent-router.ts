@@ -289,6 +289,11 @@ export function routeLocalIntent(
           category: localParsed.category,
           description: localParsed.description,
           date: localParsed.date || today,
+          subtotal: localParsed.subtotal,
+          taxAmount: localParsed.taxAmount,
+          taxRate: localParsed.taxRate,
+          taxLabel: localParsed.taxLabel,
+          discountAmount: localParsed.discountAmount,
         },
       };
       return {
