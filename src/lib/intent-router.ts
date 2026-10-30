@@ -76,6 +76,12 @@ const EXTENDED_REASONING_HINTS = [
   '分期预算', '股票分析', '投资建议', 'pelaburan mana bagus', 'berapa', 'bajet', 'cukai', 'banding',
 ];
 
+const IMAGE_REASONING_HINTS = [
+  'should i', 'can i afford', 'worth it', 'over budget', 'budget', 'expensive', 'too much',
+  'tax', 'sst', 'relief', 'compare', 'analysis', 'analyze', 'analyse', 'recommend', 'advice',
+  'duplicate', '扣税', '减税', '税务', '建议', '分析', '比较', '贵不贵', '超支', '值得', '重复',
+];
+
 /**
  * Checks if the text asks a question or requests advice/analysis.
  */
@@ -86,9 +92,9 @@ export function isQuestionOrAdviceRequest(text: string): boolean {
 
 /** Use extended model reasoning only when the message calls for financial judgment or analysis. */
 export function requiresExtendedReasoning(text: string, hasImage = false): boolean {
-  if (hasImage) return true;
   const lower = text.toLowerCase().trim();
-  return EXTENDED_REASONING_HINTS.some((hint) => lower.includes(hint));
+  const hints = hasImage ? IMAGE_REASONING_HINTS : EXTENDED_REASONING_HINTS;
+  return hints.some((hint) => lower.includes(hint));
 }
 
 /**

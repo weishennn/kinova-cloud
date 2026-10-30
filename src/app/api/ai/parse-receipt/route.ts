@@ -231,6 +231,7 @@ Return ONLY this JSON shape:
         temperature: 0.1,
         maxOutputTokens: 4096,
         timeoutMs: 25_000,
+        totalTimeoutMs: 35_000,
       });
       cleanJson = result.text;
       usedModel = result.model;

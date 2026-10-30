@@ -139,5 +139,6 @@ test('requiresExtendedReasoning keeps ordinary messages fast and reserves thinki
   assert.equal(requiresExtendedReasoning('mamak 12.4 last month'), false);
   assert.equal(requiresExtendedReasoning('I spent RM 12.4 at Mamak last month'), false);
   assert.equal(requiresExtendedReasoning('how much did I spend last month'), true);
-  assert.equal(requiresExtendedReasoning('hello Kinova', true), true);
+  assert.equal(requiresExtendedReasoning('identify the merchant and total in this photo', true), false);
+  assert.equal(requiresExtendedReasoning('does this receipt qualify for tax relief?', true), true);
 });

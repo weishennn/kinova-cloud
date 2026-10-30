@@ -182,11 +182,11 @@ export async function POST(req: NextRequest) {
       mimeType: imageBase64 ? mimeType : undefined,
       responseMimeType: 'application/json',
       thinking: useExtendedReasoning,
-      thinkingBudget: useExtendedReasoning ? 2048 : 0,
+      thinkingBudget: useExtendedReasoning ? 128 : 0,
       temperature: useExtendedReasoning ? 0.4 : 0.1,
-      maxOutputTokens: useExtendedReasoning ? 4096 : 1536,
-      timeoutMs: useExtendedReasoning ? 30_000 : 10_000,
-      totalTimeoutMs: useExtendedReasoning ? 45_000 : 15_000,
+      maxOutputTokens: useExtendedReasoning ? 2048 : 1536,
+      timeoutMs: useExtendedReasoning ? 15_000 : imageBase64 ? 20_000 : 10_000,
+      totalTimeoutMs: useExtendedReasoning ? 20_000 : imageBase64 ? 25_000 : 15_000,
     });
 
     let parsedResult: Record<string, unknown>;
