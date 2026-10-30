@@ -388,6 +388,10 @@ export default function InvestmentsPage() {
       const mergedById = new Map<string, Record<string, unknown>>();
       for (const row of existingRows) {
         const id = String(row.Id || row.id || '').trim();
+        const notes = String(row.Notes || row.notes || '');
+        // Full re-sync treats Moomoo as the source of truth for auto-imported
+        // orders, so stale device-only copies must not survive a reset.
+        if (forceFullSync && /Moomoo Auto-Sync/i.test(notes)) continue;
         if (id) mergedById.set(id, row);
       }
       const getOrderIdentity = (row: Record<string, unknown>) => {
