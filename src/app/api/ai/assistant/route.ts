@@ -13,6 +13,8 @@ import {
 } from '@/lib/kinova-assistant';
 import { requiresExtendedReasoning } from '@/lib/intent-router';
 
+export const maxDuration = 30;
+
 export interface AssistantTurn {
   role: 'user' | 'assistant';
   text: string;
