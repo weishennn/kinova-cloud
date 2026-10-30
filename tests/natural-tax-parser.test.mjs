@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseNaturalExpense } from '../src/lib/natural-expense-parser.ts';
 import { routeLocalIntent } from '../src/lib/intent-router.ts';
+import { buildAssistantParserCandidate } from '../src/lib/kinova-assistant.ts';
 
 const mockProfile = {
   monthlyBudgetCap: 3000,
@@ -69,10 +70,38 @@ test('3. multi-operator math expressions are preserved without false single-rate
 });
 
 test('4. routeLocalIntent carries subtotal and tax metadata in quick_parse command', () => {
-  // Use input without advice/tax keyword triggers in routeLocalIntent so it takes quick_parse
   const r = parseNaturalExpense('chicken rice 14 witrh 6%');
   assert.ok(r);
   assert.equal(r.amount, 14.84);
   assert.equal(r.subtotal, 14);
   assert.equal(r.taxRate, 6);
+});
+
+test('5. unparsed calculation words yield to Gemini rather than assuming naive single number', () => {
+  const r1 = parseNaturalExpense('chicken rice 14 with 6 percent tax');
+  assert.ok(r1);
+  assert.equal(r1.hasUnparsedCalculationContext, true);
+
+  const route1 = routeLocalIntent('chicken rice 14 with 6 percent tax', mockProfile, '2026-10-30');
+  assert.equal(route1, null, 'Must delegate to Gemini instead of naive quick_parse');
+
+  const r2 = parseNaturalExpense('2 chicken rice 14 each');
+  assert.ok(r2);
+  assert.equal(r2.hasUnparsedCalculationContext, true);
+
+  const route2 = routeLocalIntent('2 chicken rice 14 each', mockProfile, '2026-10-30');
+  assert.equal(route2, null, 'Must delegate to Gemini instead of naive quick_parse');
+
+  const r3 = parseNaturalExpense('dinner 120 split between 4 people');
+  assert.ok(r3);
+  assert.equal(r3.hasUnparsedCalculationContext, true);
+
+  const route3 = routeLocalIntent('dinner 120 split between 4 people', mockProfile, '2026-10-30');
+  assert.equal(route3, null, 'Must delegate to Gemini instead of naive quick_parse');
+});
+
+test('6. buildAssistantParserCandidate marks amount as unresolved when calculation context is unparsed', () => {
+  const candidate = buildAssistantParserCandidate('chicken rice 14 with 6 percent tax');
+  assert.ok(candidate);
+  assert.deepEqual(candidate.unresolvedFields, ['amount'], 'Should not anchor Gemini to 14 when calculation is unparsed');
 });

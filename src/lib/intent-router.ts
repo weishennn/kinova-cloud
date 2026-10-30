@@ -277,7 +277,8 @@ export function routeLocalIntent(
       localParsed.category &&
       localParsed.category !== 'Other' &&
       localParsed.description &&
-      !localParsed.hasUnparsedTemporalContext
+      !localParsed.hasUnparsedTemporalContext &&
+      !localParsed.hasUnparsedCalculationContext
     ) {
       const command: AiCommand = {
         intent: 'transaction',

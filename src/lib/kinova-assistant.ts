@@ -58,7 +58,10 @@ export function buildAssistantParserCandidate(text: string): AssistantParserCand
     currency: parsed.currency || 'MYR',
     type: parsed.type,
     category: parsed.category,
-    unresolvedFields: parsed.hasUnparsedTemporalContext ? ['date'] : [],
+    unresolvedFields: [
+      ...(parsed.hasUnparsedTemporalContext ? ['date'] : []),
+      ...(parsed.hasUnparsedCalculationContext ? ['amount'] : []),
+    ],
   };
 }
 

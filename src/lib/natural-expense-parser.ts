@@ -12,6 +12,7 @@ export interface ParsedExpense {
   date: string; // YYYY-MM-DD
   /** True when the input contains relative date language this parser did not resolve. */
   hasUnparsedTemporalContext: boolean;
+  hasUnparsedCalculationContext?: boolean;
   isInstallment?: boolean;
   installmentMonths?: number;
   interestRate?: number;
@@ -245,6 +246,26 @@ function hasUnparsedTemporalContext(text: string, matchedDateText: string): bool
  * - "Salary 6500" -> Amount: 6500, Category: Salary, Type: Income
  * - "Macbook 3600 12m" -> Amount: 3600, Category: Shopping, isInstallment: true, installmentMonths: 12
  */
+const UNPARSED_CALCULATION_PATTERNS = [
+  /\b(?:percent|percentage|peratus|tax|taxes|sst|gst|service\s*charge|service\s*tax|cukai|svc|vat|discount|diskaun|rebate|voucher|kupon|税|折扣|服务费)\b/i,
+  /\b(?:each|per\s*(?:item|piece|person|pax|one|head|plate|bowl)|split\s*(?:by|between)|divided\s*by|分摊|平摊|均摊|每份|每个|每个人|per\s*orang)\b/i,
+];
+
+/**
+ * Returns true when the input contains calculation, tax, discount, or quantity phrases
+ * that were not fully evaluated into a resolved formula/amount by the local parser.
+ * This signals to the intent router to delegate to Gemini Assistant rather than
+ * pretending to know the final amount with a naive single-number regex match.
+ */
+function hasUnparsedCalculationContext(
+  text: string,
+  hasResolvedFormula: boolean,
+  hasResolvedTax: boolean,
+  hasResolvedDiscount: boolean
+): boolean {
+  if (hasResolvedFormula || hasResolvedTax || hasResolvedDiscount) return false;
+  return UNPARSED_CALCULATION_PATTERNS.some((pattern) => pattern.test(text));
+}
 export function parseNaturalExpense(input: string): ParsedExpense | null {
   const text = input.trim();
   if (!text) return null;
@@ -468,6 +489,12 @@ export function parseNaturalExpense(input: string): ParsedExpense | null {
     description: cleanedDesc,
     date: targetDate,
     hasUnparsedTemporalContext: hasUnresolvedTemporalContext,
+    hasUnparsedCalculationContext: hasUnparsedCalculationContext(
+      text,
+      Boolean(detectedFormula),
+      detectedTaxRate != null,
+      detectedDiscountAmount != null
+    ),
     isInstallment,
     installmentMonths,
     interestRate: detectedInterestRate,
