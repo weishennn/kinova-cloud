@@ -10,6 +10,8 @@ export interface ParsedExpense {
   type: 'Expense' | 'Income';
   description: string;
   date: string; // YYYY-MM-DD
+  /** True when the input contains relative date language this parser did not resolve. */
+  hasUnparsedTemporalContext: boolean;
   isInstallment?: boolean;
   installmentMonths?: number;
   interestRate?: number;
@@ -203,6 +205,32 @@ function extractDateFromNaturalText(text: string, todayStr: string): { date: str
   return { date: todayStr, matchText: '' };
 }
 
+const RELATIVE_TIME_UNITS = '(?:days?|weeks?|fortnights?|months?|quarters?|years?)';
+const NUMBER_WORDS = '(?:\\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|few|several)';
+const UNPARSED_TEMPORAL_CONTEXT_PATTERNS = [
+  new RegExp(
+    `\\b(?:(?:last|previous|prior|this|current|next|coming|upcoming|past|recent|within)\\s+(?:(?:the|last|past)\\s+)?(?:${NUMBER_WORDS}\\s+)?${RELATIVE_TIME_UNITS}|(?:for|during|over|in|since|from)\\s+(?:(?:the|last|past)\\s+)?(?:${NUMBER_WORDS}\\s+)?${RELATIVE_TIME_UNITS})\\b`,
+    'i'
+  ),
+  new RegExp(`\\b${NUMBER_WORDS}\\s+${RELATIVE_TIME_UNITS}\\s+(?:ago|earlier|later|from now)\\b`, 'i'),
+  /\b(?:tomorrow|esok)\b/i,
+  /\b(?:last|this|next|coming|upcoming)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i,
+  /\b(?:hari|minggu|bulan|tahun)\s+(?:lepas|lalu|ini|depan|akan datang)\b/i,
+  /\b(?:lepas|lalu|depan|akan datang)\s+(?:(?:\d+|satu|dua|tiga|empat|lima)\s+)?(?:hari|minggu|bulan|tahun)\b/i,
+  /(?:上|这|本|下|过去|最近|未来)\s*(?:个|一)?\s*(?:天|周|星期|月|季度|年)/u,
+  /(?:\d+|[零一二三四五六七八九十百]+)\s*(?:天|周|星期|个?月|季度|年)\s*(?:前|后)/u,
+];
+
+/**
+ * The quick parser only understands specific dates and single-day relatives such as
+ * "today" and "yesterday". Catch broader date ranges and relative dates that still
+ * need interpretation so the assistant can resolve them instead of defaulting to today.
+ */
+function hasUnparsedTemporalContext(text: string, matchedDateText: string): boolean {
+  const unparsedText = matchedDateText ? text.replace(matchedDateText, ' ') : text;
+  return UNPARSED_TEMPORAL_CONTEXT_PATTERNS.some((pattern) => pattern.test(unparsedText));
+}
+
 /**
  * Parses natural language input string into structured expense data.
  * Examples:
@@ -220,6 +248,7 @@ export function parseNaturalExpense(input: string): ParsedExpense | null {
 
   // 1. Detect and protect date expression so its numbers are not confused with expense amount
   const { date: targetDate, matchText: dateMatchText } = extractDateFromNaturalText(text, todayStr);
+  const hasUnresolvedTemporalContext = hasUnparsedTemporalContext(text, dateMatchText);
   let textForAmount = dateMatchText ? text.replace(dateMatchText, ' ') : text;
 
   // 1b. Detect installment & explicit interest rate (e.g. "2.12% interest", "interest 2.12%", "2.12% p.a.")
@@ -379,6 +408,7 @@ export function parseNaturalExpense(input: string): ParsedExpense | null {
     type: detectedType,
     description: cleanedDesc,
     date: targetDate,
+    hasUnparsedTemporalContext: hasUnresolvedTemporalContext,
     isInstallment,
     installmentMonths,
     interestRate: detectedInterestRate,

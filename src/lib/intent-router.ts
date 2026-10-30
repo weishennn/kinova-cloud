@@ -241,7 +241,9 @@ export function routeLocalIntent(
   }
 
   // 6. FAST PATH FOR EXPENSES (Instant local parse, 0ms, NO GEMINI CALL)
-  // If user entered a simple expense like "Shell 60", "午餐 15", "KFC 32"
+  // Only use it when the parser resolved any relative date language in the input.
+  // Otherwise let the assistant interpret the complete request instead of silently
+  // treating an unrecognized date phrase as today.
   if (!isQuestionOrAdviceRequest(trimmed)) {
     const localParsed = parseNaturalExpense(trimmed);
     if (
@@ -249,7 +251,8 @@ export function routeLocalIntent(
       localParsed.amount > 0 &&
       localParsed.category &&
       localParsed.category !== 'Other' &&
-      localParsed.description
+      localParsed.description &&
+      !localParsed.hasUnparsedTemporalContext
     ) {
       const command: AiCommand = {
         intent: 'transaction',

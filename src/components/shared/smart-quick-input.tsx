@@ -129,10 +129,16 @@ export function SmartQuickInput() {
 
   // Assistant states
   const [sessionTurns, setSessionTurns] = useState<AssistantTurnMessage[]>([]);
+  const sessionTurnsRef = useRef<AssistantTurnMessage[]>([]);
   const [assistantResult, setAssistantResult] = useState<AssistantApiResponse | null>(null);
   const [isAssistantThinking, setIsAssistantThinking] = useState(false);
+  const assistantRequestInFlightRef = useRef(false);
   const [assistantError, setAssistantError] = useState<string | null>(null);
   const [dismissedChipTexts, setDismissedChipTexts] = useState<string[]>([]);
+
+  useEffect(() => {
+    sessionTurnsRef.current = sessionTurns;
+  }, [sessionTurns]);
 
   // User Money Profile
   const profile = useMemo<UserMoneyProfile>(() => {
@@ -180,8 +186,9 @@ export function SmartQuickInput() {
     if (aiParsed) return aiParsed;
     if (assistantResult?.command) return assistantResult.command;
     if (localRoute?.mode === 'quick_parse') return localRoute.command;
+    if (localParsed?.hasUnparsedTemporalContext) return null;
     return localCommand;
-  }, [aiParsed, assistantResult, localRoute, localCommand]);
+  }, [aiParsed, assistantResult, localRoute, localCommand, localParsed]);
 
   // Real-time Malaysia LHDN Tax Relief preview for SmartQuickInput
   const taxPreviewInfo = useMemo(() => {
@@ -442,8 +449,9 @@ export function SmartQuickInput() {
   const triggerAssistantTurn = useCallback(
     async (textToRun: string) => {
       const trimmed = textToRun.trim();
-      if (!trimmed || isAssistantThinking) return;
+      if (!trimmed || assistantRequestInFlightRef.current) return;
 
+      assistantRequestInFlightRef.current = true;
       setIsAssistantThinking(true);
       setAssistantError(null);
       try {
@@ -452,7 +460,7 @@ export function SmartQuickInput() {
           today: getLocalDateString(),
           profile,
           transactions,
-          sessionTurns,
+          sessionTurns: sessionTurnsRef.current,
           forceAssistant: true,
         });
 
@@ -477,10 +485,11 @@ export function SmartQuickInput() {
         const msg = err instanceof Error ? err.message : 'Kinova Assistant thinking failed';
         setAssistantError(msg);
       } finally {
+        assistantRequestInFlightRef.current = false;
         setIsAssistantThinking(false);
       }
     },
-    [isAssistantThinking, profile, transactions, sessionTurns]
+    [profile, transactions]
   );
 
   const handleUndoAction = async (transactionId?: string, sheetName?: string) => {

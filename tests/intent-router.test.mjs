@@ -111,6 +111,21 @@ test('routeLocalIntent fast paths clear simple expenses as Quick parse', () => {
   assert.equal(expenseRes.command.data.amount, 60);
 });
 
+test('routeLocalIntent delegates relative dates the quick parser cannot resolve', () => {
+  for (const phrase of [
+    'mamak 12.4 last month',
+    'mamak 12.4 two weeks ago',
+    'mamak 12.4 next Monday',
+    'mamak 12.4 上个月',
+  ]) {
+    assert.equal(routeLocalIntent(phrase, mockProfile, TODAY), null, phrase);
+  }
+
+  const supportedRelativeDate = routeLocalIntent('mamak 12.4 yesterday', mockProfile, TODAY);
+  assert.ok(supportedRelativeDate);
+  assert.equal(supportedRelativeDate.mode, 'quick_parse');
+});
+
 test('routeLocalIntent delegates questions and advice to Gemini (returns null)', () => {
   assert.equal(routeLocalIntent('should I buy this iPhone?', mockProfile, TODAY), null);
   assert.equal(routeLocalIntent('怎么看这笔支出', mockProfile, TODAY), null);
