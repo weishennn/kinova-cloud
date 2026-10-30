@@ -6,6 +6,7 @@ import { getLocalDateString } from '@/lib/date-helper';
 import { normalizeToCanonicalCategory } from '@/lib/canonical-categories';
 import {
   parseAssistantJsonResponse,
+  resolveAssistantParserCandidate,
   type AssistantParserCandidate,
   type AssistantPendingContext,
   shouldUseTransactionCapturePrompt,
@@ -241,7 +242,11 @@ export async function POST(req: NextRequest) {
     const imageBase64 = typeof body.imageBase64 === 'string' ? body.imageBase64.trim() : '';
     const mimeType = body.mimeType || 'image/jpeg';
     const pendingContext = normalizePendingContext(body.pendingContext);
-    const parserCandidate = normalizeParserCandidate(body.parserCandidate);
+    const parserCandidate = resolveAssistantParserCandidate(
+      text,
+      Boolean(imageBase64),
+      normalizeParserCandidate(body.parserCandidate),
+    );
 
     if (!text && !imageBase64) {
       return NextResponse.json(

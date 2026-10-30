@@ -5,6 +5,7 @@ import {
   buildAssistantParserCandidate,
   computeDeterministicLedgerFacts,
   parseAssistantJsonResponse,
+  resolveAssistantParserCandidate,
   runKinovaTurn,
   shouldUseTransactionCapturePrompt,
   updateAssistantConversation,
@@ -42,6 +43,10 @@ test('assistant parser candidate carries supported amount fields without inventi
   assert.equal(shouldUseTransactionCapturePrompt('mamak lunch 15 last week', false, candidate), true);
   assert.equal(shouldUseTransactionCapturePrompt('Should I pay 15 for lunch?', false, candidate), false);
   assert.equal(shouldUseTransactionCapturePrompt('mamak lunch 15 last week', true, candidate), false);
+  const serverCandidate = resolveAssistantParserCandidate('mamak lunch 15 last week', false);
+  assert.deepEqual(serverCandidate, candidate);
+  assert.equal(shouldUseTransactionCapturePrompt('mamak lunch 15 last week', false, serverCandidate), true);
+  assert.equal(resolveAssistantParserCandidate('mamak lunch 15 last week', true), null);
 });
 
 test('computeDeterministicLedgerFacts correctly aggregates whole-ledger totals without arithmetic hallucinations', () => {

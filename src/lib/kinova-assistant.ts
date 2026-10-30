@@ -62,6 +62,15 @@ export function buildAssistantParserCandidate(text: string): AssistantParserCand
   };
 }
 
+export function resolveAssistantParserCandidate(
+  text: string,
+  hasImage: boolean,
+  providedCandidate?: AssistantParserCandidate | null,
+): AssistantParserCandidate | null {
+  if (providedCandidate) return providedCandidate;
+  return hasImage ? null : buildAssistantParserCandidate(text);
+}
+
 export function shouldUseTransactionCapturePrompt(
   text: string,
   hasImage: boolean,
@@ -311,7 +320,6 @@ export interface RunKinovaTurnOptions {
   transactions?: Array<any>;
   sessionTurns?: AssistantTurnMessage[];
   pendingContext?: AssistantPendingContext | null;
-  parserCandidate?: AssistantParserCandidate | null;
   forceAssistant?: boolean;
   factQuery?: string;
   pendingReceipt?: { amount: number; merchant?: string; date?: string };
