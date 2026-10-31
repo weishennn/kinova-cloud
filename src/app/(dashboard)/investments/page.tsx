@@ -1108,14 +1108,15 @@ export default function InvestmentsPage() {
         title="Investment Portfolio"
         description="Real-time stock & crypto tracker with automated Google Sheets formulas"
         action={(
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <div className="flex flex-col items-end gap-0.5">
-              <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="flex flex-col items-start sm:items-end gap-2 w-full sm:w-auto">
+            {/* Row 1: Moomoo Sync & Full re-sync */}
+            <div className="flex flex-col items-start sm:items-end gap-0.5">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   disabled={isSyncingMoomoo}
                   onClick={() => handleSyncMoomoo(false)}
-                  className="min-h-[44px] px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 active:scale-[0.97] text-white text-xs font-semibold shadow-lg shadow-emerald-500/20 flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation disabled:opacity-50"
+                  className="min-h-[40px] px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 active:scale-[0.97] text-white text-xs font-semibold shadow-lg shadow-emerald-500/20 flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation disabled:opacity-50"
                   title="Later syncs check recent activity and update matching orders with Moomoo fee details."
                 >
                   {isSyncingMoomoo ? (
@@ -1129,7 +1130,7 @@ export default function InvestmentsPage() {
                   type="button"
                   disabled={isSyncingMoomoo}
                   onClick={() => handleSyncMoomoo(true)}
-                  className="min-h-[44px] px-3 py-2 rounded-xl border border-amber-500/40 bg-white/80 dark:bg-zinc-900/80 hover:bg-amber-50 dark:hover:bg-amber-950/30 active:scale-[0.97] text-amber-800 dark:text-amber-300 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation disabled:opacity-50"
+                  className="min-h-[40px] px-3 py-2 rounded-xl border border-amber-500/40 bg-white/80 dark:bg-zinc-900/80 hover:bg-amber-50 dark:hover:bg-amber-950/30 active:scale-[0.97] text-amber-800 dark:text-amber-300 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation disabled:opacity-50"
                   title="Fetch full Moomoo history and restore returned orders that were previously deleted."
                 >
                   <RefreshCw className={`h-3.5 w-3.5 ${isSyncingMoomoo ? 'animate-spin' : ''}`} aria-hidden="true" />
@@ -1142,35 +1143,39 @@ export default function InvestmentsPage() {
                   : 'First sync imports history'}
               </span>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                setEditingTrade(null);
-                setTradeAction('BUY');
-                setIsReinvested(false);
-                setIsAddTradeOpen(true);
-              }}
-              className="min-h-[40px] px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 active:scale-[0.97] text-white dark:text-white text-xs font-semibold shadow-lg shadow-indigo-500/20 flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation"
-            >
-              <ArrowUpRight className="h-3.5 w-3.5" />
-              <span>+ Buy</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setEditingTrade(null);
-                setTradeAction('SELL');
-                setIsReinvested(false);
-                if (!ticker && holdings.length > 0) {
-                  selectHoldingForTrade(holdings[0], 'SELL');
-                }
-                setIsAddTradeOpen(true);
-              }}
-              className="min-h-[40px] px-4 py-2 rounded-xl border border-rose-500/35 bg-rose-500/10 hover:bg-rose-500/20 active:scale-[0.97] text-rose-800 dark:text-rose-300 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation"
-            >
-              <ArrowDownRight className="h-3.5 w-3.5" />
-              <span>Sell</span>
-            </button>
+
+            {/* Row 2: Buy and Sell in same row */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingTrade(null);
+                  setTradeAction('BUY');
+                  setIsReinvested(false);
+                  setIsAddTradeOpen(true);
+                }}
+                className="min-h-[40px] px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 active:scale-[0.97] text-white dark:text-white text-xs font-semibold shadow-lg shadow-indigo-500/20 flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation"
+              >
+                <ArrowUpRight className="h-3.5 w-3.5" />
+                <span>+ Buy</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingTrade(null);
+                  setTradeAction('SELL');
+                  setIsReinvested(false);
+                  if (!ticker && holdings.length > 0) {
+                    selectHoldingForTrade(holdings[0], 'SELL');
+                  }
+                  setIsAddTradeOpen(true);
+                }}
+                className="min-h-[40px] px-4 py-2 rounded-xl border border-rose-500/35 bg-rose-500/10 hover:bg-rose-500/20 active:scale-[0.97] text-rose-800 dark:text-rose-300 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation"
+              >
+                <ArrowDownRight className="h-3.5 w-3.5" />
+                <span>Sell</span>
+              </button>
+            </div>
           </div>
         )}
       />
