@@ -2018,9 +2018,15 @@ export default function SettingsPage() {
             <ol className="list-decimal list-inside text-xs text-slate-600 dark:text-zinc-400 space-y-1.5 leading-relaxed">
               <li>打开 iPhone <strong>快捷指令 (Shortcuts)</strong> App，新建快捷指令并命名为 <strong>「Kinova 快速记账」</strong>。</li>
               <li>添加动作 1：<strong>截屏 (Take Screenshot)</strong>。</li>
-              <li>添加动作 2：<strong>使用 Base64 编码 (Base64 Encode)</strong> → 输入选择「截屏」，换行选项设为 <strong>无 (None)</strong>。</li>
               <li>
-                添加动作 3：<strong>获取 URL 内容 (Get Contents of URL)</strong>：
+                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">⚡ [提速关键] 添加动作 2：调整图像大小 (Resize Image)</span> → 宽度设为 <strong>1080</strong>（高度保持自动），将原图 8MB 缩减至轻量尺寸。
+              </li>
+              <li>
+                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">⚡ [提速关键] 添加动作 3：转换图像 (Convert Image)</span> → 转换为 <strong>JPEG</strong>，质量设为 <strong>0.75 (或 75%)</strong>。体积由 8MB 骤降至 200KB（手机上传时间由 4 秒暴降到 0.2 秒）。
+              </li>
+              <li>添加动作 4：<strong>使用 Base64 编码 (Base64 Encode)</strong> → 输入选择「已转换的图像」，换行选项设为 <strong>无 (None)</strong>。</li>
+              <li>
+                添加动作 5：<strong>获取 URL 内容 (Get Contents of URL)</strong>：
                 <ul className="list-disc list-inside pl-4 mt-1 space-y-0.5 text-[11px]">
                   <li>URL：<code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">{typeof window !== 'undefined' ? `${window.location.origin}/api/shortcuts/ingest${googleUser?.email ? `?user=${encodeURIComponent(googleUser.email)}` : ''}` : 'https://你的域名/api/shortcuts/ingest?user=你的邮箱'}</code>（已自动预带你的专属账号参数）</li>
                   <li>方法：<code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">POST</code>，请求体：<code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">JSON</code></li>
@@ -2036,7 +2042,7 @@ export default function SettingsPage() {
                   </li>
                 </ul>
               </li>
-              <li>添加动作 4：<strong>获取词典值 (Get Dictionary Value)</strong> → 获取键 <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">notificationText</code>，再通过 <strong>显示通知 (Show Notification)</strong> 直接弹窗提示入账结果。</li>
+              <li>添加动作 6：<strong>获取词典值 (Get Dictionary Value)</strong> → 获取键 <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">notificationText</code>，再通过 <strong>显示通知 (Show Notification)</strong> 直接弹窗提示入账结果。</li>
               <li>绑定背面轻点：前往 iPhone <strong>设置 → 辅助功能 (Accessibility) → 触控 (Touch) → 轻点背面 (Back Tap) → 轻点两下 (Double Tap)</strong>，选择 <strong>「Kinova Automation」</strong>。</li>
             </ol>
           </div>

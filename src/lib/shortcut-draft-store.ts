@@ -896,7 +896,7 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
           const generationConfig: Record<string, unknown> = {
             responseMimeType: 'application/json',
             temperature: 0.1,
-            maxOutputTokens: 2048,
+            maxOutputTokens: 768,
           };
           if (!omitThinking) {
             // Strictly disable thinking tokens to ensure sub-5s response time for iOS Shortcuts OCR

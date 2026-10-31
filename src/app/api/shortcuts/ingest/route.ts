@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { getLocalDateString, parseLocalDate } from '@/lib/date-helper';
 import { getValidGoogleSession } from '@/lib/google-auth';
 import { getActiveShortcutOwnerEmail, setActiveShortcutOwner } from '@/lib/admin-registry';
@@ -238,10 +238,48 @@ export async function POST(req: NextRequest) {
         normalizedDraft.amount > 0 &&
         Boolean(normalizedDraft.merchant || normalizedDraft.description);
 
-      const ledgerRes = await recordShortcutDraftToLedger(saved, {
-        autoRecord: canAutoRecord,
-        userEmail,
-      });
+      const isExplicitSync = req.nextUrl.searchParams.get('sync') === 'true';
+
+      let ledgerRes: {
+        autoRecorded: boolean;
+        duplicateSkipped: boolean;
+        transactionId: string | null;
+        sheetName: string | null;
+        notificationTitle: string;
+        notificationText: string;
+      };
+
+      if (canAutoRecord && !isExplicitSync) {
+        const label = saved.description || saved.merchant || saved.category || '消费记录';
+        const rawCurr = (saved.currency || 'MYR').toUpperCase().trim();
+        const curr = rawCurr === 'RM' || !rawCurr ? 'MYR' : rawCurr;
+        const targetDate = String(saved.date || '').trim().slice(0, 10);
+
+        ledgerRes = {
+          autoRecorded: true,
+          duplicateSkipped: false,
+          transactionId: saved.draftId,
+          sheetName: targetDate.slice(0, 7),
+          notificationTitle: `✅ 已记账 ${curr} ${saved.amount!.toFixed(2)} (${targetDate})`,
+          notificationText: `✅ 已记账 [${targetDate}]：${curr} ${saved.amount!.toFixed(2)} · ${label} (${saved.category})`,
+        };
+
+        after(async () => {
+          try {
+            await recordShortcutDraftToLedger(saved, {
+              autoRecord: true,
+              userEmail,
+            });
+          } catch (err) {
+            console.error('[Shortcut Ingest ApplePay] Background Google Sheets write error:', err);
+          }
+        });
+      } else {
+        ledgerRes = await recordShortcutDraftToLedger(saved, {
+          autoRecord: canAutoRecord,
+          userEmail,
+        });
+      }
 
       return NextResponse.json(
         {
@@ -626,11 +664,51 @@ Return JSON shape:
       Boolean(effectiveDescription) &&
       missingFields.length === 0;
 
-    const ledgerRes = await recordShortcutDraftToLedger(saved, {
-      fallbackNotice: ocrFallbackNotice,
-      autoRecord: canAutoRecord,
-      userEmail,
-    });
+    const isExplicitSync = req.nextUrl.searchParams.get('sync') === 'true';
+
+    let ledgerRes: {
+      autoRecorded: boolean;
+      duplicateSkipped: boolean;
+      transactionId: string | null;
+      sheetName: string | null;
+      notificationTitle: string;
+      notificationText: string;
+    };
+
+    if (canAutoRecord && !isExplicitSync) {
+      const label = effectiveDescription || saved.category || '消费记录';
+      const rawCurr = (saved.currency || 'MYR').toUpperCase().trim();
+      const curr = rawCurr === 'RM' || !rawCurr ? 'MYR' : rawCurr;
+      const targetDate = String(saved.date || '').trim().slice(0, 10);
+
+      ledgerRes = {
+        autoRecorded: true,
+        duplicateSkipped: false,
+        transactionId: saved.draftId,
+        sheetName: targetDate.slice(0, 7),
+        notificationTitle: `✅ 已记账 ${curr} ${saved.amount!.toFixed(2)} (${targetDate})`,
+        notificationText: `✅ 已记账 [${targetDate}]：${curr} ${saved.amount!.toFixed(2)} · ${label} (${saved.category})`,
+      };
+
+      // Optimistic response: return immediately to iPhone, write to Google Sheets in background
+      after(async () => {
+        try {
+          await recordShortcutDraftToLedger(saved, {
+            fallbackNotice: ocrFallbackNotice,
+            autoRecord: true,
+            userEmail,
+          });
+        } catch (err) {
+          console.error('[Shortcut Ingest] Background Google Sheets write error:', err);
+        }
+      });
+    } else {
+      ledgerRes = await recordShortcutDraftToLedger(saved, {
+        fallbackNotice: ocrFallbackNotice,
+        autoRecord: canAutoRecord,
+        userEmail,
+      });
+    }
 
     return NextResponse.json(
       {
