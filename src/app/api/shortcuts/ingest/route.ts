@@ -312,11 +312,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const preferredModel = (
+    const rawModel = (
       process.env.GEMINI_OCR_MODEL ||
       process.env.GEMINI_MODEL ||
-      'gemini-flash-latest'
+      'gemini-3.5-flash'
     ).trim();
+    // Defensive sanitization: Automatically remap deprecated model to prevent 404 even if remote server env is stale
+    const preferredModel = rawModel === 'gemini-2.5-flash' ? 'gemini-3.5-flash' : rawModel;
 
     const prompt = `You are an intelligent financial OCR and receipt analysis AI.
 Analyze this payment / receipt / transaction screenshot carefully and return ONLY valid JSON.

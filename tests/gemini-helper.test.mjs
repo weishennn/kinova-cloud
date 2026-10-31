@@ -20,6 +20,11 @@ test('getStandardGeminiModelOrder puts process.env.GEMINI_MODEL first when confi
   assert.deepEqual(models, ['gemini-2.5-pro', 'gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest', 'gemini-2.5-flash']);
 });
 
+test('getStandardGeminiModelOrder automatically remaps deprecated gemini-2.5-flash to gemini-3.5-flash to prevent 404', () => {
+  const models = getStandardGeminiModelOrder({ GEMINI_MODEL: 'gemini-2.5-flash' });
+  assert.equal(models[0], 'gemini-3.5-flash');
+});
+
 test('extractTextFromGeminiResponse concatenates text parts and ignores thought parts', () => {
   const payload = {
     candidates: [

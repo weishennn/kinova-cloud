@@ -43,7 +43,9 @@ export const STANDARD_GEMINI_MODELS = [
 export function getStandardGeminiModelOrder(
   env: Record<string, string | undefined> = process.env
 ): string[] {
-  const preferred = (env.GEMINI_MODEL || '').trim();
+  const rawPreferred = (env.GEMINI_MODEL || '').trim();
+  // Automatically sanitize deprecated model name so stale server env vars don't trigger 404
+  const preferred = rawPreferred === 'gemini-2.5-flash' ? 'gemini-3.5-flash' : rawPreferred;
   const models: string[] = [];
   if (preferred) {
     models.push(preferred);

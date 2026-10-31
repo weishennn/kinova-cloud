@@ -868,7 +868,8 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
       : splitKeys(options.geminiKey);
   const effectiveKeys = candidateKeys.length > 0 ? candidateKeys : [''];
 
-  const preferred = (options.preferredModel || 'gemini-3.5-flash').trim();
+  const rawPreferred = (options.preferredModel || 'gemini-3.5-flash').trim();
+  const preferred = rawPreferred === 'gemini-2.5-flash' ? 'gemini-3.5-flash' : rawPreferred;
   const candidateModels = [
     preferred,
     'gemini-3.5-flash',
