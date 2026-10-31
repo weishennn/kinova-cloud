@@ -231,13 +231,18 @@ export function CashflowCockpit() {
     } else if (transaction.type === 'expense') {
       result.spending += amount;
     } else if (transaction.type === 'investment' || isTrade) {
-      const isSell = transaction.subCategory?.toUpperCase() === 'SELL' ||
-        /^(SELL)\b/i.test(transaction.description || '');
-      if (isSell) {
-        // Stock sale proceeds return capital from investment to liquid cash
-        result.invested -= amount;
-      } else {
-        result.invested += amount;
+      const isCashSavings = transaction.category === 'Emergency Savings' ||
+        transaction.category === 'Fixed Deposit' ||
+        transaction.category === 'Other Savings';
+      if (!isCashSavings) {
+        const isSell = transaction.subCategory?.toUpperCase() === 'SELL' ||
+          /^(SELL)\b/i.test(transaction.description || '');
+        if (isSell) {
+          // Stock sale proceeds return capital from investment to liquid cash
+          result.invested -= amount;
+        } else {
+          result.invested += amount;
+        }
       }
     }
     return result;

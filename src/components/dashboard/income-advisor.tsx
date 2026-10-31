@@ -158,6 +158,8 @@ export function IncomeAdvisor({
     const safeTxs = Array.isArray(currentMonthTxs) ? currentMonthTxs : [];
     return safeTxs.reduce((sum, t) => {
       if (t.type !== 'investment') return sum;
+      const isCashSavings = t.category === 'Emergency Savings' || t.category === 'Fixed Deposit' || t.category === 'Other Savings';
+      if (isCashSavings) return sum;
       const amt = getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount);
       const sub = (t.subCategory || '').toUpperCase();
       const desc = (t.description || '').toUpperCase();

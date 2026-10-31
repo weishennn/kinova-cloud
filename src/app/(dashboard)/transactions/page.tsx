@@ -244,6 +244,7 @@ export default function TransactionsPage() {
     let expense = 0;
     let investedBuys = 0;
     let investedSells = 0;
+    let savingsDeposits = 0;
     filteredTransactions.forEach(t => {
       const baseAmount = getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount);
       const isTrade = String(t.id || '').startsWith('tx_trade_') ||
@@ -254,11 +255,16 @@ export default function TransactionsPage() {
       if (t.type === 'income' && !isTrade) income += baseAmount;
       if (t.type === 'expense') expense += baseAmount;
       if (t.type === 'investment' || isTrade) {
-        const isSell = t.subCategory?.toUpperCase() === 'SELL' || /^(SELL)\b/i.test(t.description || '');
-        if (isSell) {
-          investedSells += baseAmount;
+        const isCashSavings = t.category === 'Emergency Savings' || t.category === 'Fixed Deposit' || t.category === 'Other Savings';
+        if (isCashSavings) {
+          savingsDeposits += baseAmount;
         } else {
-          investedBuys += baseAmount;
+          const isSell = t.subCategory?.toUpperCase() === 'SELL' || /^(SELL)\b/i.test(t.description || '');
+          if (isSell) {
+            investedSells += baseAmount;
+          } else {
+            investedBuys += baseAmount;
+          }
         }
       }
     });
@@ -268,6 +274,7 @@ export default function TransactionsPage() {
       totalInvested: investedBuys - investedSells,
       investedBuys,
       investedSells,
+      savingsDeposits,
       balance: income - expense
     };
   }, [filteredTransactions]);
@@ -639,28 +646,36 @@ export default function TransactionsPage() {
 
       {/* Summary Bar */}
       {filterType === 'investment' ? (
-        <div className="grid grid-cols-3 gap-2.5 rounded-2xl border border-indigo-500/25 bg-card/60 p-4 shadow-xl specular-card">
-          <div className="text-center">
-            <span className="block text-xs font-semibold text-slate-700 dark:text-zinc-300">Net Invested</span>
-            <div className="text-base md:text-lg font-bold text-indigo-700 dark:text-indigo-400 font-mono tabular-nums mt-0.5">
-              <AnimatedNumber value={displaySummary.totalInvested} animateOnMount />
+        <div className="space-y-2">
+          <div className="grid grid-cols-3 gap-2.5 rounded-2xl border border-indigo-500/25 bg-card/60 p-4 shadow-xl specular-card">
+            <div className="text-center">
+              <span className="block text-xs font-semibold text-slate-700 dark:text-zinc-300">Net Invested</span>
+              <div className="text-base md:text-lg font-bold text-indigo-700 dark:text-indigo-400 font-mono tabular-nums mt-0.5">
+                <AnimatedNumber value={displaySummary.totalInvested} animateOnMount />
+              </div>
+              <span className="block text-[10px] text-slate-500 dark:text-zinc-400">Stocks & Assets</span>
             </div>
-            <span className="block text-[10px] text-slate-500 dark:text-zinc-400">Deployed Capital</span>
-          </div>
-          <div className="text-center border-l border-slate-200 dark:border-white/[0.08]">
-            <span className="block text-xs font-semibold text-slate-700 dark:text-zinc-300">Total Purchases</span>
-            <div className="text-base md:text-lg font-bold text-slate-900 dark:text-white font-mono tabular-nums mt-0.5">
-              <AnimatedNumber value={displaySummary.investedBuys} animateOnMount />
+            <div className="text-center border-l border-slate-200 dark:border-white/[0.08]">
+              <span className="block text-xs font-semibold text-slate-700 dark:text-zinc-300">Total Purchases</span>
+              <div className="text-base md:text-lg font-bold text-slate-900 dark:text-white font-mono tabular-nums mt-0.5">
+                <AnimatedNumber value={displaySummary.investedBuys} animateOnMount />
+              </div>
+              <span className="block text-[10px] text-indigo-600 dark:text-indigo-400">BUY orders</span>
             </div>
-            <span className="block text-[10px] text-indigo-600 dark:text-indigo-400">BUY orders</span>
-          </div>
-          <div className="text-center border-l border-slate-200 dark:border-white/[0.08]">
-            <span className="block text-xs font-semibold text-slate-700 dark:text-zinc-300">Total Liquidated</span>
-            <div className="text-base md:text-lg font-bold text-emerald-700 dark:text-emerald-400 font-mono tabular-nums mt-0.5">
-              <AnimatedNumber value={displaySummary.investedSells} animateOnMount />
+            <div className="text-center border-l border-slate-200 dark:border-white/[0.08]">
+              <span className="block text-xs font-semibold text-slate-700 dark:text-zinc-300">Total Liquidated</span>
+              <div className="text-base md:text-lg font-bold text-emerald-700 dark:text-emerald-400 font-mono tabular-nums mt-0.5">
+                <AnimatedNumber value={displaySummary.investedSells} animateOnMount />
+              </div>
+              <span className="block text-[10px] text-emerald-600 dark:text-emerald-400">SELL proceeds</span>
             </div>
-            <span className="block text-[10px] text-emerald-600 dark:text-emerald-400">SELL capital returned</span>
           </div>
+          {displaySummary.savingsDeposits > 0 && (
+            <div className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/40 text-xs text-indigo-900 dark:text-indigo-300">
+              <span className="font-medium">🏦 Separate Cash & Emergency Savings:</span>
+              <span className="font-mono font-bold">RM {displaySummary.savingsDeposits.toFixed(2)}</span>
+            </div>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-3 gap-3 rounded-2xl border border-slate-200 dark:border-white/[0.08] bg-card/60 p-4 shadow-xl specular-card">
