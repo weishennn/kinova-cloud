@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import Link from 'next/link';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertTriangle, ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, CalendarDays, CalendarRange, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, CloudAlert, House, Receipt, Search, ShoppingBag, Sparkles, Train, TrendingUp, Utensils, Wallet } from 'lucide-react';
+import { AlertTriangle, ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, CalendarDays, CalendarRange, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, CloudAlert, House, Receipt, RotateCcw, Search, ShoppingBag, Sparkles, Train, TrendingUp, Utensils, Wallet } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useAppStore } from '@/stores/app-store';
 import { Transaction, useTransactions } from '@/hooks/useTransactions';
@@ -379,6 +379,13 @@ export function CashflowCockpit() {
   }, [currentMonth, periodKind, selectedMonth, visibleTransactions]);
   const hasTrendData = trendData.some((period) => period.income > 0 || period.expense > 0);
   const greeting = new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening';
+  const currentMonthShort = useMemo(() => {
+    const [y, m] = currentMonth.split('-').map(Number);
+    if (!isNaN(y) && !isNaN(m)) {
+      return new Date(y, m - 1, 1).toLocaleString('en-MY', { month: 'short' });
+    }
+    return 'Current';
+  }, [currentMonth]);
 
   return (
     <div className="money-cockpit-page">
@@ -417,10 +424,15 @@ export function CashflowCockpit() {
             <button
               type="button"
               onClick={() => setSelectedMonth(currentMonth)}
-              className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition-colors cursor-pointer shrink-0"
-              title="Jump back to current month"
+              className="cockpit-current-jump-btn"
+              title={`Jump back to current month (${monthName(currentMonth)})`}
+              aria-label={`Jump back to current month (${monthName(currentMonth)})`}
             >
-              Current
+              <RotateCcw size={13} className="cockpit-current-jump-icon" />
+              <span className="cockpit-current-jump-text">
+                <span className="hidden sm:inline">{currentMonthShort} (Current)</span>
+                <span className="sm:hidden">{currentMonthShort}</span>
+              </span>
             </button>
           )}
           <button type="button" className="cockpit-period-arrow" aria-label="Previous period" onClick={() => changePeriod(-1)}><ArrowLeft size={15} /></button>
@@ -440,7 +452,7 @@ export function CashflowCockpit() {
                     <option value={`year-${year}`}>{year} full year</option>
                     {months.filter((month) => month.startsWith(year)).map((month) => (
                       <option key={month} value={month}>
-                        {month === currentMonth ? `★ ${monthName(month)} (Current)` : monthName(month)}
+                        {month === currentMonth ? `${monthName(month)} (Current)` : monthName(month)}
                       </option>
                     ))}
                   </optgroup>

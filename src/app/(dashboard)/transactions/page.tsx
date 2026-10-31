@@ -15,6 +15,7 @@ import {
   ChevronRight,
   Calendar,
   CreditCard,
+  RotateCcw,
   X
 } from "lucide-react"
 import { useTransactions, useDeleteTransaction, type Transaction } from "@/hooks/useTransactions"
@@ -62,6 +63,18 @@ export default function TransactionsPage() {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   }, []);
+
+  const { currentMonthShort, currentMonthName } = useMemo(() => {
+    const [y, m] = currentMonthStr.split('-').map(Number);
+    if (!isNaN(y) && !isNaN(m)) {
+      const d = new Date(y, m - 1, 1);
+      return {
+        currentMonthShort: d.toLocaleString('en-US', { month: 'short' }),
+        currentMonthName: d.toLocaleString('en-US', { month: 'long', year: 'numeric' }),
+      };
+    }
+    return { currentMonthShort: 'Current', currentMonthName: 'Current Month' };
+  }, [currentMonthStr]);
 
   const { data: months = [] } = useMonthList()
   const { transactions = [], isLoading } = useTransactions(selectedMonth ? { period: selectedMonth } : undefined)
@@ -585,7 +598,7 @@ export default function TransactionsPage() {
                     </option>
                     {monthsByYear[year]?.map(m => (
                       <option key={m} value={m} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono">
-                        {m === currentMonthStr ? `★ ${formatPeriodLabel(m)} (Current)` : formatPeriodLabel(m)}
+                        {m === currentMonthStr ? `${formatPeriodLabel(m)} (Current)` : formatPeriodLabel(m)}
                       </option>
                     ))}
                   </optgroup>
@@ -610,10 +623,13 @@ export default function TransactionsPage() {
               <button
                 type="button"
                 onClick={() => setSelectedMonth(currentMonthStr)}
-                className="h-11 px-3 shrink-0 inline-flex items-center justify-center rounded-xl border border-emerald-500/30 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-xs font-bold hover:bg-emerald-500/25 active:scale-[0.96] transition-all cursor-pointer touch-manipulation"
-                title="Jump back to current month"
+                className="h-11 px-3 shrink-0 inline-flex items-center gap-1.5 justify-center rounded-xl border border-indigo-500/25 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 text-xs font-semibold hover:bg-indigo-500/20 active:scale-[0.96] transition-all cursor-pointer touch-manipulation shadow-xs"
+                title={`Jump back to current month (${currentMonthName})`}
+                aria-label={`Jump back to current month (${currentMonthName})`}
               >
-                Current
+                <RotateCcw className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">{currentMonthShort} (Current)</span>
+                <span className="sm:hidden">{currentMonthShort}</span>
               </button>
             )}
           </div>

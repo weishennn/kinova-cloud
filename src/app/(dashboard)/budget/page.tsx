@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import {
   AlertCircle, Wallet, Edit2, Check, Inbox, Sparkles,
   Clock, TrendingDown, ShieldAlert, ArrowUpRight, DollarSign, X,
-  Calendar, ChevronLeft, ChevronRight
+  Calendar, ChevronLeft, ChevronRight, RotateCcw
 } from 'lucide-react';
 import { useTransactions } from '@/hooks/useTransactions';
 import { AnimatedNumber } from '@/components/shared/animated-number';
@@ -33,6 +33,14 @@ export default function BudgetPage() {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   }, []);
+
+  const currentMonthShort = useMemo(() => {
+    const [y, m] = currentMonthStr.split('-').map(Number);
+    if (!isNaN(y) && !isNaN(m)) {
+      return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'short' });
+    }
+    return 'Current';
+  }, [currentMonthStr]);
 
   // Extract all available years and months from transactions + current year/month
   const { availableYears, monthsByYear, allAvailableMonths } = useMemo(() => {
@@ -284,14 +292,14 @@ export default function BudgetPage() {
         {/* Header: Label + Selected Month */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="p-2 rounded-xl bg-indigo-500/15 text-indigo-800 dark:text-indigo-400 border border-indigo-500/20 shrink-0">
+            <div className="p-2 rounded-xl bg-indigo-500/15 text-indigo-700 dark:text-indigo-400 border border-indigo-500/20 shrink-0">
               <Calendar className="h-4 w-4" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <span className="text-[11px] font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider block">Budgeting Period</span>
                 {selectedMonth === currentMonthStr && (
-                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30">
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/25">
                     Current
                   </span>
                 )}
@@ -299,7 +307,20 @@ export default function BudgetPage() {
               <span className="text-sm sm:text-base font-bold text-slate-950 dark:text-white tracking-tight truncate block">{formatMonthLabel(selectedMonth)}</span>
             </div>
           </div>
-          <span className="text-[11px] text-slate-500 dark:text-zinc-400 hidden sm:inline">Filter monthly budget</span>
+          {selectedMonth !== currentMonthStr ? (
+            <button
+              type="button"
+              onClick={() => setSelectedMonth(currentMonthStr)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 active:scale-95 text-indigo-700 dark:text-indigo-300 border border-indigo-500/25 text-xs font-semibold transition-all cursor-pointer shadow-xs shrink-0"
+              title={`Jump back to current month (${formatMonthLabel(currentMonthStr)})`}
+              aria-label={`Jump back to current month (${formatMonthLabel(currentMonthStr)})`}
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span>{currentMonthShort} (Current)</span>
+            </button>
+          ) : (
+            <span className="text-[11px] text-slate-500 dark:text-zinc-400 hidden sm:inline">Filter monthly budget</span>
+          )}
         </div>
 
         {/* Navigation Box: Prev / Dropdown / Next - fits neatly INSIDE the card without overflowing */}
@@ -337,7 +358,7 @@ export default function BudgetPage() {
                   </option>
                   {monthsByYear[year]?.map(m => (
                     <option key={m} value={m} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono">
-                      {m === currentMonthStr ? `★ ${formatMonthLabel(m)} (Current)` : formatMonthLabel(m)}
+                      {m === currentMonthStr ? `${formatMonthLabel(m)} (Current)` : formatMonthLabel(m)}
                     </option>
                   ))}
                 </optgroup>
@@ -357,16 +378,6 @@ export default function BudgetPage() {
           >
             <ChevronRight className="h-4 w-4" />
           </button>
-          {selectedMonth !== currentMonthStr && (
-            <button
-              type="button"
-              onClick={() => setSelectedMonth(currentMonthStr)}
-              className="min-h-[40px] px-3 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 text-xs font-bold transition-colors cursor-pointer active:scale-95 shrink-0"
-              title="Jump back to current month"
-            >
-              Current
-            </button>
-          )}
         </div>
       </div>
 

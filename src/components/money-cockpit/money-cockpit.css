@@ -108,7 +108,40 @@
 .dark .cockpit-period-tabs { background: var(--cockpit-surface-soft); }
 .cockpit-period-tabs button { min-width: 74px; min-height: 40px; padding: 0 14px; color: var(--cockpit-muted); background: transparent; border: 0; border-radius: 9px; font-size: 13px; font-weight: 550; cursor: pointer; }
 .cockpit-period-tabs button.is-active { color: var(--cockpit-text); background: var(--cockpit-surface); box-shadow: 0 1px 3px rgba(15, 23, 42, .12); }
-.cockpit-period-select-wrap { display: flex; gap: 4px; align-items: center; }
+.cockpit-period-select-wrap { display: flex; gap: 6px; align-items: center; }
+.cockpit-current-jump-btn {
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cockpit-accent, #6366f1);
+  background: color-mix(in srgb, var(--cockpit-accent, #6366f1) 10%, var(--cockpit-surface));
+  border: 1px solid color-mix(in srgb, var(--cockpit-accent, #6366f1) 25%, transparent);
+  border-radius: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all .16s ease;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+}
+.cockpit-current-jump-btn:hover {
+  background: color-mix(in srgb, var(--cockpit-accent, #6366f1) 18%, var(--cockpit-surface));
+  border-color: color-mix(in srgb, var(--cockpit-accent, #6366f1) 40%, transparent);
+  transform: translateY(-0.5px);
+}
+.cockpit-current-jump-btn:active {
+  transform: scale(0.97);
+}
+.cockpit-current-jump-btn:focus-visible {
+  outline: 2px solid var(--cockpit-accent, #6366f1);
+  outline-offset: 2px;
+}
+.cockpit-current-jump-icon {
+  opacity: 0.85;
+}
 .cockpit-period-arrow { width: 44px; height: 44px; display: grid; place-items: center; color: var(--cockpit-muted); background: transparent; border: 1px solid transparent; border-radius: 11px; cursor: pointer; }
 .cockpit-period-arrow:hover { color: var(--cockpit-text); border-color: var(--cockpit-line); background: var(--cockpit-surface); }
 .cockpit-period-select-label { height: 44px; display: inline-flex; align-items: center; gap: 9px; position: relative; padding: 0 36px 0 13px; color: var(--cockpit-text); background: var(--cockpit-surface); border: 1px solid var(--cockpit-line); border-radius: 11px; }
@@ -364,9 +397,11 @@ body:has(.money-cockpit-shell) [role="dialog"] .specular-card { color: var(--coc
   .cockpit-period-row { align-items: stretch; flex-direction: column; gap: 10px; padding: 14px 0 12px; }
   .cockpit-period-tabs { width: 100%; }
   .cockpit-period-tabs button { flex: 1; }
-  .cockpit-period-select-wrap { width: 100%; justify-content: space-between; }
-  .cockpit-period-select-label { flex: 1; justify-content: center; }
-  .cockpit-period-select-label select { max-width: min(66vw, 240px); }
+  .cockpit-period-select-wrap { width: 100%; display: flex; align-items: center; gap: 4px; box-sizing: border-box; }
+  .cockpit-period-arrow { width: 36px; height: 40px; flex-shrink: 0; }
+  .cockpit-period-select-label { height: 40px; flex: 1 1 0%; min-width: 0; padding: 0 28px 0 10px; justify-content: center; }
+  .cockpit-period-select-label select { width: 100%; min-width: 0; max-width: 100%; font-size: 12px; }
+  .cockpit-current-jump-btn { height: 40px; padding: 0 9px; font-size: 11px; gap: 4px; flex-shrink: 0; border-radius: 10px; }
   .cockpit-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "welcome" "orbit" "trend" "pulse" "insight" "stream" "commitments" "installments" "advisor"; gap: 12px; }
   .cockpit-quick-entry-top { margin-bottom: 12px; }
   .cockpit-area-welcome { align-items: center; gap: 12px; padding: 2px 0; }
