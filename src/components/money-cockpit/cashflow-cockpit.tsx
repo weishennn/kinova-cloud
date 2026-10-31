@@ -746,7 +746,14 @@ export function CashflowCockpit() {
 
         <section className="cockpit-area-advisor" aria-labelledby="advisor-title">
           <div className="cockpit-section-heading cockpit-secondary-heading"><div><p className="cockpit-eyebrow">PLANNING</p><h2 id="advisor-title">Income allocation</h2></div><Wallet size={15} aria-hidden="true" /></div>
-          <IncomeAdvisor liveIncome={totals.income} liveExpense={totals.spending} transactions={allLedgerTransactions.length > 0 ? allLedgerTransactions : transactions} monthLabel={monthName(selectedMonth)} />
+          <IncomeAdvisor
+            liveIncome={totals.income}
+            liveExpense={totals.spending}
+            liveInvested={totals.invested}
+            monthTransactions={visibleTransactions}
+            allTransactions={allLedgerTransactions.length > 0 ? allLedgerTransactions : transactions}
+            monthLabel={monthName(selectedMonth)}
+          />
         </section>
       </main>
       <footer className="cockpit-footer"><span>Kinova overview · {monthName(selectedMonth)}</span><span>Amounts shown in MYR</span></footer>

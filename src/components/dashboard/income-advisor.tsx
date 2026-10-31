@@ -15,11 +15,22 @@ import { getLocalDateString } from '@/lib/date-helper';
 interface IncomeAdvisorProps {
   liveIncome: number;
   liveExpense: number;
-  transactions: Transaction[];
+  liveInvested?: number;
+  transactions?: Transaction[];
+  monthTransactions?: Transaction[];
+  allTransactions?: Transaction[];
   monthLabel?: string;
 }
 
-export function IncomeAdvisor({ liveIncome, liveExpense, transactions, monthLabel }: IncomeAdvisorProps) {
+export function IncomeAdvisor({
+  liveIncome,
+  liveExpense,
+  liveInvested,
+  transactions = [],
+  monthTransactions,
+  allTransactions,
+  monthLabel,
+}: IncomeAdvisorProps) {
   const { setQuickAddOpen, setEditTransaction } = useAppStore();
   const [customIncome, setCustomIncome] = useState<string>('');
   const [isEditing, setIsEditing] = useState(false);
@@ -34,6 +45,9 @@ export function IncomeAdvisor({ liveIncome, liveExpense, transactions, monthLabe
   const [investmentTargetPct, setInvestmentTargetPct] = useState<number>(20);
   const [emergencyMonthsGoal, setEmergencyMonthsGoal] = useState<number>(6);
   const [isCustomizingGoals, setIsCustomizingGoals] = useState(false);
+
+  const historyTxs = allTransactions && allTransactions.length > 0 ? allTransactions : transactions;
+  const currentMonthTxs = monthTransactions && monthTransactions.length > 0 ? monthTransactions : transactions;
 
   useEffect(() => {
     const loadSettings = () => {
@@ -95,7 +109,7 @@ export function IncomeAdvisor({ liveIncome, liveExpense, transactions, monthLabe
     const monthExpenses = new Map<string, number>();
     const monthIncomes = new Map<string, number>();
 
-    const safeTxs = Array.isArray(transactions) ? transactions : [];
+    const safeTxs = Array.isArray(historyTxs) ? historyTxs : [];
     for (const t of safeTxs) {
       if (!t.date || t.date.length < 7) continue;
       const m = t.date.slice(0, 7);
@@ -134,31 +148,49 @@ export function IncomeAdvisor({ liveIncome, liveExpense, transactions, monthLabe
     }
 
     return { rollingMonthlyExpense, incomeVolatility, completedMonthsCount };
-  }, [transactions, liveExpense, effectiveIncome]);
+  }, [historyTxs, liveExpense, effectiveIncome]);
 
-  // Actual monthly figures from transactions
+  // Actual monthly figures from transactions (respects liveInvested from cockpit to ensure 100% sync)
   const actualInvested = useMemo(() => {
-    return (Array.isArray(transactions) ? transactions : [])
-      .filter((t) => t.type === 'investment')
-      .reduce((sum, t) => sum + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount), 0);
-  }, [transactions]);
+    if (typeof liveInvested === 'number') {
+      return liveInvested;
+    }
+    const safeTxs = Array.isArray(currentMonthTxs) ? currentMonthTxs : [];
+    return safeTxs.reduce((sum, t) => {
+      if (t.type !== 'investment') return sum;
+      const amt = getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount);
+      const sub = (t.subCategory || '').toUpperCase();
+      const desc = (t.description || '').toUpperCase();
+      const isSell = sub === 'SELL' || desc.includes('SELL') || desc.includes('卖出');
+      return isSell ? sum - amt : sum + amt;
+    }, 0);
+  }, [liveInvested, currentMonthTxs]);
 
-  // Actual net saved cash (Income - Expenses - Invested)
-  const actualSavedCash = Math.max(0, liveIncome - liveExpense - actualInvested);
+  // Transactions explicitly logged under 'Emergency Savings' or 'Fixed Deposit' this month
+  const monthEmergencyDeposits = useMemo(() => {
+    const safeTxs = Array.isArray(currentMonthTxs) ? currentMonthTxs : [];
+    return safeTxs
+      .filter((t) => (t.category === 'Emergency Savings' || t.category === 'Fixed Deposit') && t.amount > 0)
+      .reduce((sum, t) => sum + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount), 0);
+  }, [currentMonthTxs]);
+
+  // Actual net saved cash (explicit savings deposits or unallocated monthly cashflow surplus)
+  const unallocatedCashSurplus = Math.max(0, liveIncome - liveExpense - actualInvested);
+  const actualSavedCash = monthEmergencyDeposits > 0 ? monthEmergencyDeposits : unallocatedCashSurplus;
 
   // Suggested Targets: customizable percentage of income
   const emergencyTarget = effectiveIncome * (savingsTargetPct / 100);
   const investmentTarget = effectiveIncome * (investmentTargetPct / 100);
 
-  // Transactions explicitly logged under 'Emergency Savings' or 'Fixed Deposit'
-  const emergencyDeposits = useMemo(() => {
-    return (Array.isArray(transactions) ? transactions : [])
-      .filter((t) => t.category === 'Emergency Savings' || t.category === 'Fixed Deposit')
+  // Total accumulated emergency reserve across history (baseline + all recorded deposits)
+  const totalEmergencyDeposits = useMemo(() => {
+    const safeTxs = Array.isArray(historyTxs) ? historyTxs : [];
+    return safeTxs
+      .filter((t) => (t.category === 'Emergency Savings' || t.category === 'Fixed Deposit') && t.amount > 0)
       .reduce((sum, t) => sum + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount), 0);
-  }, [transactions]);
+  }, [historyTxs]);
 
-  // Total accumulated emergency reserve (baseline + recorded deposits)
-  const totalEmergencyReserve = currentReserve + emergencyDeposits;
+  const totalEmergencyReserve = currentReserve + totalEmergencyDeposits;
 
   // Emergency reserve goal is based on rolling monthly expense * target months
   const emergencyReserveGoal = rollingMonthlyExpense * emergencyMonthsGoal;
@@ -362,10 +394,42 @@ export function IncomeAdvisor({ liveIncome, liveExpense, transactions, monthLabe
               </span>
             </div>
 
-            {/* Current Accumulated Emergency Reserve */}
-            <div className="p-3.5 rounded-2xl bg-white/90 dark:bg-zinc-900/70 border border-indigo-500/20 space-y-2">
+            {/* Monthly Target and Savings (Matches Investment Card) */}
+            <div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-xl md:text-2xl font-black text-slate-950 dark:text-white font-mono">
+                  RM {emergencyTarget.toLocaleString('en-MY', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                </span>
+                <span className="text-xs text-slate-600 dark:text-zinc-400">/ month target ({savingsTargetPct}%)</span>
+              </div>
+              <p className="text-[11px] text-slate-600 dark:text-zinc-400 mt-1">
+                Keep in liquid high-yield cash (GXBank, Versa, KDI Save, Boost, Rize) for unexpected bills.
+              </p>
+            </div>
+
+            {/* Progress bar for monthly savings */}
+            <div className="space-y-1.5 pt-1">
               <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-600 dark:text-zinc-400 font-medium">Total Emergency Reserve:</span>
+                <span className="text-slate-600 dark:text-zinc-400">
+                  Saved this month: <strong className="text-slate-950 dark:text-white">RM {actualSavedCash.toFixed(2)}</strong>
+                </span>
+                <span className="text-indigo-800 dark:text-indigo-400 font-semibold">{emergencyProgress.toFixed(0)}%</span>
+              </div>
+              <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-zinc-800/90 overflow-hidden p-0.5 border border-slate-300 dark:border-zinc-700/40">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-cyan-400 transition-all duration-500 shadow-sm"
+                  style={{ width: `${emergencyProgress}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Total Accumulated Emergency Safety Net (Clear long-term reserve pool) */}
+            <div className="p-3.5 rounded-2xl bg-white/90 dark:bg-zinc-900/70 border border-indigo-500/20 space-y-2 mt-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-600 dark:text-zinc-400 font-medium flex items-center gap-1.5">
+                  <ShieldCheck className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                  <span>长期应急总储备池 (Total Reserve):</span>
+                </span>
                 {!isEditingReserve ? (
                   <div className="flex items-center gap-1.5">
                     <span className="font-bold text-slate-950 dark:text-white font-mono text-sm">
@@ -378,7 +442,7 @@ export function IncomeAdvisor({ liveIncome, liveExpense, transactions, monthLabe
                         setIsEditingReserve(true);
                       }}
                       className="p-1 rounded-md text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
-                      title="Set/Update Current Emergency Fund Balance"
+                      title="设定/更新银行长期应急存款总额"
                     >
                       <Edit3 className="h-3.5 w-3.5" />
                     </button>
@@ -416,47 +480,19 @@ export function IncomeAdvisor({ liveIncome, liveExpense, transactions, monthLabe
               {/* Progress towards Safety Net Goal */}
               <div className="space-y-1">
                 <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-zinc-400">
-                  <span>{emergencyMonthsGoal}-Month Goal (RM {emergencyReserveGoal.toLocaleString('en-MY', { maximumFractionDigits: 0 })}):</span>
-                  <span className="font-semibold text-indigo-800 dark:text-indigo-400 font-mono">{reserveGoalProgress.toFixed(0)}% Funded</span>
+                  <span>{emergencyMonthsGoal}个月开支防线 (RM {emergencyReserveGoal.toLocaleString('en-MY', { maximumFractionDigits: 0 })}):</span>
+                  <span className="font-semibold text-indigo-800 dark:text-indigo-400 font-mono">{reserveGoalProgress.toFixed(0)}% 备齐</span>
                 </div>
-                <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-zinc-800/90 overflow-hidden p-0.5 border border-slate-300 dark:border-zinc-700/40">
+                <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-zinc-800/90 overflow-hidden border border-slate-300 dark:border-zinc-700/40">
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-indigo-500 transition-all duration-500 shadow-sm"
                     style={{ width: `${reserveGoalProgress}%` }}
                   />
                 </div>
-                <div className="text-[10px] text-slate-500 dark:text-zinc-500 pt-0.5">
-                  基于{completedMonthsCount > 0 ? `往期月均支出 RM ${rollingMonthlyExpense.toFixed(0)}` : '月度基准支出'}测算
+                <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-zinc-500 pt-0.5">
+                  <span>基于{completedMonthsCount > 0 ? `月均支出 RM ${rollingMonthlyExpense.toFixed(0)}` : '月度基准支出'}</span>
+                  <span className="text-indigo-600 dark:text-indigo-400 font-medium">💡 上方追踪本月存入，此处监控长期总池</span>
                 </div>
-              </div>
-            </div>
-
-            {/* Monthly Target and Savings */}
-            <div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-xl md:text-2xl font-black text-slate-950 dark:text-white font-mono">
-                  RM {emergencyTarget.toLocaleString('en-MY', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                </span>
-                <span className="text-xs text-slate-600 dark:text-zinc-400">/ month target ({savingsTargetPct}%)</span>
-              </div>
-              <p className="text-[11px] text-slate-600 dark:text-zinc-400 mt-1">
-                Keep in liquid cash (Versa Cash, KDI Save, GXBank, Rize, Maybank MAE) for unexpected bills.
-              </p>
-            </div>
-
-            {/* Progress bar for monthly savings */}
-            <div className="space-y-1.5 pt-1">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-600 dark:text-zinc-400">
-                  Saved this month: <strong className="text-slate-950 dark:text-white">RM {actualSavedCash.toFixed(2)}</strong>
-                </span>
-                <span className="text-indigo-800 dark:text-indigo-400 font-semibold">{emergencyProgress.toFixed(0)}%</span>
-              </div>
-              <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-zinc-800/90 overflow-hidden p-0.5 border border-slate-300 dark:border-zinc-700/40">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-cyan-400 transition-all duration-500 shadow-sm"
-                  style={{ width: `${emergencyProgress}%` }}
-                />
               </div>
             </div>
           </div>
