@@ -326,17 +326,29 @@ export default function BudgetPage() {
           )}
         </div>
 
-        {/* Navigation Box: Prev / Dropdown / Next - fits neatly INSIDE the card without overflowing */}
-        <div className="flex items-center justify-between gap-1.5 rounded-2xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-950/60 p-1 w-full max-w-full overflow-hidden">
-          <button
-            type="button"
-            onClick={handlePrevMonth}
-            className="min-w-[40px] min-h-[40px] p-2 rounded-xl bg-white/90 dark:bg-zinc-900/80 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white transition-colors cursor-pointer border border-slate-200 dark:border-white/[0.06] active:scale-95 flex items-center justify-center shrink-0"
-            title="Previous Month"
-            aria-label="Previous Month"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
+        {/* Navigation Box: Stepper (Prev/Next) + Dropdown */}
+        <div className="flex items-center gap-1.5 rounded-2xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-950/60 p-1 w-full max-w-full overflow-hidden">
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={handlePrevMonth}
+              className="min-w-[40px] min-h-[40px] p-2 rounded-xl bg-white/90 dark:bg-zinc-900/80 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white transition-colors cursor-pointer border border-slate-200 dark:border-white/[0.06] active:scale-95 flex items-center justify-center shrink-0"
+              title="Previous Month"
+              aria-label="Previous Month"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+
+            <button
+              type="button"
+              onClick={handleNextMonth}
+              className="min-w-[40px] min-h-[40px] p-2 rounded-xl bg-white/90 dark:bg-zinc-900/80 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white transition-colors cursor-pointer border border-slate-200 dark:border-white/[0.06] active:scale-95 flex items-center justify-center shrink-0"
+              title="Next Month"
+              aria-label="Next Month"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
 
           <select
             value={selectedMonth}
@@ -371,16 +383,6 @@ export default function BudgetPage() {
               All Time (Accumulated)
             </option>
           </select>
-
-          <button
-            type="button"
-            onClick={handleNextMonth}
-            className="min-w-[40px] min-h-[40px] p-2 rounded-xl bg-white/90 dark:bg-zinc-900/80 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white transition-colors cursor-pointer border border-slate-200 dark:border-white/[0.06] active:scale-95 flex items-center justify-center shrink-0"
-            title="Next Month"
-            aria-label="Next Month"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
         </div>
       </div>
 

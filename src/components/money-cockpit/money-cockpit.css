@@ -142,6 +142,22 @@
 .cockpit-current-jump-icon {
   opacity: 0.85;
 }
+.cockpit-period-arrows {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--cockpit-surface);
+  border: 1px solid var(--cockpit-line);
+  border-radius: 12px;
+  padding: 2px;
+  flex-shrink: 0;
+}
+.cockpit-period-arrows .cockpit-period-arrow {
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  border: 0;
+}
 .cockpit-period-arrow { width: 44px; height: 44px; display: grid; place-items: center; color: var(--cockpit-muted); background: transparent; border: 1px solid transparent; border-radius: 11px; cursor: pointer; }
 .cockpit-period-arrow:hover { color: var(--cockpit-text); border-color: var(--cockpit-line); background: var(--cockpit-surface); }
 .cockpit-period-select-label { height: 44px; display: inline-flex; align-items: center; gap: 9px; position: relative; padding: 0 36px 0 13px; color: var(--cockpit-text); background: var(--cockpit-surface); border: 1px solid var(--cockpit-line); border-radius: 11px; }
@@ -398,6 +414,8 @@ body:has(.money-cockpit-shell) [role="dialog"] .specular-card { color: var(--coc
   .cockpit-period-tabs { width: 100%; }
   .cockpit-period-tabs button { flex: 1; }
   .cockpit-period-select-wrap { width: 100%; display: flex; align-items: center; gap: 4px; box-sizing: border-box; }
+  .cockpit-period-arrows { padding: 1px; gap: 1px; border-radius: 10px; }
+  .cockpit-period-arrows .cockpit-period-arrow { width: 33px; height: 38px; }
   .cockpit-period-arrow { width: 36px; height: 40px; flex-shrink: 0; }
   .cockpit-period-select-label { height: 40px; flex: 1 1 0%; min-width: 0; padding: 0 28px 0 10px; justify-content: center; }
   .cockpit-period-select-label select { width: 100%; min-width: 0; max-width: 100%; font-size: 12px; }

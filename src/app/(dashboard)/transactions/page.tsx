@@ -581,6 +581,16 @@ export default function TransactionsPage() {
               <ChevronLeft className="h-4 w-4" />
             </button>
 
+            <button
+              type="button"
+              onClick={() => changePeriod(1)}
+              className="h-11 w-11 shrink-0 inline-flex items-center justify-center rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/90 text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:border-indigo-400/50 active:scale-[0.96] transition-all cursor-pointer touch-manipulation"
+              aria-label="Next period"
+              title="Next period"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+
             <select
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
@@ -614,16 +624,6 @@ export default function TransactionsPage() {
                 All Time (All Transactions)
               </option>
             </select>
-
-            <button
-              type="button"
-              onClick={() => changePeriod(1)}
-              className="h-11 w-11 shrink-0 inline-flex items-center justify-center rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/90 text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:border-indigo-400/50 active:scale-[0.96] transition-all cursor-pointer touch-manipulation"
-              aria-label="Next period"
-              title="Next period"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
 
             {selectedMonth !== currentMonthStr && (
               <button

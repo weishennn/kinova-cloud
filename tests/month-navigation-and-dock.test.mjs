@@ -20,7 +20,7 @@ test('Floating Dock: Investments is 4th dock item and Insights is in secondaryLi
   assert.doesNotMatch(content, /<Link href="\/analytics"[^>]*>[\s\S]*?<span>Insights<\/span>/);
 });
 
-test('Cashflow Cockpit: Previous period button is child 0 in period-select-wrap to prevent layout shift', () => {
+test('Cashflow Cockpit: Both Previous and Next arrows are grouped at position 0 to prevent any layout shift', () => {
   const cockpitFilePath = path.resolve('src/components/money-cockpit/cashflow-cockpit.tsx');
   const content = fs.readFileSync(cockpitFilePath, 'utf8');
 
@@ -30,15 +30,46 @@ test('Cashflow Cockpit: Previous period button is child 0 in period-select-wrap 
 
   const wrapContent = content.slice(wrapIndex, wrapIndex + 3500);
 
+  const arrowsWrapperIndex = wrapContent.indexOf('className="cockpit-period-arrows"');
   const prevArrowIndex = wrapContent.indexOf('aria-label="Previous period"');
-  const selectLabelIndex = wrapContent.indexOf('className="cockpit-period-select-label"');
   const nextArrowIndex = wrapContent.indexOf('aria-label="Next period"');
+  const selectLabelIndex = wrapContent.indexOf('className="cockpit-period-select-label"');
   const jumpBtnIndex = wrapContent.indexOf('className="cockpit-current-jump-btn"');
 
-  // Previous arrow must come BEFORE the Jump to Current button
-  assert.ok(prevArrowIndex < selectLabelIndex, 'Previous period arrow is before select dropdown');
-  assert.ok(selectLabelIndex < nextArrowIndex, 'Select dropdown is before Next period arrow');
-  assert.ok(nextArrowIndex < jumpBtnIndex, 'Next period arrow is before Jump to Current button');
+  // Both arrows must be anchored together at the start before the dropdown
+  assert.ok(arrowsWrapperIndex !== -1, 'cockpit-period-arrows wrapper exists');
+  assert.ok(prevArrowIndex < nextArrowIndex, 'Previous arrow is before Next arrow');
+  assert.ok(nextArrowIndex < selectLabelIndex, 'Both arrows are before the select dropdown');
+  assert.ok(selectLabelIndex < jumpBtnIndex, 'Select dropdown is before Jump to Current button');
+});
+
+test('Transactions: Both Previous and Next arrows are grouped at the start of the row', () => {
+  const txFilePath = path.resolve('src/app/(dashboard)/transactions/page.tsx');
+  const content = fs.readFileSync(txFilePath, 'utf8');
+
+  const prevArrow = content.indexOf('aria-label="Previous period"');
+  const nextArrow = content.indexOf('aria-label="Next period"');
+  const selectEl = content.indexOf('aria-label="Filter transactions by month or year"');
+
+  assert.ok(prevArrow !== -1 && nextArrow !== -1 && selectEl !== -1);
+  assert.ok(prevArrow < nextArrow, 'Previous arrow is before Next arrow');
+  assert.ok(nextArrow < selectEl, 'Both arrows are before select element');
+});
+
+test('Investments: Scan Moomoo is removed, only Sync Moomoo & Full re-sync remain', () => {
+  const invFilePath = path.resolve('src/app/(dashboard)/investments/page.tsx');
+  const content = fs.readFileSync(invFilePath, 'utf8');
+
+  // Must NOT have scan moomoo UI
+  assert.doesNotMatch(content, /Scan Moomoo/);
+  assert.doesNotMatch(content, /Auto-Fill from Moomoo/);
+  assert.doesNotMatch(content, /handleScanTradeFile/);
+  assert.doesNotMatch(content, /isScanningTrade/);
+
+  // Must HAVE Moomoo sync functionality
+  assert.match(content, /Sync Moomoo/);
+  assert.match(content, /Full re-sync/);
+  assert.match(content, /handleSyncMoomoo/);
 });
 
 test('Month Navigation Stepper Logic: Stepping back twice from 2026-11 lands on 2026-09', () => {
@@ -73,6 +104,12 @@ test('Month Navigation Stepper Logic: Stepping back twice from 2026-11 lands on 
   // Second tap on Previous (<)
   month = stepPeriod(month, currentMonth, -1);
   assert.equal(month, '2026-09', 'Second tap goes to September');
+
+  // Tapping Next (>) twice from September returns to November
+  month = stepPeriod(month, currentMonth, 1);
+  assert.equal(month, '2026-10', 'Tap forward goes to October');
+  month = stepPeriod(month, currentMonth, 1);
+  assert.equal(month, '2026-11', 'Second tap forward returns to November');
 
   // Tap from 'all'
   assert.equal(stepPeriod('all', currentMonth, -1), '2026-10', 'Tap from all with -1 goes to previous month');

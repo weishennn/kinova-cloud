@@ -426,7 +426,10 @@ export function CashflowCockpit() {
           <button type="button" className={periodKind === 'all' ? 'is-active' : ''} aria-pressed={periodKind === 'all'} onClick={() => setSelectedMonth('all')}>All time</button>
         </div>
         <div className="cockpit-period-select-wrap">
-          <button type="button" className="cockpit-period-arrow" aria-label="Previous period" onClick={() => changePeriod(-1)}><ArrowLeft size={15} /></button>
+          <div className="cockpit-period-arrows">
+            <button type="button" className="cockpit-period-arrow" aria-label="Previous period" onClick={() => changePeriod(-1)}><ArrowLeft size={15} /></button>
+            <button type="button" className="cockpit-period-arrow" aria-label="Next period" onClick={() => changePeriod(1)}><ArrowRight size={15} /></button>
+          </div>
           <label className="cockpit-period-select-label" htmlFor="cockpit-period"><CalendarDays size={14} />
             <select id="cockpit-period" value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)}>
               {orderedYears.map((year) => {
@@ -453,7 +456,6 @@ export function CashflowCockpit() {
             </select>
             <ChevronDown size={14} className="cockpit-period-chevron" />
           </label>
-          <button type="button" className="cockpit-period-arrow" aria-label="Next period" onClick={() => changePeriod(1)}><ArrowRight size={15} /></button>
           {selectedMonth !== currentMonth && (
             <button
               type="button"

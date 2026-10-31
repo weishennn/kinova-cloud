@@ -4,8 +4,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { 
   TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight,
-  DollarSign, Activity, PieChart as PieChartIcon, History, X, Loader2, Sparkles, AlertCircle, Edit2, Trash2, Search, ChevronRight, RefreshCw,
-  Camera, ScanLine, Upload
+  DollarSign, Activity, PieChart as PieChartIcon, History, X, Loader2, Sparkles, AlertCircle, Edit2, Trash2, Search, ChevronRight, RefreshCw
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useQueryClient } from '@tanstack/react-query';
@@ -468,10 +467,8 @@ export default function InvestmentsPage() {
   const [notes, setNotes] = useState('');
   const [isReinvested, setIsReinvested] = useState(false);
   const [editingTrade, setEditingTrade] = useState<null | (typeof trades[number])>(null);
-  const [isScanningTrade, setIsScanningTrade] = useState(false);
   const [isSyncingMoomoo, setIsSyncingMoomoo] = useState(false);
   const [lastMoomooSyncAt, setLastMoomooSyncAt] = useState<string | null>(null);
-  const tradeFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -676,70 +673,7 @@ export default function InvestmentsPage() {
       setIsSyncingMoomoo(false);
     }
   };
-  const handleScanTradeFile = async (file: File) => {
-    if (!file) return;
-    setIsScanningTrade(true);
-    try {
-      const reader = new FileReader();
-      const base64Promise = new Promise<string>((resolve, reject) => {
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-      });
-      reader.readAsDataURL(file);
-      const dataUrl = await base64Promise;
-      const imageBase64 = dataUrl.split(',')[1];
-      const mimeType = file.type || 'image/jpeg';
-
-      const res = await fetch('/api/ai/parse-trade', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageBase64,
-          mimeType,
-          today: getLocalDateString(),
-        }),
-      });
-
-      const json = await res.json();
-      if (!res.ok || !json.success || !json.data) {
-        throw new Error(json.error || 'Failed to extract trade details from image.');
-      }
-
-      const parsed = json.data;
-      setEditingTrade(null);
-      setTradeAction(parsed.action === 'REINVEST' ? 'DIVIDEND' : parsed.action);
-      setIsReinvested(Boolean(parsed.isReinvested));
-      setTicker(parsed.ticker);
-      setAssetName(parsed.assetName || parsed.ticker);
-      setAssetType(parsed.assetType || 'US Stock');
-      setQuantity(parsed.quantity != null ? String(parsed.quantity) : '');
-      setPrice(parsed.price != null ? String(parsed.price) : '');
-      setFees(parsed.fees != null ? String(parsed.fees) : '0');
-      setCurrency(parsed.currency || 'USD');
-      setDate(parsed.date || getLocalDateString());
-      setNotes(parsed.notes || '');
-
-      const currentRate = fxRates[parsed.currency] || DEFAULT_RATES_TO_MYR[parsed.currency] || 1.0;
-      setRateToMyr(parsed.currency === 'MYR' ? '1.0' : currentRate.toFixed(4));
-      const computedCostMyr = parsed.currency === 'MYR'
-        ? parsed.netTotal
-        : (parsed.netTotal * currentRate);
-      setCostInMyr(computedCostMyr > 0 ? computedCostMyr.toFixed(2) : '');
-      setManualCostEdited(false);
-
-      setIsAddTradeOpen(true);
-      toast.success(`✨ Moomoo trade scanned! ${parsed.ticker} (${parsed.quantity} @ ${formatAssetCurrency(parsed.price, parsed.currency)}, Fees: ${formatAssetCurrency(parsed.fees, parsed.currency)})`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Trade scan failed. Please try a clearer screenshot.');
-    } finally {
-      setIsScanningTrade(false);
-      if (tradeFileInputRef.current) {
-        tradeFileInputRef.current.value = '';
-      }
-    }
-  };
-
-  useEffect(() => {
+ useEffect(() => {
     const handleTradeRequest = (event: Event) => {
       const action = (event as CustomEvent<{ action?: string }>).detail?.action;
       if (action !== 'BUY' && action !== 'SELL') return;
@@ -1208,20 +1142,6 @@ export default function InvestmentsPage() {
                   : 'First sync imports history'}
               </span>
             </div>
-            <button
-              type="button"
-              disabled={isScanningTrade}
-              onClick={() => tradeFileInputRef.current?.click()}
-              className="min-h-[40px] px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 active:scale-[0.97] text-white text-xs font-semibold shadow-lg shadow-orange-500/20 flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation disabled:opacity-50"
-              title="Scan Moomoo or broker trade confirmation to auto-extract trade and all hidden fees"
-            >
-              {isScanningTrade ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <ScanLine className="h-3.5 w-3.5" />
-              )}
-              <span>{isScanningTrade ? 'Scanning...' : 'Scan Moomoo'}</span>
-            </button>
             <button
               type="button"
               onClick={() => {
@@ -1972,51 +1892,7 @@ export default function InvestmentsPage() {
           closeLabel="Close trade dialog"
         />
 
-        {/* Hidden file input for Moomoo / Broker screenshots */}
-        <input
-          ref={tradeFileInputRef}
-          type="file"
-          accept="image/*,application/pdf"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) {
-              void handleScanTradeFile(file);
-            }
-          }}
-        />
-
-        {/* Auto-Scan Moomoo Prompt Card */}
-        <div className="mt-4 p-3 rounded-2xl bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-indigo-500/10 border border-amber-500/30 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="h-8 w-8 rounded-xl bg-orange-500/20 text-orange-800 dark:text-orange-400 flex items-center justify-center shrink-0">
-              {isScanningTrade ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                {isScanningTrade ? 'AI Analyzing Moomoo Trade...' : 'Auto-Fill from Moomoo'}
-              </p>
-              <p className="text-[11px] text-slate-600 dark:text-zinc-400 truncate">
-                Upload screenshot to auto-extract trade & hidden fees
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            disabled={isScanningTrade}
-            onClick={() => tradeFileInputRef.current?.click()}
-            className="shrink-0 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 active:scale-[0.97] text-white font-semibold text-xs transition-all flex items-center gap-1 shadow-md shadow-orange-500/20 cursor-pointer disabled:opacity-50"
-          >
-            {isScanningTrade ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <Upload className="h-3 w-3" />
-            )}
-            <span>{isScanningTrade ? 'Reading...' : 'Upload'}</span>
-          </button>
-        </div>
-
-              <form onSubmit={handleAddTrade} className="mt-3.5 space-y-3.5">
+        <form onSubmit={handleAddTrade} className="mt-3.5 space-y-3.5">
                 {/* Action Selector */}
                 <div>
                   <div className="investment-action-label">Trade type</div>
