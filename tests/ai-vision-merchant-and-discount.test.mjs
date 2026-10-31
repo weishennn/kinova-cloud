@@ -79,6 +79,23 @@ test('3. Merchant and item category inference handles fuel and dessert categorie
   assert.equal(inferCategoryFromMerchant('Four Beans 四夕豆花').category, 'Food & Dining');
   assert.equal(inferCategoryFromMerchant('四夕豆花').category, 'Food & Dining');
   assert.equal(inferCategoryFromMerchant('Dessert Bar').category, 'Food & Dining');
+
+  // Food & Dining F&B and Kopitiam (general semantic inference without hardcoded names)
+  const s11Inference = inferCategoryFromMerchant('S11 F and B group section 17 branch');
+  assert.equal(s11Inference.category, 'Food & Dining');
+  assert.equal(s11Inference.isUncertain, false);
+
+  const s11Ampersand = inferCategoryFromMerchant('S11 F&B Group Section 17 Branch');
+  assert.equal(s11Ampersand.category, 'Food & Dining');
+  assert.equal(s11Ampersand.isUncertain, false);
+
+  const explicitFb = inferCategoryFromMerchant('Some Stall', 'F&B');
+  assert.equal(explicitFb.category, 'Food & Dining');
+  assert.equal(explicitFb.isUncertain, false);
+
+  const explicitFoodAndBev = inferCategoryFromMerchant('Generic Merchant', 'Food and Beverage');
+  assert.equal(explicitFoodAndBev.category, 'Food & Dining');
+  assert.equal(explicitFoodAndBev.isUncertain, false);
 });
 
 test('4. Petrol subsidy reconciliation calculates net card amount correctly', () => {

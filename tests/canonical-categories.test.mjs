@@ -28,6 +28,15 @@ test('2. normalizeToCanonicalCategory maps Gemini hallucinations to valid catego
   assert.equal(normalizeToCanonicalCategory('Dining Out', 'Expense'), 'Food & Dining');
   assert.equal(normalizeToCanonicalCategory('Supermarket', 'Expense'), 'Food & Dining');
   assert.equal(normalizeToCanonicalCategory('Coffee', 'Expense'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('F&B', 'Expense'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('F and B', 'Expense'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('fnb', 'Expense'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('Food & Beverage', 'Expense'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('Food and Beverage', 'Expense'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('Kopitiam', 'Expense'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('Food Court', 'Expense'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('Fast Food', 'Expense'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('Seafood', 'Expense'), 'Food & Dining');
   assert.equal(normalizeToCanonicalCategory('Fuel', 'Expense'), 'Transport');
   assert.equal(normalizeToCanonicalCategory('Gas', 'Expense'), 'Transport');
   assert.equal(normalizeToCanonicalCategory('Utilities', 'Expense'), 'Housing & Bills');
@@ -51,6 +60,9 @@ test('3. Context-aware category fallback when category is missing or invalid', (
   assert.equal(normalizeToCanonicalCategory('', 'Expense', 'Birthday present for friend'), 'Gift');
   assert.equal(normalizeToCanonicalCategory('', 'Expense', 'Shell V-Power fuel'), 'Transport');
   assert.equal(normalizeToCanonicalCategory('', 'Expense', 'Chicken rice lunch'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('', 'Expense', 'S11 F and B group section 17 branch'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('', 'Expense', 'S11 F&B Group Section 17 Branch'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('', 'Expense', 'Uncle Lim Kopitiam Section 17'), 'Food & Dining');
   assert.equal(normalizeToCanonicalCategory('', 'Expense', 'Jaya Grocer weekly groceries'), 'Food & Dining');
   assert.equal(normalizeToCanonicalCategory('', 'Expense', 'Village Grocer vegetables'), 'Food & Dining');
 });

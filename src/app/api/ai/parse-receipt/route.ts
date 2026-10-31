@@ -243,7 +243,7 @@ Return ONLY this JSON shape:
   "notes": string
 }`;
 
-    let usedModel = 'gemini-2.5-flash';
+    let usedModel = process.env.GEMINI_MODEL?.trim() || 'gemini-3.5-flash';
     let parsed: Record<string, unknown> | null = null;
     let fastPassError: unknown = null;
     let fastResult: Awaited<ReturnType<typeof generateGeminiContent>> | null = null;
@@ -292,7 +292,7 @@ Return ONLY this JSON shape:
           totalTimeoutMs: 5_000,
           preferredKeySlot: 0,
           onlyPreferredKey: true,
-          models: [process.env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash'],
+          models: [process.env.GEMINI_MODEL?.trim() || 'gemini-3.5-flash'],
         });
       } catch (err: unknown) {
         try {
@@ -511,12 +511,7 @@ ${JSON.stringify(parsed)}`
 
         // Check if items or context reveals the true merchant if description was empty/filtered
         if (!description && items.length > 0) {
-          const firstItem = items[0].name;
-          if (/fuelsave|ron95|ron97|diesel/i.test(firstItem)) {
-            description = 'Shell';
-          } else {
-            description = items.map((i) => i.name).slice(0, 2).join(', ');
-          }
+          description = items.map((i) => i.name).slice(0, 2).join(', ');
         }
         if (!description) {
           description = 'Receipt Expense';

@@ -86,31 +86,31 @@ const UNAMBIGUOUS_SYMBOL_MAP: Array<{ pattern: RegExp; currency: string }> = [
 
 const MERCHANT_CATEGORY_RULES: Array<{ regex: RegExp; category: string }> = [
   {
-    regex: /\b(grab|airasia|shell|petronas|petron|caltex|bhpetrol|touch\s*n\s*go|tng|rapidkl|mrt|lrt|ktm|erl|parking|toll|beam|socars|uber|taxi|fuelsave|ron95|ron97|diesel|petrol|stesen\s*minyak|budi\s*madani)\b/i,
+    regex: /\b(grab|airasia|shell|petronas|petron|caltex|bhpetrol|touch\s*n\s*go|tng|rapidkl|mrt|lrt|ktm|erl|parking|toll|beam|socars|uber|taxi|fuelsave|ron95|ron97|diesel|petrol|stesen\s*minyak|budi\s*madani|transit|transport|travel|flight|airline|train|bus)\b/i,
     category: 'Transport',
   },
   {
-    regex: /\b(starbucks|zus|tealive|chagee|mcdonald|kfc|nando|pelita|kopitiam|cafe|coffee|bakery|ramen|sushi|bistro|restaurant|restoran|mamak|foodpanda|grabfood|dining|kitchen|hotpot|barbecue|bbq|four\s*beans|豆花|dessert|tea|boba|noodles?|rice|dim\s*sum|bakery|cake|bread)\b/i,
+    regex: /\b(f\s*&?\s*and\s*b|f\s*&\s*b|fnb|fb|starbucks|zus|tealive|chagee|mcdonald|kfc|nando|pelita|kopitiam|cafe|coffee|bakery|bakeshop|bake|roti|pastry|ramen|sushi|bistro|restaurant|restoran|resto|mamak|foodpanda|grabfood|dining|kitchen|hotpot|barbecue|bbq|steamboat|food\s*court|hawker|canteen|cafeteria|catering|eatery|s11|dessert|tea|boba|noodles?|rice|nasi|mee|dim\s*sum|cake|bread|makan|minum|warung|gerai)\b/i,
     category: 'Food & Dining',
   },
   {
-    regex: /\b(uniqlo|zara|shopee|lazada|taobao|ikea|decathlon|aeon|jaya\s*grocer|village\s*grocer|99\s*speedmart|lotus|mydin|giant|watson|guardian|sephora|apple\s*store|machines|switch|harvey\s*norman)\b/i,
+    regex: /\b(uniqlo|zara|shopee|lazada|taobao|ikea|decathlon|aeon|jaya\s*grocer|village\s*grocer|99\s*speedmart|lotus|mydin|giant|watson|guardian|sephora|apple\s*store|machines|switch|harvey\s*norman|shopping|supermarket|hypermarket|grocer|grocery|market|pasar|mall|retail|store|hardware|diy|convenience|furniture|appliances?|stationery|clothes|clothing|fashion|shoes)\b/i,
     category: 'Shopping',
   },
   {
-    regex: /\b(tnb|tenaga|syabas|air\s*selangor|indah\s*water|time\s*dotcom|unifi|maxis|celcom|digi|umobile|yes\s*5g|astro|coway|cuckoo)\b/i,
+    regex: /\b(tnb|tenaga|syabas|air\s*selangor|indah\s*water|time\s*dotcom|unifi|maxis|celcom|digi|umobile|yes\s*5g|astro|coway|cuckoo|bill|bills|utility|utilities|electric|electricity|water|telecom|telco|internet|broadband|rental|maintenance)\b/i,
     category: 'Housing & Bills',
   },
   {
-    regex: /\b(gsc|tgv|cinema|netflix|spotify|youtube|disney|steam|playstation|nintendo|genting|karaoke)\b/i,
+    regex: /\b(gsc|tgv|cinema|netflix|spotify|youtube|disney|steam|playstation|nintendo|genting|karaoke|ktv|movie|movies|film|entertainment|concert)\b/i,
     category: 'Entertainment',
   },
   {
-    regex: /\b(clinic|klinik|hospital|gleneagles|sunway\s*medical|pantai|kpj|pharmacy|farmasi|caring|big\s*pharmacy|aa\s*pharmacy|dental|dentist)\b/i,
+    regex: /\b(clinic|klinik|hospital|gleneagles|sunway\s*medical|pantai|kpj|pharmacy|farmasi|caring|big\s*pharmacy|aa\s*pharmacy|dental|dentist|doctor|medical|medicine|healthcare|wellness)\b/i,
     category: 'Health',
   },
   {
-    regex: /\b(aia|prudential|great\s*eastern|allianz|zurich|etiqa|takaful|manulife|fwd)\b/i,
+    regex: /\b(aia|prudential|great\s*eastern|allianz|zurich|etiqa|takaful|manulife|fwd|insurance|assurance|policy|premium)\b/i,
     category: 'Insurance',
   },
 ];
@@ -140,7 +140,15 @@ export function sanitizeMerchantCandidate(rawName: string, contextText?: string)
       cleaned = headerMatch[1].trim();
     }
 
-    // 2. Check known brands
+    // 2. Check general merchant patterns in text (F&B groups, restaurants, petrol stations, etc.)
+    if (!cleaned) {
+      const generalEntityMatch = text.match(/\b([A-Za-z0-9\u4e00-\u9fa5\s&'-]+?\s+(?:F\s*&?\s*and\s*B|F\s*&\s*B|FNB|Food\s*Court|Kopitiam|Restaurant|Restoran|Cafe|Bakery|Bistro|Group|Branch|Store|Mart|Trading))\b/i);
+      if (generalEntityMatch && generalEntityMatch[1] && !SYSTEM_NOTIFICATION_NOISE_REGEX.test(generalEntityMatch[1].trim())) {
+        cleaned = generalEntityMatch[1].trim();
+      }
+    }
+
+    // 3. Check known major retail/station brands
     if (!cleaned) {
       const brandMatches = [
         /\b(SHELL(?:\s+[A-Z0-9\s/]+)?)\b/i,
@@ -367,7 +375,9 @@ export function inferCategoryFromMerchant(merchantOrDesc: string, explicitCatego
 } {
   if (explicitCategory && explicitCategory.trim()) {
     const normalized = normalizeToCanonicalCategory(explicitCategory, 'Expense', merchantOrDesc);
-    return { category: normalized, isUncertain: false };
+    if (normalized !== 'Other') {
+      return { category: normalized, isUncertain: false };
+    }
   }
   const text = String(merchantOrDesc || '').trim();
   if (!text) {
@@ -380,7 +390,13 @@ export function inferCategoryFromMerchant(merchantOrDesc: string, explicitCatego
     return { category: userRule.category, isUncertain: false };
   }
 
-  // 2. Predefined pattern rules
+  // 2. Single source of truth: canonical category context inference
+  const canonicalInferred = normalizeToCanonicalCategory(undefined, 'Expense', text);
+  if (canonicalInferred && canonicalInferred !== 'Other') {
+    return { category: canonicalInferred, isUncertain: false };
+  }
+
+  // 3. Predefined pattern rules
   for (const rule of MERCHANT_CATEGORY_RULES) {
     if (rule.regex.test(text)) {
       return { category: rule.category, isUncertain: false };
@@ -852,11 +868,13 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
       : splitKeys(options.geminiKey);
   const effectiveKeys = candidateKeys.length > 0 ? candidateKeys : [''];
 
-  const preferred = (options.preferredModel || 'gemini-2.5-flash').trim();
+  const preferred = (options.preferredModel || 'gemini-3.5-flash').trim();
   const candidateModels = [
     preferred,
-    'gemini-2.5-flash',
+    'gemini-3.5-flash',
+    'gemini-3.6-flash',
     'gemini-flash-latest',
+    'gemini-2.5-flash',
   ]
     .filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
 
@@ -951,6 +969,7 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
             if (unwrapped && typeof unwrapped === 'object') {
               parsedOcr = unwrapped as Record<string, unknown>;
               modelUsed = model;
+              ocrFallbackNotice = '';
             } else {
               ocrFallbackNotice = '云端 AI 返回格式无效，请直接手动补充金额与商户';
             }
@@ -1024,6 +1043,7 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
       }
     }
 
+    if (Object.keys(parsedOcr).length > 0) break;
     if (!shouldTryNextModel) break;
   }
 

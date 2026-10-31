@@ -9,16 +9,14 @@ import {
   resetGeminiKeyPoolStateForTests,
 } from '../src/lib/gemini-key-pool.ts';
 
-test('getStandardGeminiModelOrder enforces gemini-2.5-flash then gemini-flash-latest by default', () => {
+test('getStandardGeminiModelOrder enforces gemini-3.5-flash then reliable fallbacks by default', () => {
   const models = getStandardGeminiModelOrder({});
-  assert.deepEqual(models, ['gemini-2.5-flash', 'gemini-flash-latest']);
-  assert(!models.includes('gemini-3.5-flash'));
-  assert(!models.includes('gemini-3.8-flash'));
+  assert.deepEqual(models, ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest', 'gemini-2.5-flash']);
 });
 
 test('getStandardGeminiModelOrder puts process.env.GEMINI_MODEL first when configured', () => {
   const models = getStandardGeminiModelOrder({ GEMINI_MODEL: 'gemini-2.5-pro' });
-  assert.deepEqual(models, ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-flash-latest']);
+  assert.deepEqual(models, ['gemini-2.5-pro', 'gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest', 'gemini-2.5-flash']);
 });
 
 test('extractTextFromGeminiResponse concatenates text parts and ignores thought parts', () => {

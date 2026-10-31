@@ -304,35 +304,39 @@ CRITICAL INSTRUCTIONS:
    - Screenshots often have mobile UI chrome: iOS status bar (time, 5G, battery), Dynamic Island, or NOTIFICATION BANNERS at the top (e.g. from "Kinova Automation", "Shortcuts", "Automation", "Screenshot", "now", notification icons).
    - NEVER EVER use "Kinova Automation", "Kinova", "Shortcuts", or any system app/shortcut name as the merchant, store, or item name!
    - NEVER use generic screen status titles like "Payment successful", "Payment success", "Order details", or "Order ID" as the merchant name!
-   - Look UNDERNEATH or PAST any notification banner to find the ACTUAL store/merchant (e.g. Shell, Petronas, Four Beans 四夕豆花, etc.).
+   - Look UNDERNEATH or PAST any notification banner to find the ACTUAL store/merchant name (e.g. restaurant brand, petrol station, store, stall).
 
 2. APP HEADER & WEBH5 SHOP NAME EXTRACTION:
-   - On payment success screens (e.g. Touch 'n Go, GrabPay, WeChat mini-programs, food order webviews), the shop name is often located at the top navigation bar next to a close button '✕' or '<' (e.g. '✕ Four Beans 四夕豆花 - Taman Me...').
+   - On payment success screens (e.g. Touch 'n Go, GrabPay, WeChat mini-programs, food order webviews), the shop name is often located at the top navigation bar next to a close button '✕' or '<' (e.g. '✕ Store Name - Branch...').
    - You MUST extract the merchant name from this top bar if it is not inside the card body!
-   - Clean branch suffixes or trailing truncation dots: e.g. "Four Beans 四夕豆花".
-   - FOOD INFERENCE: If the payment confirmation does not list individual dishes (e.g. only shows Order ID, Bill amount, Deals and offers), extract the signature food from the merchant name into 'items' (e.g. for 'Four Beans 四夕豆花', extract { "name": "四夕豆花 / 甜品", "quantity": 1, "unitPrice": 18.74, "amount": 18.74 }).
+   - Clean branch suffixes or trailing truncation dots.
+   - LINE ITEMS INFERENCE: If the payment confirmation does not list individual dishes or items, generate a single line item using the merchant name or description.
 
 2.5. E-WALLET & BANK TRANSFER CONFIRMATIONS (ShopeePay, Touch 'n Go, GrabPay, MAE, DuitNow QR):
    - PAYMENT METHOD IS NOT THE MERCHANT: "ShopeePay", "ShopeePay Balance", "Touch 'n Go eWallet", "eWallet Balance", "DuitNow QR", "MAE" are payment channels/methods, NEVER the merchant/store name!
    - MERCHANT LOCATION IS NOT THE STORE NAME: "Merchant Location: AMPANG", "Location: ...", or city names are locations, NOT the merchant/store name! NEVER invent generic names like "Food Stall (Ampang)" or "Shop (Location)"!
-   - EXTRACT "MEMO" / "REMARK" / "RECIPIENT REFERENCE": In e-wallet receipts, look carefully for "Memo", "Remark", "Recipient Reference", "Payment Details", or "Note" (e.g. "Memo: Chicken rice").
-   - When no specific restaurant or shop brand is printed, the "Memo" or "Remark" text IS the primary purchased item, dish, or stall name! You MUST set "merchant" to this value (e.g. "Chicken rice"), include it in "items": [{ "name": "Chicken rice", "quantity": 1, "unitPrice": 14.00, "amount": 14.00 }], and classify it under "Food & Dining" (or appropriate category)!
+   - EXTRACT "MEMO" / "REMARK" / "RECIPIENT REFERENCE": In e-wallet receipts, look carefully for "Memo", "Remark", "Recipient Reference", "Payment Details", or "Note".
+   - When no specific restaurant or shop brand is printed, the "Memo" or "Remark" text IS the primary purchased item, dish, or stall name! Set "merchant" to this value, include it in "items", and classify it under "Food & Dining" (or appropriate category)!
 
 3. FUEL / PETROL RECEIPTS (CRITICAL PRICE EXTRACTION):
    - Gas stations (Shell, Petronas, Caltex, Petron, BHPetrol) belong to category "Transport".
    - Extract purchased fuel line items into "items": e.g. "FuelSave 95", "RON95", "RON97", "Diesel", with litres and unit price per litre.
-   - CRITICAL PRICE RULE: Petrol receipts frequently show an unsubsidized pump gross total (e.g. "Total Paid RM 202.82") alongside Government Subsidies (e.g. "Subsidy (BUDI MADANI) RM 115.46"), Loyalty Vouchers (e.g. "Loyalty Voucher RM 5.00"), and the actual user card debit (e.g. "VISA Shell App - RHB Visa Debit RM 82.36").
-   - "amount" MUST BE THE NET OUT-OF-POCKET AMOUNT CHARGED TO THE USER'S CARD OR PAID IN CASH (e.g. 82.36)! NEVER use the unsubsidized pump total (202.82) when government subsidy or vouchers paid for part of the fuel!
-   - Set "billAmount": 202.82 (gross pump price), "discountAmount": 120.46 (115.46 subsidy + 5.00 voucher), and "dealsDescription": "Subsidy (BUDI MADANI) RM 115.46 + Loyalty Voucher RM 5.00".
+   - CRITICAL PRICE RULE: Petrol receipts frequently show an unsubsidized pump gross total alongside Government Subsidies, Loyalty Vouchers, and the actual user card debit.
+   - "amount" MUST BE THE NET OUT-OF-POCKET AMOUNT CHARGED TO THE USER'S CARD OR PAID IN CASH! NEVER use the unsubsidized pump total when government subsidy or vouchers paid for part of the fuel!
+   - Set "billAmount" (gross pump price), "discountAmount" (subsidy + voucher), and "dealsDescription".
 
 4. NET AMOUNT PAID VS PRE-DISCOUNT BILL:
-   - "amount" MUST ALWAYS BE THE ACTUAL NET OUT-OF-POCKET AMOUNT PAID (e.g. 18.74 for Four Beans, 82.36 for Shell).
+   - "amount" MUST ALWAYS BE THE ACTUAL NET OUT-OF-POCKET AMOUNT PAID.
    - NEVER record the pre-discount bill amount as the expense "amount".
-   - Extract "billAmount" (e.g. 22.05), "discountAmount" (e.g. 3.31), and "dealsDescription" (e.g. "Deals and offers -RM3.31 (10% off bill -2.21, 5% off bill -1.10)").
+   - Extract "billAmount", "discountAmount", and "dealsDescription".
 
 5. CATEGORIES:
    - [Food & Dining, Transport, Shopping, Housing & Bills, Parents, Insurance, Entertainment, Health, Education, Sport, Gift, Other].
-   - CRITICAL: category MUST be selected ONLY from this list. NEVER invent custom category names. Specifically, NEVER use "Groceries", "Food", "Beverages", or "Dining" — all food, groceries, dining, and supermarket expenses MUST strictly be "Food & Dining".
+   - CRITICAL: category MUST be selected ONLY from this list. NEVER invent custom category names.
+   - CATEGORY REASONING:
+     * Food & Dining: All restaurants, kopitiams, food courts, F&B groups/companies, hawker stalls, cafes, bakeries, bars, catering, meals, drinks, desserts, and groceries MUST strictly be "Food & Dining". Any business with "F&B", "F and B", "Food & Beverage", "Catering", "Kopitiam", "Food Court", "Restoran", "Cafe", etc., is Food & Dining.
+     * Transport: Petrol/fuel stations, transit, train, MRT, LRT, bus, taxi, Grab, tolls, parking, flights.
+     * Shopping: Retail stores, clothing, supermarkets, marts, electronics, department stores.
 
 Return JSON shape:
 {
@@ -456,10 +460,11 @@ Return JSON shape:
       items[0].amount = moneyRes.amount;
     }
 
-    // Fallback: If receipt items list is empty, infer signature item from merchant name so user's food records are preserved
+    // Fallback: If receipt items list is empty, generate single line item using merchant / description
     if (items.length === 0 && moneyRes.amount != null && moneyRes.amount > 0) {
-      if (/豆花|four\s*beans/i.test(rawMerchant)) {
-        items.push({ name: '四夕豆花 / 甜品', amount: moneyRes.amount });
+      const fallbackItemName = rawMerchant || (typeof parsedOcr.description === 'string' && parsedOcr.description.trim() ? parsedOcr.description.trim() : '');
+      if (fallbackItemName) {
+        items.push({ name: fallbackItemName, amount: moneyRes.amount });
       }
     }
 

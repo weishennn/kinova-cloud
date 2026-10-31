@@ -30,10 +30,12 @@ const NUMBERED_KEY_NAMES = [
 const QUOTA_COOLDOWN_MS = 60_000; // 60s cooldown on HTTP 429
 const AUTH_COOLDOWN_MS = 10 * 60_000; // 10m cooldown on HTTP 401/403
 
-export const STANDARD_GEMINI_MODEL = 'gemini-2.5-flash';
+export const STANDARD_GEMINI_MODEL = 'gemini-3.5-flash';
 export const STANDARD_GEMINI_MODELS = [
-  'gemini-2.5-flash',
+  'gemini-3.5-flash',
+  'gemini-3.6-flash',
   'gemini-flash-latest',
+  'gemini-2.5-flash',
 ] as const;
 
 export function getStandardGeminiModelOrder(
@@ -44,11 +46,11 @@ export function getStandardGeminiModelOrder(
   if (preferred) {
     models.push(preferred);
   }
-  if (!models.includes('gemini-2.5-flash')) {
-    models.push('gemini-2.5-flash');
-  }
-  if (!models.includes('gemini-flash-latest')) {
-    models.push('gemini-flash-latest');
+  const defaultFallbacks = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest', 'gemini-2.5-flash'];
+  for (const fallback of defaultFallbacks) {
+    if (!models.includes(fallback)) {
+      models.push(fallback);
+    }
   }
   return models;
 }

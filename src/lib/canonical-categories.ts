@@ -66,10 +66,43 @@ const EXPENSE_SYNONYMS: Record<string, CanonicalExpenseCategory> = {
   food: 'Food & Dining',
   dining: 'Food & Dining',
   diningout: 'Food & Dining',
+  eatingout: 'Food & Dining',
   fooddining: 'Food & Dining',
   foodanddining: 'Food & Dining',
+  foodandbeverage: 'Food & Dining',
+  foodandbeverages: 'Food & Dining',
+  foodbeverage: 'Food & Dining',
+  foodbeverages: 'Food & Dining',
+  foodanddrink: 'Food & Dining',
+  foodanddrinks: 'Food & Dining',
+  fooddrink: 'Food & Dining',
+  fooddrinks: 'Food & Dining',
+  fb: 'Food & Dining',
+  fandb: 'Food & Dining',
+  fnb: 'Food & Dining',
   restaurant: 'Food & Dining',
+  restaurants: 'Food & Dining',
+  restoran: 'Food & Dining',
   cafe: 'Food & Dining',
+  cafes: 'Food & Dining',
+  eatery: 'Food & Dining',
+  kopitiam: 'Food & Dining',
+  foodcourt: 'Food & Dining',
+  hawker: 'Food & Dining',
+  hawkercentre: 'Food & Dining',
+  canteen: 'Food & Dining',
+  cafeteria: 'Food & Dining',
+  bistro: 'Food & Dining',
+  bakery: 'Food & Dining',
+  catering: 'Food & Dining',
+  dessert: 'Food & Dining',
+  desserts: 'Food & Dining',
+  fastfood: 'Food & Dining',
+  seafood: 'Food & Dining',
+  steamboat: 'Food & Dining',
+  hotpot: 'Food & Dining',
+  bbq: 'Food & Dining',
+  barbecue: 'Food & Dining',
   groceries: 'Food & Dining',
   grocery: 'Food & Dining',
   grocer: 'Food & Dining',
@@ -89,6 +122,11 @@ const EXPENSE_SYNONYMS: Record<string, CanonicalExpenseCategory> = {
   snack: 'Food & Dining',
   snacks: 'Food & Dining',
   makan: 'Food & Dining',
+  minum: 'Food & Dining',
+  warung: 'Food & Dining',
+  gerai: 'Food & Dining',
+  kedaimakan: 'Food & Dining',
+  kedaikopi: 'Food & Dining',
 
   // Transport
   transportation: 'Transport',
@@ -331,37 +369,37 @@ export function normalizeToCanonicalCategory(
 
 function inferExpenseCategoryFromContext(text: string): CanonicalExpenseCategory {
   const lower = text.toLowerCase();
-  if (/badminton|gym|fitness|workout|running|court|nike|adidas|decathlon|运动|羽毛球|健身|跑步|球拍|瑜伽/i.test(lower)) {
+  if (/\b(?:badminton|gym|fitness|workout|exercise|running|run|climbing|climb|court|swimming|swim|tennis|yoga|pilates|athletics|nike|adidas|decathlon)\b|运动|羽毛球|健身|跑步|球拍|瑜伽|球场/i.test(lower)) {
     return 'Sport';
   }
-  if (/gift|present|birthday|souvenir|angpow|angpao|red packet|礼物|送礼|红包|礼金|手信/i.test(lower)) {
+  if (/\b(?:gift|gifts|present|presents|birthday|souvenir|souvenirs|angpow|angpao|hongbao|red\s*packet|donation|donations|charity)\b|礼物|送礼|红包|礼金|手信|捐款/i.test(lower)) {
     return 'Gift';
   }
-  if (/shell|petronas|caltex|bhpetrol|petron|grab|parking|toll|fuel|petrol|ron95|ron97|diesel|交通|打车|加油|汽油|油费|停车|过路费/i.test(lower)) {
+  if (/\b(?:shell|petronas|caltex|bhpetrol|petron|grab|parking|toll|fuel|petrol|ron95|ron97|diesel|fuelsave|stesen\s*minyak|transit|train|mrt|lrt|ktm|erl|bus|taxi|cab|uber|airline|airasia|flight|budi\s*madani|touch\s*n\s*go|tng|rapidkl)\b|交通|打车|加油|汽油|油费|停车|过路费|车费|地铁|公交|机票/i.test(lower)) {
     return 'Transport';
   }
-  if (/food|rice|noodle|makan|kopi|coffee|cafe|restaurant|tea|burger|chicken|zapfan|bak kut|hawker|dining|grocer|groceries|supermarket|market|pasar|lotus|giant|aeon|jaya grocer|village grocer|econsave|mydin|cold storage|nsk|买菜|超市|餐饮|吃饭|餐馆|饮食|外卖|午餐|晚餐|早餐|零食|饮料|奶茶/i.test(lower)) {
+  if (/\b(?:f\s*&?\s*and\s*b|f\s*&\s*b|fnb|fb|food|dining|restaurant|restoran|resto|kopitiam|food\s*court|hawker|canteen|cafeteria|bistro|cafe|coffee|kopi|tea|bakery|bakeshop|bake|roti|cake|bread|pastry|dessert|rice|noodles?|nasi|mee|laksa|burger|pizza|sushi|ramen|chicken|steamboat|hotpot|bbq|barbecue|zapfan|chap\s*fan|economy\s*rice|dim\s*sum|s11|makan|minum|warung|gerai|grocer|groceries|supermarket|market|pasar|hypermarket|catering|bar|pub|boba|eatery|takeaway|kitchen)\b|餐饮|吃饭|餐馆|饮食|外卖|午餐|晚餐|早餐|买菜|超市|零食|饮料|奶茶|茶室|酒楼|食堂|档口|美食|快餐|海鲜|火锅|杂饭|小吃|甜品|面馆|饭店/i.test(lower)) {
     return 'Food & Dining';
   }
-  if (/doctor|clinic|pharmacy|hospital|panadol|watson|guardian|dental|医疗|看病|医院|诊所|药房|买药/i.test(lower)) {
+  if (/\b(?:doctor|clinic|klinik|pharmacy|farmasi|hospital|panadol|watson|guardian|dental|dentist|optical|optometry|medical|medicine|healthcare)\b|医疗|看病|医院|诊所|药房|买药|看牙|牙医/i.test(lower)) {
     return 'Health';
   }
-  if (/netflix|spotify|cinema|movie|gsc|tgv|game|steam|娱乐|电影|游戏|唱歌|追剧/i.test(lower)) {
+  if (/\b(?:netflix|spotify|cinema|movie|movies|film|gsc|tgv|game|games|gaming|steam|playstation|nintendo|karaoke|ktv|concert)\b|娱乐|电影|游戏|唱歌|追剧|影院/i.test(lower)) {
     return 'Entertainment';
   }
-  if (/tnb|electric|water|syabas|air selangor|unifi|maxis|celcom|digi|rental|maintenance|住房|房租|水电|账单|话费|宽带|物业/i.test(lower)) {
+  if (/\b(?:tnb|electric|electricity|water|syabas|air\s*selangor|indah\s*water|unifi|maxis|celcom|digi|umobile|yes\s*5g|astro|telecom|telco|internet|broadband|rental|maintenance|management\s*fee)\b|住房|房租|水电|账单|话费|宽带|物业|电费|水费/i.test(lower)) {
     return 'Housing & Bills';
   }
-  if (/parents|family|父母|家用|孝顺/i.test(lower)) {
+  if (/\b(?:parents|parent|family|allowance|parentsallowance)\b|父母|家用|孝顺/i.test(lower)) {
     return 'Parents';
   }
-  if (/insurance|takaful|保险|保单|保费/i.test(lower)) {
+  if (/\b(?:insurance|takaful|assurance|policy|premium|aia|prudential|great\s*eastern|allianz|zurich|etiqa)\b|保险|保单|保费/i.test(lower)) {
     return 'Insurance';
   }
-  if (/education|school|tuition|教育|学费|培训|课程|买书/i.test(lower)) {
+  if (/\b(?:education|school|tuition|university|college|academy|training|course|courses|books?|bookstore)\b|教育|学费|培训|课程|买书/i.test(lower)) {
     return 'Education';
   }
-  if (/shopping|clothes|fashion|shoes|mall|购物|衣服|数码|买东西|网购/i.test(lower)) {
+  if (/\b(?:shopping|retail|mall|store|mart|diy|hardware\s*store|convenience|furniture|appliances?|stationery|clothes|clothing|fashion|shoes|apparel|electronics|gadget|gadgets|uniqlo|zara|shopee|lazada|taobao|ikea)\b|购物|衣服|数码|买东西|网购|商场|五金/i.test(lower)) {
     return 'Shopping';
   }
   return 'Other';
@@ -381,7 +419,7 @@ export function isLegacyFoodOrGrocery(rawVal: string | null | undefined): boolea
   const normalized = lower.replace(/[^a-z0-9\u4e00-\u9fa5]/g, '');
 
   if (
-    /^(groceries|grocery|grocer|food|dining|fooddining|foodanddining|foodndining|supermarket|supermarkets|foodbeverage|fooddrink|meals|meal|lunch|dinner|breakfast|makan|买菜|食品|餐饮|饮食|食物|外卖|午餐|晚餐|早餐|零食|饮料|奶茶|超市)$/i.test(
+    /^(groceries|grocery|grocer|food|dining|fooddining|foodanddining|foodndining|foodandbeverage|foodbeverage|foodanddrink|fooddrink|fandb|fb|fnb|supermarket|supermarkets|foodbeverage|fooddrink|meals|meal|lunch|dinner|breakfast|makan|kopitiam|foodcourt|hawker|canteen|cafeteria|bistro|bakery|dessert|restaurant|restoran|cafe|fastfood|seafood|买菜|食品|餐饮|饮食|食物|外卖|午餐|晚餐|早餐|零食|饮料|奶茶|超市|茶室|酒楼|档口|美食|快餐|海鲜|火锅|杂饭)$/i.test(
       normalized
     )
   ) {
@@ -391,10 +429,11 @@ export function isLegacyFoodOrGrocery(rawVal: string | null | undefined): boolea
     return true;
   }
   if (
-    (normalized.includes('food') || normalized.includes('dining')) &&
-    !normalized.includes('petfood') &&
-    !normalized.includes('fastfood') &&
-    !normalized.includes('seafood')
+    normalized.includes('food') ||
+    normalized.includes('dining') ||
+    normalized.includes('fandb') ||
+    normalized.includes('fnb') ||
+    normalized.includes('kopitiam')
   ) {
     return true;
   }
