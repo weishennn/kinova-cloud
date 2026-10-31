@@ -6,7 +6,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   X, Upload, Camera, Check, Calendar, CreditCard, 
   Tag, FileText, ArrowDownRight, ArrowUpRight, TrendingUp, Loader2,
-  Plane, ChevronRight, Percent, ShieldCheck, Lock, Landmark, Eye, Sparkles
+  Plane, ChevronRight, Percent, ShieldCheck, Lock, Landmark, Eye, Sparkles,
+  AlertTriangle, Utensils
 } from 'lucide-react';
 import Link from 'next/link';
 import { useAppStore } from '@/stores/app-store';
@@ -65,6 +66,7 @@ import { saveMerchantCategoryRule, normalizePattern } from '@/lib/merchant-rules
 import { matchHabitMemory, learnOrStrengthenHabit } from '@/lib/habit-memory-engine';
 import { runKinovaTurn } from '@/lib/kinova-assistant';
 import { getUserMoneyProfile } from '@/lib/user-money-profile';
+import { getCategoryRealtimeBudgetStatus } from '@/lib/category-budget-helper';
 
 const CATEGORIES = {
   Expense: [
@@ -507,6 +509,21 @@ export function RecordPaymentModal() {
       exceedsRemaining: currentPurchaseRm > remainingBefore && remainingBefore > 0,
     };
   }, [activeTaxCategory, yearlyTaxSummary, amount, transactionCurrency]);
+
+  const categoryBudgetStatus = useMemo(() => {
+    if (type !== 'Expense' || !category) return null;
+    const numAmount = getAmountInBaseCurrency(
+      parseFloat(amount) || 0,
+      transactionCurrency,
+      undefined,
+      getCachedRatesToMyr()
+    );
+    const targetMonthStr = date ? date.slice(0, 7) : undefined;
+    const monthTxs = targetMonthStr
+      ? yearTransactions.filter((t) => t.date && t.date.startsWith(targetMonthStr))
+      : yearTransactions;
+    return getCategoryRealtimeBudgetStatus(category, monthTxs, undefined, numAmount);
+  }, [type, category, amount, transactionCurrency, date, yearTransactions]);
 
   useEffect(() => {
     if (!editTransaction) return;
@@ -1982,6 +1999,100 @@ export function RecordPaymentModal() {
                 ))}
               </div>
             </div>
+
+            {/* Real-time In-Context Category Budget & Food Pacing Banner */}
+            {type === 'Expense' && categoryBudgetStatus && (
+              <motion.div
+                initial={{ opacity: 0, y: 3 }}
+                animate={{ opacity: 1, y: 0 }}
+                className={`p-3 rounded-2xl border transition-all text-xs space-y-2 ${
+                  categoryBudgetStatus.isOverCapAfter
+                    ? 'bg-rose-500/10 border-rose-500/30 text-rose-950 dark:text-rose-200'
+                    : categoryBudgetStatus.spentPercentAfter > 80
+                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-950 dark:text-amber-200'
+                    : 'bg-emerald-500/10 border-emerald-500/25 text-emerald-950 dark:text-emerald-200'
+                }`}
+              >
+                {/* Header row: Category Cap & Remaining / Over info */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 font-semibold">
+                    {categoryBudgetStatus.isOverCapAfter ? (
+                      <AlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                    ) : (
+                      <Sparkles className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    )}
+                    <span>{category} Budget Cap:</span>
+                    <span className="font-mono font-bold text-slate-900 dark:text-white">
+                      RM {categoryBudgetStatus.cap.toFixed(0)}
+                    </span>
+                  </div>
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      categoryBudgetStatus.badgeColor === 'rose'
+                        ? 'bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/30'
+                        : categoryBudgetStatus.badgeColor === 'amber'
+                        ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30'
+                        : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                    }`}
+                  >
+                    {categoryBudgetStatus.badgeText}
+                  </span>
+                </div>
+
+                {/* Progress bar */}
+                <div className="h-1.5 w-full bg-black/10 dark:bg-white/10 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      categoryBudgetStatus.isOverCapAfter
+                        ? 'bg-rose-500'
+                        : categoryBudgetStatus.spentPercentAfter > 80
+                        ? 'bg-amber-400'
+                        : 'bg-indigo-500'
+                    }`}
+                    style={{ width: `${Math.min(100, categoryBudgetStatus.spentPercentAfter)}%` }}
+                  />
+                </div>
+
+                {/* Spent & Impact details */}
+                <div className="flex flex-wrap items-center justify-between gap-1 text-[11px] text-slate-700 dark:text-zinc-300">
+                  <span>
+                    Spent this month: <strong className="font-mono text-slate-950 dark:text-white">RM {categoryBudgetStatus.spentSoFar.toFixed(2)}</strong>
+                    {parseFloat(amount) > 0 && (
+                      <span className="ml-1 text-slate-500 dark:text-zinc-400 font-mono">
+                        (+RM {parseFloat(amount).toFixed(2)})
+                      </span>
+                    )}
+                  </span>
+                  <span>
+                    {categoryBudgetStatus.remainingAfter >= 0 ? (
+                      <span>After entry: <strong className="font-mono text-emerald-700 dark:text-emerald-300">RM {categoryBudgetStatus.remainingAfter.toFixed(2)} left</strong></span>
+                    ) : (
+                      <span className="font-semibold text-rose-700 dark:text-rose-400">
+                        Exceeds cap by RM {Math.abs(categoryBudgetStatus.remainingAfter).toFixed(2)}
+                      </span>
+                    )}
+                  </span>
+                </div>
+
+                {/* Food & Dining Specific Daily Burn Rate & Pacing */}
+                {categoryBudgetStatus.isDailyCategory && (
+                  <div className="mt-1 pt-2 border-t border-black/10 dark:border-white/10 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                    <div className="flex items-center gap-1.5 font-medium text-amber-900 dark:text-amber-200">
+                      <Utensils className="h-3.5 w-3.5 shrink-0" />
+                      <span>Today's Food: <strong className="font-mono">RM {categoryBudgetStatus.todaySpentInCategory.toFixed(2)}</strong></span>
+                      {parseFloat(amount) > 0 && (
+                        <span className="text-slate-500 dark:text-zinc-400 font-mono">
+                          (today total: RM {(categoryBudgetStatus.todaySpentInCategory + (parseFloat(amount) || 0)).toFixed(2)})
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-right text-slate-600 dark:text-zinc-400">
+                      Safe Food Pace: <strong className="font-mono text-slate-900 dark:text-white">RM {categoryBudgetStatus.dailyAllowanceRemaining.toFixed(2)}/day</strong> ({categoryBudgetStatus.daysRemainingInMonth}d left)
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            )}
 
             {/* Merchant Category Rule Memory Toggle ("我改过一次，下次更省事") */}
             {showRememberCategoryPrompt && (

@@ -5,8 +5,10 @@ import { motion } from 'framer-motion';
 import {
   AlertCircle, Wallet, Edit2, Check, Inbox, Sparkles,
   Clock, TrendingDown, ShieldAlert, ArrowUpRight, DollarSign, X,
-  Calendar, ChevronLeft, ChevronRight, RotateCcw
+  Calendar, ChevronLeft, ChevronRight, RotateCcw,
+  ShieldCheck, Utensils, Info, CheckCircle2, Sliders
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { useTransactions } from '@/hooks/useTransactions';
 import { AnimatedNumber } from '@/components/shared/animated-number';
 import { CockpitPageHeading } from '@/components/money-cockpit/cockpit-page-heading';
@@ -18,7 +20,11 @@ import {
   getSavedCategoryCaps,
   saveCategoryCaps,
   calculateDailySafeSpend,
-  DEFAULT_CATEGORY_CAPS
+  DEFAULT_CATEGORY_CAPS,
+  generateIntelligentCategoryCaps,
+  getPaydayCycleIntelligence,
+  type IntelligentBudgetPlan,
+  type IntelligentCapSuggestion,
 } from '@/lib/category-budget-helper';
 import { saveSettingWithCloudSync, SETTINGS_UPDATED_EVENT } from '@/lib/cloud-settings-sync';
 import { useMonthList } from '@/hooks/useSheets';
@@ -27,6 +33,7 @@ export default function BudgetPage() {
   const { selectedMonth, setSelectedMonth } = useAppStore();
   const { data: sheetMonths = [] } = useMonthList();
   const { transactions = [] } = useTransactions(selectedMonth ? { period: selectedMonth } : undefined);
+  const { transactions: allTransactions = [] } = useTransactions({ period: 'all' });
 
   // Active month in YYYY-MM format, e.g. "2026-10"
   const currentMonthStr = useMemo(() => {
@@ -256,6 +263,83 @@ export default function BudgetPage() {
     }
     return { ...calculateDailySafeSpend(effectiveBudget, totalSpent, selectedMonth), isAllTime: false };
   }, [effectiveBudget, totalSpent, selectedMonth, isOverBudget]);
+
+  // AI Dynamic Category Caps calculation
+  const intelligentPlan = useMemo(() => {
+    return generateIntelligentCategoryCaps(
+      allTransactions.length > 0 ? allTransactions : transactions,
+      { configuredCaps: categoryCaps }
+    );
+  }, [allTransactions, transactions, categoryCaps]);
+
+  // Payday Cycle & Savings Shield intelligence
+  const paydayInfo = useMemo(() => {
+    const curMonthTxs = (allTransactions.length > 0 ? allTransactions : transactions).filter(
+      (t) => t.date && t.date.startsWith(currentMonthStr)
+    );
+    return getPaydayCycleIntelligence(curMonthTxs);
+  }, [allTransactions, transactions, currentMonthStr]);
+
+  // Food & Dining burn rate & daily allowance
+  const foodInfo = useMemo(() => {
+    const foodCap = categoryCaps['Food & Dining'] || DEFAULT_CATEGORY_CAPS['Food & Dining'] || 1200;
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+    const foodTxs = monthlyExpenses.filter((t) => t.category === 'Food & Dining');
+    const foodSpent = foodTxs.reduce(
+      (sum, t) => sum + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount),
+      0
+    );
+    const remainingFood = Math.max(0, foodCap - foodSpent);
+    const isOver = foodSpent > foodCap;
+
+    const todayFoodTxs = (allTransactions.length > 0 ? allTransactions : transactions).filter(
+      (t) => t.type === 'expense' && t.category === 'Food & Dining' && t.date === todayStr
+    );
+    const todayFoodSpent = todayFoodTxs.reduce(
+      (sum, t) => sum + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount),
+      0
+    );
+
+    const daysRemaining = dailyInfo.daysRemaining;
+    const safeDailyFoodAllowance = daysRemaining > 0 ? remainingFood / daysRemaining : 0;
+    const percentUsed = foodCap > 0 ? (foodSpent / foodCap) * 100 : 0;
+    const isTodayOverDaily = todayFoodSpent > safeDailyFoodAllowance && safeDailyFoodAllowance > 0;
+
+    return {
+      foodCap,
+      foodSpent,
+      remainingFood,
+      isOver,
+      todayFoodSpent,
+      daysRemaining,
+      safeDailyFoodAllowance,
+      percentUsed,
+      isTodayOverDaily,
+    };
+  }, [categoryCaps, monthlyExpenses, allTransactions, transactions, dailyInfo.daysRemaining]);
+
+  const [isAutoTuneOpen, setIsAutoTuneOpen] = useState(false);
+  const [customCapsDraft, setCustomCapsDraft] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    if (isAutoTuneOpen && intelligentPlan?.suggestions) {
+      const draft: Record<string, number> = {};
+      intelligentPlan.suggestions.forEach((s) => {
+        draft[s.category] = s.suggestedCap;
+      });
+      setCustomCapsDraft(draft);
+    }
+  }, [isAutoTuneOpen, intelligentPlan]);
+
+  const handleApplySmartCaps = () => {
+    const updated = { ...categoryCaps, ...customCapsDraft };
+    setCategoryCaps(updated);
+    saveCategoryCaps(updated);
+    toast.success('AI Smart Category Caps applied and saved to cloud sync!');
+    setIsAutoTuneOpen(false);
+  };
 
   return (
     <div className="cockpit-module-page">
@@ -507,6 +591,209 @@ export default function BudgetPage() {
         </motion.div>
       </div>
 
+      {/* Payday Cycle & Savings Shield Card */}
+      <motion.div
+        whileHover={{ y: -2 }}
+        transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
+        className="rounded-3xl border border-indigo-500/25 bg-gradient-to-br from-indigo-950/20 via-slate-50 dark:via-zinc-900/40 to-white dark:to-zinc-950 p-5 sm:p-6 backdrop-blur-xl shadow-xl specular-card space-y-4"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2.5 rounded-2xl bg-indigo-500/15 text-indigo-700 dark:text-indigo-400 border border-indigo-500/30">
+              <ShieldCheck className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-950 dark:text-white uppercase tracking-wider block">
+                  Payday Cycle & Savings Shield
+                </span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                  paydayInfo.cyclePhase === 'living_phase'
+                    ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30'
+                    : 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30'
+                }`}>
+                  {paydayInfo.cyclePhase === 'living_phase' ? 'Living Phase' : 'Payday Settlement'}
+                </span>
+              </div>
+              <span className="text-[11px] text-slate-600 dark:text-zinc-400">
+                {paydayInfo.headline}
+              </span>
+            </div>
+          </div>
+
+          <div className="text-right text-xs">
+            <span className="text-slate-500 dark:text-zinc-400 block text-[11px]">Salary Cycle Anchor</span>
+            <span className="font-mono font-bold text-slate-900 dark:text-white">
+              {paydayInfo.paydayDay}th of month (Last Week)
+            </span>
+          </div>
+        </div>
+
+        {/* 2 Envelopes Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+          {/* Envelope 1: Pre-quarantined Savings Target */}
+          <div className="p-4 rounded-2xl bg-white/90 dark:bg-zinc-900/60 border border-indigo-500/20 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-indigo-900 dark:text-indigo-300 flex items-center gap-1.5">
+                <ShieldAlert className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+                Pre-Quarantined Savings Target
+              </span>
+              <span className="font-mono font-bold text-slate-900 dark:text-white">
+                RM {paydayInfo.preQuarantinedSavings.toLocaleString()}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-600 dark:text-zinc-400 leading-relaxed">
+              Shielded from Day 1 ({paydayInfo.savingsTargetPct + paydayInfo.investmentTargetPct}% of RM {paydayInfo.baselineIncome.toLocaleString()} income). You will never suffer an artificial early surplus or end-of-month budget cliff.
+            </p>
+            <div className="space-y-1 pt-1">
+              <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-zinc-400">
+                <span>Transfers fulfilled this month:</span>
+                <span className="font-mono font-bold text-slate-900 dark:text-white">
+                  RM {paydayInfo.actualSavedThisMonth.toLocaleString()} ({paydayInfo.savingsProgressPct}%)
+                </span>
+              </div>
+              <div className="h-1.5 w-full bg-slate-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-indigo-500 rounded-full transition-all duration-500"
+                  style={{ width: `${paydayInfo.savingsProgressPct}%` }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Envelope 2: Protected Living Allowance */}
+          <div className="p-4 rounded-2xl bg-white/90 dark:bg-zinc-900/60 border border-emerald-500/20 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-emerald-900 dark:text-emerald-300 flex items-center gap-1.5">
+                <Wallet className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                Protected Living Budget
+              </span>
+              <span className="font-mono font-bold text-slate-900 dark:text-white">
+                RM {paydayInfo.targetLivingBudget.toLocaleString()} / mo
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-600 dark:text-zinc-400 leading-relaxed">
+              Steady living allowance regardless of salary bank-in date:
+            </p>
+            <div className="flex items-baseline gap-2 pt-0.5">
+              <span className="text-2xl font-black font-mono text-emerald-800 dark:text-emerald-400">
+                RM {paydayInfo.dailyLivingAllowance.toFixed(2)}
+              </span>
+              <span className="text-xs text-slate-500 dark:text-zinc-400 font-mono">
+                / day ({paydayInfo.daysRemainingInMonth} days left in cycle)
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Intelligence Detail Banner */}
+        <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-xs text-indigo-950 dark:text-indigo-200 flex items-start gap-2 leading-relaxed">
+          <Info className="h-4 w-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+          <span>{paydayInfo.detail}</span>
+        </div>
+      </motion.div>
+
+      {/* Food & Dining Daily Pace Spotlight Card */}
+      <motion.div
+        whileHover={{ y: -2 }}
+        transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
+        className="rounded-3xl border border-amber-500/25 bg-gradient-to-br from-amber-950/20 via-slate-50 dark:via-zinc-900/40 to-white dark:to-zinc-950 p-5 sm:p-6 backdrop-blur-xl shadow-xl specular-card space-y-4"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2.5 rounded-2xl bg-amber-500/15 text-amber-800 dark:text-amber-400 border border-amber-500/30">
+              <Utensils className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-950 dark:text-white uppercase tracking-wider block">
+                  Food & Dining Burn Rate & Daily Pace
+                </span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                  foodInfo.isOver
+                    ? 'bg-rose-500/15 text-rose-800 dark:text-rose-400 border border-rose-500/30'
+                    : foodInfo.percentUsed > 80
+                    ? 'bg-amber-500/15 text-amber-800 dark:text-amber-400 border border-amber-500/30'
+                    : 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-400 border border-emerald-500/30'
+                }`}>
+                  {foodInfo.isOver ? 'Over Cap' : foodInfo.percentUsed > 80 ? 'Approaching Cap' : 'On Track'}
+                </span>
+              </div>
+              <span className="text-[11px] text-slate-600 dark:text-zinc-400">
+                Pacing control for your most frequent variable daily expense
+              </span>
+            </div>
+          </div>
+
+          <div className="text-right text-xs">
+            <span className="text-slate-500 dark:text-zinc-400 block text-[11px]">Category Cap</span>
+            <span className="font-mono font-bold text-slate-900 dark:text-white">
+              RM {foodInfo.foodCap.toFixed(0)} / mo
+            </span>
+          </div>
+        </div>
+
+        {/* 3 Metrics Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="p-3.5 rounded-2xl bg-white/90 dark:bg-zinc-900/60 border border-slate-200 dark:border-white/[0.08] space-y-1">
+            <span className="text-[11px] font-semibold text-slate-500 dark:text-zinc-400 block uppercase">
+              Remaining Food Budget
+            </span>
+            <div className="text-xl font-black font-mono text-slate-900 dark:text-white">
+              RM {foodInfo.remainingFood.toFixed(2)}
+            </div>
+            <span className="text-[10px] text-slate-500 dark:text-zinc-400 block">
+              RM {foodInfo.foodSpent.toFixed(2)} used ({foodInfo.percentUsed.toFixed(0)}%)
+            </span>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-white/90 dark:bg-zinc-900/60 border border-slate-200 dark:border-white/[0.08] space-y-1">
+            <span className="text-[11px] font-semibold text-slate-500 dark:text-zinc-400 block uppercase">
+              Safe Daily Food Pace
+            </span>
+            <div className="text-xl font-black font-mono text-emerald-800 dark:text-emerald-400">
+              RM {foodInfo.safeDailyFoodAllowance.toFixed(2)}
+              <span className="text-xs font-normal text-slate-500 dark:text-zinc-400 ml-1">/ day</span>
+            </div>
+            <span className="text-[10px] text-slate-500 dark:text-zinc-400 block">
+              {foodInfo.daysRemaining} days remaining in month
+            </span>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-white/90 dark:bg-zinc-900/60 border border-slate-200 dark:border-white/[0.08] space-y-1">
+            <span className="text-[11px] font-semibold text-slate-500 dark:text-zinc-400 block uppercase">
+              Today's Food Spent
+            </span>
+            <div className={`text-xl font-black font-mono ${
+              foodInfo.isTodayOverDaily ? 'text-amber-800 dark:text-amber-400' : 'text-slate-900 dark:text-white'
+            }`}>
+              RM {foodInfo.todayFoodSpent.toFixed(2)}
+            </div>
+            <span className="text-[10px] text-slate-500 dark:text-zinc-400 block">
+              {foodInfo.isTodayOverDaily
+                ? `Exceeds daily pace by RM ${(foodInfo.todayFoodSpent - foodInfo.safeDailyFoodAllowance).toFixed(2)}`
+                : 'Within safe daily pace'}
+            </span>
+          </div>
+        </div>
+
+        {/* Food Progress Bar */}
+        <div className="space-y-1.5">
+          <div className="h-2 w-full bg-slate-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${
+                foodInfo.isOver
+                  ? 'bg-rose-500'
+                  : foodInfo.percentUsed > 80
+                  ? 'bg-amber-400'
+                  : 'bg-emerald-500'
+              }`}
+              style={{ width: `${Math.min(100, foodInfo.percentUsed)}%` }}
+            />
+          </div>
+        </div>
+      </motion.div>
+
       {/* Active Installment & Debt Commitment Dashboard */}
       <InstallmentDashboard />
 
@@ -515,11 +802,25 @@ export default function BudgetPage() {
 
       {/* Category Breakdown & Spending Caps */}
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xs uppercase font-semibold text-slate-600 dark:text-zinc-400 tracking-wider">
-            Category Spending Caps & Daily Allowances
-          </h3>
-          <span className="text-[11px] text-slate-500 dark:text-zinc-400">Tap pencil to edit category cap</span>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-xs uppercase font-semibold text-slate-600 dark:text-zinc-400 tracking-wider">
+              Category Spending Caps & Daily Allowances
+            </h3>
+            <span className="text-[11px] text-slate-500 dark:text-zinc-400">
+              Personalized caps dynamically balanced against your income & target savings
+            </span>
+          </div>
+          <motion.button
+            whileHover={{ scale: 1.04 }}
+            whileTap={{ scale: 0.96 }}
+            type="button"
+            onClick={() => setIsAutoTuneOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-semibold text-xs shadow-md shadow-indigo-500/20 cursor-pointer"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>AI Auto-Tune Caps</span>
+          </motion.button>
         </div>
 
         {breakdown.length === 0 ? (
@@ -535,6 +836,7 @@ export default function BudgetPage() {
             const dailyCat = !dailyInfo.isAllTime && dailyInfo.daysRemaining > 0 ? remainingCat / dailyInfo.daysRemaining : 0;
 
             const isEditingThis = editingCategory === item.name;
+            const suggestion = intelligentPlan?.suggestions?.find((s) => s.category === item.name);
 
             return (
               <div
@@ -548,8 +850,21 @@ export default function BudgetPage() {
                 }`}
               >
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-bold text-slate-950 dark:text-white text-sm">{item.name}</span>
+                    {suggestion && (
+                      <span className={`text-[9px] font-semibold px-2 py-0.5 rounded-full border ${
+                        suggestion.nature === 'fixed'
+                          ? 'bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/25'
+                          : suggestion.nature === 'quasi-fixed'
+                          ? 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/25'
+                          : suggestion.nature === 'trend'
+                          ? 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border-cyan-500/25'
+                          : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/25'
+                      }`}>
+                        {suggestion.natureLabel}
+                      </span>
+                    )}
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                       isCatOver
                         ? 'bg-rose-500/20 text-rose-800 dark:text-rose-400'
@@ -618,6 +933,19 @@ export default function BudgetPage() {
                   />
                 </div>
 
+                {/* Food & Dining Extra Burn Rate Row */}
+                {item.name === 'Food & Dining' && dailyInfo.isCurrentMonth && (
+                  <div className="text-[11px] text-amber-900 dark:text-amber-200 bg-amber-500/10 border border-amber-500/20 rounded-xl px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-1">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <Utensils className="h-3 w-3" />
+                      Today's Food Spent: <strong className="font-mono">RM {foodInfo.todayFoodSpent.toFixed(2)}</strong>
+                    </span>
+                    <span>
+                      Safe Daily Food Allowance: <strong className="font-mono">RM {foodInfo.safeDailyFoodAllowance.toFixed(2)} / day</strong>
+                    </span>
+                  </div>
+                )}
+
                 {/* Daily Safe Limit for this Category */}
                 <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-zinc-400 pt-0.5">
                   <span>
@@ -636,6 +964,148 @@ export default function BudgetPage() {
           })
         )}
       </div>
+
+      {/* AI Auto-Tune Caps Modal */}
+      {isAutoTuneOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl border border-slate-200 dark:border-white/[0.1] bg-white dark:bg-zinc-900 p-6 shadow-2xl space-y-5"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-2xl bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/25">
+                  <Sparkles className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    AI Intelligent Category Caps
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400">
+                    Dynamically derived from your spending history & target savings
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAutoTuneOpen(false)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Income & Savings Shield Math Summary */}
+            <div className="p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 space-y-2 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2 font-semibold">
+                <span className="text-indigo-900 dark:text-indigo-300">
+                  Income Allocation Shield:
+                </span>
+                <span className="font-mono text-slate-900 dark:text-white">
+                  RM {intelligentPlan.baselineIncome.toLocaleString()} Income - RM {intelligentPlan.targetSavingsAmount.toLocaleString()} Savings ({intelligentPlan.savingsTargetPct + intelligentPlan.investmentTargetPct}%) = <strong className="text-emerald-700 dark:text-emerald-300">RM {intelligentPlan.targetLivingBudget.toLocaleString()} Living Pool</strong>
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-600 dark:text-zinc-400 leading-relaxed">
+                {intelligentPlan.summaryInsight}
+              </p>
+            </div>
+
+            {/* Suggestions list */}
+            <div className="space-y-3">
+              <div className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider flex items-center justify-between">
+                <span>Category Breakdown & AI Reasoning</span>
+                <span>Editable Suggested Cap (RM)</span>
+              </div>
+
+              <div className="space-y-2 max-h-[48vh] overflow-y-auto pr-1">
+                {intelligentPlan.suggestions.map((s) => {
+                  const currentVal = customCapsDraft[s.category] ?? s.suggestedCap;
+                  const natureBadgeClass =
+                    s.nature === 'fixed'
+                      ? 'bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/25'
+                      : s.nature === 'quasi-fixed'
+                      ? 'bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/25'
+                      : s.nature === 'trend'
+                      ? 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/25'
+                      : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/25';
+
+                  return (
+                    <div
+                      key={s.category}
+                      className="p-3 rounded-2xl border border-slate-200 dark:border-white/[0.06] bg-slate-50/70 dark:bg-zinc-800/40 flex flex-wrap items-center justify-between gap-3 text-xs"
+                    >
+                      <div className="space-y-1 min-w-[200px] flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-slate-900 dark:text-white text-sm">
+                            {s.category}
+                          </span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${natureBadgeClass}`}>
+                            {s.natureLabel}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-tight">
+                          {s.reasoning}
+                        </p>
+                        {s.historicalAvg > 0 && (
+                          <span className="text-[10px] text-slate-400 dark:text-zinc-500 block">
+                            Historical monthly avg: RM {s.historicalAvg.toFixed(2)}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="font-mono text-xs text-slate-500 dark:text-zinc-400">RM</span>
+                        <input
+                          type="number"
+                          value={currentVal}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0;
+                            setCustomCapsDraft((prev) => ({ ...prev, [s.category]: val }));
+                          }}
+                          className="w-24 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2.5 py-1.5 text-xs text-slate-900 dark:text-white font-mono text-right font-bold outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Total check & Action buttons */}
+            <div className="pt-3 border-t border-slate-200 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-3">
+              <div className="text-xs">
+                <span className="text-slate-500 dark:text-zinc-400 block">Total Configured Caps:</span>
+                <span className="font-mono font-bold text-slate-900 dark:text-white text-sm">
+                  RM {Object.values(customCapsDraft).reduce((a, b) => a + (Number(b) || 0), 0).toLocaleString()}
+                </span>
+                <span className="text-[11px] text-slate-500 dark:text-zinc-400 ml-1">
+                  (Living target: RM {intelligentPlan.targetLivingBudget.toLocaleString()})
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAutoTuneOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleApplySmartCaps}
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-bold text-xs shadow-lg shadow-indigo-500/25 cursor-pointer active:scale-95 transition-all flex items-center gap-1.5"
+                >
+                  <Check className="h-4 w-4" />
+                  <span>Apply All AI Smart Caps</span>
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }
