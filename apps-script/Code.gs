@@ -2547,7 +2547,7 @@ function buildMoomooCashflowRow(trade) {
   return {
     Id: 'tx_trade_' + tradeId.replace(/[^A-Za-z0-9_-]/g, '_'),
     Date: date,
-    Type: action === 'SELL' ? 'Income' : 'Investment',
+    Type: 'Investment',
     Category: 'Stocks & Crypto',
     SubCategory: action,
     Description: action + ' ' + quantity + ' ' + ticker + ' @ ' + price + ' ' + currency,
@@ -3010,7 +3010,7 @@ function addTrade(trade, mutationId) {
   addRow(monthName, {
     Id: 'tx_trade_' + tradeId.replace(/[^A-Za-z0-9_-]/g, '_'),
     Date: tradeDate,
-    Type: action === 'SELL' ? 'Income' : 'Investment',
+    Type: 'Investment',
     Category: 'Stocks & Crypto',
     SubCategory: action,
     Description: `${action} ${quantity} ${tradeObject.Ticker} @ ${price} ${tradeCurrency}`,
@@ -3089,7 +3089,7 @@ function updateOverviewForMonth(monthStr) {
     `=IFERROR(SUMIFS('${normalizedMonth}'!G:G, '${normalizedMonth}'!C:C, "Income"), 0)`,
     `=IFERROR(SUMIFS('${normalizedMonth}'!G:G, '${normalizedMonth}'!C:C, "Expense"), 0)`,
     `=B${targetRow}-C${targetRow}`,
-    `=IFERROR(SUMIFS('${normalizedMonth}'!G:G, '${normalizedMonth}'!C:C, "Investment"), 0)`,
+    `=IFERROR(SUMIFS('${normalizedMonth}'!G:G, '${normalizedMonth}'!C:C, "Investment", '${normalizedMonth}'!E:E, "<>SELL") - SUMIFS('${normalizedMonth}'!G:G, '${normalizedMonth}'!C:C, "Investment", '${normalizedMonth}'!E:E, "SELL"), IFERROR(SUMIFS('${normalizedMonth}'!G:G, '${normalizedMonth}'!C:C, "Investment"), 0))`,
     `=IFERROR(SUMIFS(Trades!I:I, Trades!C:C, "DIVIDEND", Trades!B:B, ">=${normalizedMonth}-01", Trades!B:B, "<=${normalizedMonth}-31"), 0)`,
     `=IFERROR(SUMIFS(Trades!I:I, Trades!C:C, "SELL", Trades!B:B, ">=${normalizedMonth}-01", Trades!B:B, "<=${normalizedMonth}-31"), 0)`,
     `=F${targetRow}+G${targetRow}`,

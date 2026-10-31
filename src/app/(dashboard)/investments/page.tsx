@@ -71,6 +71,7 @@ export default function InvestmentsPage() {
   const queryClient = useQueryClient();
   const { aiPrefill, setAiPrefill } = useAppStore();
   const [activeTab, setActiveTab] = useState<'holdings' | 'trades'>('holdings');
+  const [holdingFilter, setHoldingFilter] = useState<'active' | 'closed' | 'all'>('active');
   const [isAddTradeOpen, setIsAddTradeOpen] = useState(false);
   const addTradeRequestRef = useRef<{ signature: string; id: string } | null>(null);
   const [selectedTrade, setSelectedTrade] = useState<any | null>(null);
@@ -151,116 +152,286 @@ export default function InvestmentsPage() {
     }).filter((t: NormalizedTrade) => Boolean(t.ticker && t.date));
   }, [rawTradesData, fxRates]);
 
-  // Map historical MYR trade costs by ticker for 100% accurate cost basis
-  const tradeCostByTicker = useMemo(() => {
-    const costMap: Record<string, { units: number; totalMyr: number; rateToMyr: number }> = {};
+  // 1. Calculate historical positions, average buy prices, capital used, and realized P&L by ticker from trades
+  const { positionsByTicker, tradeRealizedMap } = useMemo(() => {
+    const posMap: Record<string, {
+      ticker: string;
+      name: string;
+      type: string;
+      currency: string;
+      units: number;
+      totalCostAsset: number;
+      totalCostBase: number;
+      realizedPLAsset: number;
+      realizedPLBase: number;
+      totalDividendsAsset: number;
+      totalDividendsBase: number;
+      totalHistoricalCostAsset: number;
+      totalHistoricalCostBase: number;
+      totalHistoricalProceedsAsset: number;
+      totalHistoricalProceedsBase: number;
+      closedTradesCount: number;
+      lastPrice: number;
+    }> = {};
+
+    const tradeRealized: Record<string, {
+      tradeId: string;
+      pnlAsset: number;
+      pnlBase: number;
+      returnPercent: number;
+      costSoldAsset: number;
+      costSoldBase: number;
+      proceedsAsset: number;
+      proceedsBase: number;
+    }> = {};
+
     const chronologicalTrades = [...trades].sort((a, b) => {
       if (a.date !== b.date) return a.date.localeCompare(b.date);
       if (a.action === 'SELL' && b.action !== 'SELL') return 1;
       if (a.action !== 'SELL' && b.action === 'SELL') return -1;
       return 0;
     });
-    chronologicalTrades.forEach(t => {
+
+    chronologicalTrades.forEach((t) => {
       const isReinv = t.action === 'REINVEST' || (t.action === 'DIVIDEND' && (t.isReinvested || t.notes.toLowerCase().includes('reinvest')));
-      if (!costMap[t.ticker]) costMap[t.ticker] = { units: 0, totalMyr: 0, rateToMyr: t.rateToMyr };
-      const entry = costMap[t.ticker];
+      const ticker = t.ticker;
+      if (!ticker) return;
+
+      if (!posMap[ticker]) {
+        posMap[ticker] = {
+          ticker,
+          name: t.name || ticker,
+          type: 'Stock',
+          currency: t.currency || 'USD',
+          units: 0,
+          totalCostAsset: 0,
+          totalCostBase: 0,
+          realizedPLAsset: 0,
+          realizedPLBase: 0,
+          totalDividendsAsset: 0,
+          totalDividendsBase: 0,
+          totalHistoricalCostAsset: 0,
+          totalHistoricalCostBase: 0,
+          totalHistoricalProceedsAsset: 0,
+          totalHistoricalProceedsBase: 0,
+          closedTradesCount: 0,
+          lastPrice: t.price || 0,
+        };
+      }
+
+      const pos = posMap[ticker];
+      if (t.name && t.name !== ticker) pos.name = t.name;
+      if (t.currency) pos.currency = t.currency;
+
+      const rate = t.rateToMyr > 0 ? t.rateToMyr : (fxRates[pos.currency] || DEFAULT_RATES_TO_MYR[pos.currency] || 1.0);
+
       if (t.action === 'BUY' || isReinv) {
-        entry.units += t.quantity;
-        entry.totalMyr += t.costInMyr;
-        if (t.rateToMyr > 0) entry.rateToMyr = t.rateToMyr;
+        const qty = t.quantity;
+        const costAsset = t.netTotal;
+        const costBase = t.costInMyr > 0 ? t.costInMyr : (pos.currency === 'MYR' ? costAsset : costAsset * rate);
+
+        pos.units += qty;
+        pos.totalCostAsset += costAsset;
+        pos.totalCostBase += costBase;
+        pos.totalHistoricalCostAsset += costAsset;
+        pos.totalHistoricalCostBase += costBase;
+        if (t.price > 0) pos.lastPrice = t.price;
       } else if (t.action === 'SELL') {
-        const avgMyr = entry.units > 0 ? entry.totalMyr / entry.units : 0;
-        entry.units = Math.max(0, entry.units - t.quantity);
-        entry.totalMyr = Math.max(0, entry.totalMyr - t.quantity * avgMyr);
+        const qty = t.quantity;
+        const proceedsAsset = t.netTotal;
+        const proceedsBase = t.costInMyr > 0 ? t.costInMyr : (pos.currency === 'MYR' ? proceedsAsset : proceedsAsset * rate);
+
+        const priorAvgCostAsset = pos.units > 0 ? pos.totalCostAsset / pos.units : 0;
+        const priorAvgCostBase = pos.units > 0 ? pos.totalCostBase / pos.units : 0;
+
+        const costSoldAsset = Math.min(pos.totalCostAsset, qty * priorAvgCostAsset);
+        const costSoldBase = Math.min(pos.totalCostBase, qty * priorAvgCostBase);
+
+        const pnlAsset = proceedsAsset - costSoldAsset;
+        const pnlBase = proceedsBase - costSoldBase;
+        const returnPct = costSoldAsset > 0 ? (pnlAsset / costSoldAsset) * 100 : 0;
+
+        tradeRealized[t.id] = {
+          tradeId: t.id,
+          pnlAsset,
+          pnlBase,
+          returnPercent: returnPct,
+          costSoldAsset,
+          costSoldBase,
+          proceedsAsset,
+          proceedsBase,
+        };
+
+        pos.realizedPLAsset += pnlAsset;
+        pos.realizedPLBase += pnlBase;
+        pos.totalHistoricalProceedsAsset += proceedsAsset;
+        pos.totalHistoricalProceedsBase += proceedsBase;
+        pos.closedTradesCount += 1;
+
+        pos.units = Math.max(0, pos.units - qty);
+        pos.totalCostAsset = Math.max(0, pos.totalCostAsset - costSoldAsset);
+        pos.totalCostBase = Math.max(0, pos.totalCostBase - costSoldBase);
+
+        if (pos.units === 0) {
+          pos.totalCostAsset = 0;
+          pos.totalCostBase = 0;
+        }
+        if (t.price > 0) pos.lastPrice = t.price;
+      } else if (t.action === 'DIVIDEND' && !isReinv) {
+        const divAsset = t.netTotal;
+        const divBase = t.costInMyr > 0 ? t.costInMyr : (pos.currency === 'MYR' ? divAsset : divAsset * rate);
+        pos.totalDividendsAsset += divAsset;
+        pos.totalDividendsBase += divBase;
       }
     });
-    return costMap;
-  }, [trades]);
 
-  // Normalize Portfolio Holdings with Real-Time FX and True Historical MYR Cost
-  const holdings = useMemo(() => {
-    if (!Array.isArray(rawPortfolio)) return [];
-    return rawPortfolio.map((item: any) => {
-      const ticker = String(item.ticker || item.Ticker || '').toUpperCase();
-      const units = Number(item.units || item['Units Held'] || 0);
-      const avgCost = Number(item.avgCost || item['Avg Cost'] || 0);
-      const livePrice = Number(item.livePrice || item['Live Price'] || avgCost || 0);
-      const totalCost = Number(item.totalCost || item['Total Cost'] || (units * avgCost));
-      const marketValue = Number(item.marketValue || item['Market Value'] || (units * livePrice));
-      const currency = String(item.currency || item.Currency || 'USD').toUpperCase();
+    return { positionsByTicker: posMap, tradeRealizedMap: tradeRealized };
+  }, [trades, fxRates]);
+
+  // 2. Build complete position records ("完整的档位") combining historical trade ledger and live quotes
+  const allPositions = useMemo(() => {
+    const rawMap = new Map<string, any>();
+    if (Array.isArray(rawPortfolio)) {
+      rawPortfolio.forEach((item: any) => {
+        const t = String(item.ticker || item.Ticker || '').toUpperCase();
+        if (t) rawMap.set(t, item);
+      });
+    }
+
+    const allTickers = new Set<string>();
+    Object.keys(positionsByTicker).forEach(t => allTickers.add(t));
+    rawMap.forEach((_, t) => allTickers.add(t));
+
+    const result = Array.from(allTickers).map((ticker) => {
+      const pos = positionsByTicker[ticker];
+      const rawItem = rawMap.get(ticker);
+
+      const name = String(rawItem?.name || rawItem?.['Asset Name'] || pos?.name || ticker);
+      const type = String(rawItem?.type || rawItem?.Type || pos?.type || 'Stock');
+      const currency = String(rawItem?.currency || rawItem?.Currency || pos?.currency || 'USD').toUpperCase();
       const currentFxRate = fxRates[currency] || DEFAULT_RATES_TO_MYR[currency] || 1.0;
 
-      // 1. Real-time market valuation in MYR using live FX quote
+      const units = pos ? pos.units : Number(rawItem?.units || rawItem?.['Units Held'] || 0);
+
+      let totalCost = pos ? pos.totalCostAsset : Number(rawItem?.totalCost || rawItem?.['Total Cost'] || 0);
+      let totalCostBase = pos ? pos.totalCostBase : (currency === 'MYR' ? totalCost : totalCost * currentFxRate);
+      if (units === 0) {
+        totalCost = 0;
+        totalCostBase = 0;
+      }
+
+      const avgCost = units > 0 ? totalCost / units : Number(rawItem?.avgCost || rawItem?.['Avg Cost'] || 0);
+      const avgCostBase = units > 0 ? totalCostBase / units : (currency === 'MYR' ? avgCost : avgCost * currentFxRate);
+
+      const rawLivePrice = Number(rawItem?.livePrice || rawItem?.['Live Price'] || 0);
+      const livePrice = rawLivePrice > 0 ? rawLivePrice : (pos?.lastPrice || avgCost || 0);
+
+      const marketValue = units * livePrice;
       const marketValueBase = currency === 'MYR' ? marketValue : marketValue * currentFxRate;
 
-      // 2. True historical cost basis in MYR (what the user actually spent)
-      const historicalTradeCost = tradeCostByTicker[ticker]?.totalMyr;
-      const totalCostMyrFromItem = Number(item.totalCostMyr || item['Total Cost MYR'] || 0);
-      const itemRateToMyr = Number(item.rateToMyr || item['RateToMyr'] || tradeCostByTicker[ticker]?.rateToMyr || 0);
+      const unrealizedPL = marketValue - totalCost;
+      const unrealizedPLBase = marketValueBase - totalCostBase;
+      const unrealizedPLPercent = totalCost > 0 ? (unrealizedPL / totalCost) * 100 : 0;
+      const returnPercentBase = totalCostBase > 0 ? (unrealizedPLBase / totalCostBase) * 100 : 0;
 
-      const totalCostBase = historicalTradeCost && historicalTradeCost > 0
-        ? historicalTradeCost
-        : totalCostMyrFromItem > 0
-        ? totalCostMyrFromItem
-        : currency === 'MYR'
-        ? totalCost
-        : itemRateToMyr > 0
-        ? totalCost * itemRateToMyr
-        : totalCost * currentFxRate;
+      const realizedPL = pos ? pos.realizedPLAsset : 0;
+      const realizedPLBase = pos ? pos.realizedPLBase : 0;
+      const totalPLBase = unrealizedPLBase + realizedPLBase;
 
-      const avgCostBase = units > 0 ? totalCostBase / units : 0;
-      const pnlBase = marketValueBase - totalCostBase;
-      const returnPercentBase = totalCostBase > 0 ? (pnlBase / totalCostBase) * 100 : 0;
+      const totalHistoricalCostAsset = pos ? pos.totalHistoricalCostAsset : totalCost;
+      const totalHistoricalCostBase = pos ? pos.totalHistoricalCostBase : totalCostBase;
+      const totalHistoricalProceedsAsset = pos ? pos.totalHistoricalProceedsAsset : 0;
+      const totalHistoricalProceedsBase = pos ? pos.totalHistoricalProceedsBase : 0;
+      const closedTradesCount = pos ? pos.closedTradesCount : 0;
 
-      // Foreign currency P&L for stock-only performance
-      const pnl = Number(item.pnl || item['Profit / Loss'] || (marketValue - totalCost));
-      const returnPercent = totalCost > 0 ? (pnl / totalCost) * 100 : 0;
+      const realizedReturnPercent = totalHistoricalCostAsset > 0
+        ? (realizedPL / totalHistoricalCostAsset) * 100
+        : 0;
 
       return {
         ticker,
-        name: String(item.name || item['Asset Name'] || item.ticker || ''),
-        type: String(item.type || item.Type || 'Stock'),
+        name,
+        type,
         currency,
         units,
         avgCost,
+        avgBuyPrice: avgCost,
+        avgCostBase,
+        avgBuyPriceBase: avgCostBase,
         totalCost,
+        totalCostBase,
         livePrice,
         marketValue,
-        currentFxRate,
         marketValueBase,
-        totalCostBase,
-        avgCostBase,
-        pnlBase,
+        currentFxRate,
+        unrealizedPL,
+        unrealizedPLBase,
+        unrealizedPLPercent,
+        pnl: unrealizedPL,
+        pnlBase: unrealizedPLBase,
+        returnPercent: unrealizedPLPercent,
         returnPercentBase,
-        pnl,
-        returnPercent,
+        realizedPL,
+        realizedPLBase,
+        totalPLBase,
+        totalDividends: pos?.totalDividendsAsset || 0,
+        totalDividendsBase: pos?.totalDividendsBase || 0,
+        closedTradesCount,
+        totalHistoricalCostAsset,
+        totalHistoricalCostBase,
+        totalHistoricalProceedsAsset,
+        totalHistoricalProceedsBase,
+        realizedReturnPercent,
+        status: units > 0 ? ('active' as const) : ('closed' as const),
       };
-    }).filter(h => h.ticker && h.units > 0);
-  }, [rawPortfolio, fxRates, tradeCostByTicker]);
+    });
+
+    return result.sort((a, b) => {
+      if (a.units > 0 && b.units <= 0) return -1;
+      if (a.units <= 0 && b.units > 0) return 1;
+      if (a.units > 0 && b.units > 0) return b.marketValueBase - a.marketValueBase;
+      return b.realizedPLBase - a.realizedPLBase;
+    });
+  }, [rawPortfolio, positionsByTicker, fxRates]);
+
+  const activeHoldings = useMemo(() => allPositions.filter(p => p.units > 0), [allPositions]);
+  const closedPositions = useMemo(() => allPositions.filter(p => p.units <= 0 && (p.closedTradesCount > 0 || p.realizedPLBase !== 0)), [allPositions]);
+
+  // Backward-compatible holdings reference for existing handlers
+  const holdings = activeHoldings;
+
+  const displayedPositions = useMemo(() => {
+    if (holdingFilter === 'active') return activeHoldings;
+    if (holdingFilter === 'closed') return closedPositions;
+    return allPositions;
+  }, [holdingFilter, activeHoldings, closedPositions, allPositions]);
 
   // Google Sheets exposes the symbols already used by the portfolio and trade log.
-  // Keep the picker lightweight and only suggest symbols matching the typed prefix.
   const tickerOptions = useMemo(() => {
     const symbols = new Set<string>();
-    holdings.forEach(h => h.ticker && symbols.add(h.ticker));
+    allPositions.forEach(h => h.ticker && symbols.add(h.ticker));
     trades.forEach(t => t.ticker && symbols.add(t.ticker));
     return Array.from(symbols).sort();
-  }, [holdings, trades]);
+  }, [allPositions, trades]);
 
   // Portfolio Totals
   const totalMarketValue = useMemo(() => {
-    return holdings.reduce((sum, h) => sum + h.marketValueBase, 0);
-  }, [holdings]);
+    return activeHoldings.reduce((sum, h) => sum + h.marketValueBase, 0);
+  }, [activeHoldings]);
 
   const totalCostBasis = useMemo(() => {
-    return holdings.reduce((sum, h) => sum + h.totalCostBase, 0);
-  }, [holdings]);
+    return activeHoldings.reduce((sum, h) => sum + h.totalCostBase, 0);
+  }, [activeHoldings]);
 
   const totalPnl = totalMarketValue - totalCostBasis;
   const totalReturnPercent = totalCostBasis > 0 ? (totalPnl / totalCostBasis) * 100 : 0;
 
-  // Realized cash earnings. Reinvested dividends increase holdings but are not
-  // cash received, so they must not be counted as realized income here.
+  // Cumulative Realized P&L from all closed or trimmed stock sales
+  const totalRealizedPnl = useMemo(() => {
+    return allPositions.reduce((sum, p) => sum + p.realizedPLBase, 0);
+  }, [allPositions]);
+
+  // Realized cash earnings from dividends
   const annualRealizedGain = useMemo(() => {
     const currentYear = new Date().getFullYear().toString();
     return trades
@@ -1085,53 +1256,81 @@ export default function InvestmentsPage() {
       />
 
       {/* Metric Cards Banner */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
         {/* Total Market Value */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           whileHover={{ y: -4, scale: 1.01 }}
           transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
-          className="p-5 rounded-3xl border border-indigo-500/30 bg-gradient-to-br from-indigo-950/40 via-slate-100 dark:via-zinc-900/60 to-black backdrop-blur-xl shadow-lg hover:border-indigo-500/50 transition-colors specular-card"
+          className="p-4 sm:p-5 rounded-3xl border border-indigo-500/30 bg-gradient-to-br from-indigo-950/40 via-slate-100 dark:via-zinc-900/60 to-black backdrop-blur-xl shadow-lg hover:border-indigo-500/50 transition-colors specular-card"
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs uppercase tracking-wider text-slate-600 dark:text-zinc-400 font-semibold">Portfolio Value</span>
-            <div className="h-8 w-8 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-800 dark:text-indigo-400 border border-indigo-500/20 shadow-sm">
+            <span className="text-[11px] sm:text-xs uppercase tracking-wider text-slate-600 dark:text-zinc-400 font-semibold">Portfolio Value</span>
+            <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-800 dark:text-indigo-400 border border-indigo-500/20 shadow-sm">
               <Activity className="h-4 w-4" />
             </div>
           </div>
-          <div className="mt-3">
-            <div className="text-2xl md:text-3xl font-black tracking-tight text-slate-950 dark:text-white font-mono">
+          <div className="mt-2.5 sm:mt-3">
+            <div className="text-xl sm:text-2xl lg:text-3xl font-black tracking-tight text-slate-950 dark:text-white font-mono">
               <AnimatedNumber value={totalMarketValue} animateOnMount />
             </div>
-            <p className="text-xs text-indigo-800/80 dark:text-indigo-400/80 mt-1 font-medium">Live market valuation</p>
+            <p className="text-[11px] text-indigo-800/80 dark:text-indigo-400/80 mt-1 font-medium truncate">Live market valuation</p>
           </div>
         </motion.div>
 
-        {/* Total Return / Profit & Loss */}
+        {/* Unrealized Return */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           whileHover={{ y: -4, scale: 1.01 }}
           transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
-          className="p-5 rounded-3xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 backdrop-blur-xl shadow-lg hover:border-emerald-500/40 transition-colors specular-card"
+          className="p-4 sm:p-5 rounded-3xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 backdrop-blur-xl shadow-lg hover:border-emerald-500/40 transition-colors specular-card"
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs uppercase tracking-wider text-slate-600 dark:text-zinc-400 font-semibold">Unrealized Return</span>
-            <div className={`h-8 w-8 rounded-xl flex items-center justify-center border ${
+            <span className="text-[11px] sm:text-xs uppercase tracking-wider text-slate-600 dark:text-zinc-400 font-semibold">Unrealized P&L</span>
+            <div className={`h-7 w-7 sm:h-8 sm:w-8 rounded-xl flex items-center justify-center border ${
               totalPnl >= 0 ? 'bg-emerald-500/10 text-emerald-800 dark:text-emerald-400 border-emerald-500/20 shadow-sm' : 'bg-rose-500/10 text-rose-800 dark:text-rose-400 border-rose-500/20 shadow-sm'
             }`}>
               {totalPnl >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
             </div>
           </div>
-          <div className="mt-3">
-            <div className={`text-2xl md:text-3xl font-black tracking-tight font-mono ${
+          <div className="mt-2.5 sm:mt-3">
+            <div className={`text-xl sm:text-2xl lg:text-3xl font-black tracking-tight font-mono ${
               totalPnl >= 0 ? 'text-emerald-800 dark:text-emerald-400' : 'text-rose-800 dark:text-rose-400'
             }`}>
               <AnimatedNumber value={totalPnl} showPlus animateOnMount />
             </div>
-            <p className="text-xs text-slate-600 dark:text-zinc-400 mt-1 font-medium">
-              {totalReturnPercent >= 0 ? '+' : ''}{totalReturnPercent.toFixed(2)}% overall gain
+            <p className="text-[11px] text-slate-600 dark:text-zinc-400 mt-1 font-medium truncate">
+              {totalReturnPercent >= 0 ? '+' : ''}{totalReturnPercent.toFixed(2)}% floating gain
+            </p>
+          </div>
+        </motion.div>
+
+        {/* Realized P&L (from all sales) */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          whileHover={{ y: -4, scale: 1.01 }}
+          transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
+          className="p-4 sm:p-5 rounded-3xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 backdrop-blur-xl shadow-lg hover:border-emerald-500/40 transition-colors specular-card"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] sm:text-xs uppercase tracking-wider text-slate-600 dark:text-zinc-400 font-semibold">Realized P&L</span>
+            <div className={`h-7 w-7 sm:h-8 sm:w-8 rounded-xl flex items-center justify-center border ${
+              totalRealizedPnl >= 0 ? 'bg-emerald-500/10 text-emerald-800 dark:text-emerald-400 border-emerald-500/20 shadow-sm' : 'bg-rose-500/10 text-rose-800 dark:text-rose-400 border-rose-500/20 shadow-sm'
+            }`}>
+              {totalRealizedPnl >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+            </div>
+          </div>
+          <div className="mt-2.5 sm:mt-3">
+            <div className={`text-xl sm:text-2xl lg:text-3xl font-black tracking-tight font-mono ${
+              totalRealizedPnl >= 0 ? 'text-emerald-800 dark:text-emerald-400' : 'text-rose-800 dark:text-rose-400'
+            }`}>
+              <AnimatedNumber value={totalRealizedPnl} showPlus animateOnMount />
+            </div>
+            <p className="text-[11px] text-slate-600 dark:text-zinc-400 mt-1 font-medium truncate">
+              Locked P&L from sold shares
             </p>
           </div>
         </motion.div>
@@ -1142,19 +1341,19 @@ export default function InvestmentsPage() {
           animate={{ opacity: 1, y: 0 }}
           whileHover={{ y: -4, scale: 1.01 }}
           transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
-          className="p-5 rounded-3xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 backdrop-blur-xl shadow-lg hover:border-purple-500/40 transition-colors specular-card"
+          className="p-4 sm:p-5 rounded-3xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 backdrop-blur-xl shadow-lg hover:border-purple-500/40 transition-colors specular-card"
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs uppercase tracking-wider text-slate-600 dark:text-zinc-400 font-semibold">Total Invested</span>
-            <div className="h-8 w-8 rounded-xl bg-purple-500/10 flex items-center justify-center text-violet-800 dark:text-purple-400 border border-purple-500/20 shadow-sm">
+            <span className="text-[11px] sm:text-xs uppercase tracking-wider text-slate-600 dark:text-zinc-400 font-semibold">Capital Invested</span>
+            <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-xl bg-purple-500/10 flex items-center justify-center text-violet-800 dark:text-purple-400 border border-purple-500/20 shadow-sm">
               <DollarSign className="h-4 w-4" />
             </div>
           </div>
-          <div className="mt-3">
-            <div className="text-2xl md:text-3xl font-black tracking-tight text-slate-950 dark:text-white font-mono">
+          <div className="mt-2.5 sm:mt-3">
+            <div className="text-xl sm:text-2xl lg:text-3xl font-black tracking-tight text-slate-950 dark:text-white font-mono">
               <AnimatedNumber value={totalCostBasis} animateOnMount />
             </div>
-            <p className="text-xs text-violet-800/80 dark:text-purple-400/80 mt-1 font-medium">Capital invested across assets</p>
+            <p className="text-[11px] text-violet-800/80 dark:text-purple-400/80 mt-1 font-medium truncate">Active capital deployed</p>
           </div>
         </motion.div>
 
@@ -1164,19 +1363,19 @@ export default function InvestmentsPage() {
           animate={{ opacity: 1, y: 0 }}
           whileHover={{ y: -4, scale: 1.01 }}
           transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
-          className="p-5 rounded-3xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 backdrop-blur-xl shadow-lg hover:border-amber-500/40 transition-colors specular-card"
+          className="p-4 sm:p-5 rounded-3xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 backdrop-blur-xl shadow-lg hover:border-amber-500/40 transition-colors specular-card col-span-2 sm:col-span-1"
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs uppercase tracking-wider text-slate-600 dark:text-zinc-400 font-semibold">Annual Dividends</span>
-            <div className="h-8 w-8 rounded-xl bg-amber-500/10 flex items-center justify-center text-amber-800 dark:text-amber-400 border border-amber-500/20 shadow-sm">
+            <span className="text-[11px] sm:text-xs uppercase tracking-wider text-slate-600 dark:text-zinc-400 font-semibold">Annual Dividends</span>
+            <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-xl bg-amber-500/10 flex items-center justify-center text-amber-800 dark:text-amber-400 border border-amber-500/20 shadow-sm">
               <Sparkles className="h-4 w-4" />
             </div>
           </div>
-          <div className="mt-3">
-            <div className="text-2xl md:text-3xl font-black tracking-tight text-amber-800 dark:text-amber-400 font-mono">
+          <div className="mt-2.5 sm:mt-3">
+            <div className="text-xl sm:text-2xl lg:text-3xl font-black tracking-tight text-amber-800 dark:text-amber-400 font-mono">
               <AnimatedNumber value={annualRealizedGain} animateOnMount />
             </div>
-            <p className="text-xs text-amber-800/80 dark:text-amber-400/80 mt-1 font-medium">Dividends received in {new Date().getFullYear()}</p>
+            <p className="text-[11px] text-amber-800/80 dark:text-amber-400/80 mt-1 font-medium truncate">Received in {new Date().getFullYear()}</p>
           </div>
         </motion.div>
       </div>
@@ -1300,28 +1499,82 @@ export default function InvestmentsPage() {
             </div>
           )}
 
+          {/* Holdings Sub-Filter & Positions Header */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <div className="flex items-center gap-1 p-1 rounded-2xl bg-white/90 dark:bg-zinc-950/80 border border-slate-200 dark:border-white/[0.08] shadow-sm text-xs">
+              <button
+                type="button"
+                onClick={() => setHoldingFilter('active')}
+                className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
+                  holdingFilter === 'active'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                Active Holdings ({activeHoldings.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setHoldingFilter('closed')}
+                className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
+                  holdingFilter === 'closed'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                Closed Positions ({closedPositions.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setHoldingFilter('all')}
+                className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
+                  holdingFilter === 'all'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                All ({allPositions.length})
+              </button>
+            </div>
+            <div className="text-xs text-slate-500 dark:text-zinc-400 font-medium">
+              {holdingFilter === 'closed'
+                ? 'Historical positions sold or trimmed with locked Realized P&L'
+                : 'Active positions tracking units, average buy price, capital used & live returns'}
+            </div>
+          </div>
+
           {/* Holdings Table */}
-          {holdings.length === 0 ? (
+          {displayedPositions.length === 0 ? (
             <div className="py-16 text-center rounded-3xl border border-dashed border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/20 p-8">
               <div className="h-12 w-12 rounded-2xl bg-indigo-500/10 text-indigo-800 dark:text-indigo-400 mx-auto flex items-center justify-center mb-3">
                 <TrendingUp className="h-6 w-6" />
               </div>
-              <h3 className="text-base font-semibold text-slate-950 dark:text-white">No Investment Holdings Yet</h3>
+              <h3 className="text-base font-semibold text-slate-950 dark:text-white">
+                {holdingFilter === 'closed' ? 'No Closed Positions Yet' : 'No Investment Holdings Yet'}
+              </h3>
               <p className="text-xs text-slate-600 dark:text-zinc-400 max-w-sm mx-auto mt-1">
-                Use the Trade button at the bottom to record a purchase. Kinova will track your units, live prices, and returns automatically.
+                {holdingFilter === 'closed'
+                  ? 'When you sell shares, the trade locks in Realized P&L here instead of inflating your monthly income.'
+                  : 'Use the Trade button at the bottom to record a purchase. Kinova will track your units, live prices, and returns automatically.'}
               </p>
             </div>
           ) : (
             <>
               {/* Mobile Cards View */}
               <div className="md:hidden space-y-3">
-                {holdings.map((h) => {
+                {displayedPositions.map((h) => {
+                  const isClosed = h.units <= 0;
                   const isProfit = h.pnlBase >= 0;
+                  const isRealizedProfit = h.realizedPLBase >= 0;
                   return (
                     <div 
                       key={h.ticker} 
                       onClick={() => setSelectedHolding(h)}
-                      className="p-4 rounded-2xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 hover:bg-slate-100 dark:hover:bg-zinc-800/50 hover:border-slate-300 dark:hover:border-zinc-700/80 transition-all cursor-pointer group active:scale-[0.99] space-y-3"
+                      className={`p-4 rounded-2xl border transition-all cursor-pointer group active:scale-[0.99] space-y-3 ${
+                        isClosed 
+                          ? 'border-slate-200 dark:border-zinc-800/60 bg-slate-50/70 dark:bg-zinc-900/20 opacity-90'
+                          : 'border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 hover:bg-slate-100 dark:hover:bg-zinc-800/50 hover:border-slate-300 dark:hover:border-zinc-700/80'
+                      }`}
                     >
                       <div className="flex items-center justify-between">
                         <div>
@@ -1330,47 +1583,77 @@ export default function InvestmentsPage() {
                             <span className="px-2 py-0.5 rounded-md text-[10px] font-medium bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300">
                               {h.type}
                             </span>
+                            {isClosed && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">
+                                Closed
+                              </span>
+                            )}
                           </div>
                           <div className="text-xs text-slate-600 dark:text-zinc-400 truncate max-w-[180px] mt-0.5">{h.name}</div>
                         </div>
                         <div className="flex items-center gap-2 text-right">
                           <div>
-                            <div className="font-bold text-base text-slate-950 dark:text-white font-mono">
-                              RM {h.marketValueBase.toFixed(2)}
-                            </div>
-                            {h.currency !== 'MYR' && (
-                              <div className="text-[10px] text-slate-600 dark:text-zinc-400 font-mono">
-                                {formatAssetCurrency(h.marketValue, h.currency)} @ {h.currentFxRate.toFixed(4)}
-                              </div>
-                            )}
-                            <div className={`text-xs font-semibold font-mono ${isProfit ? 'text-emerald-800 dark:text-emerald-400' : 'text-rose-800 dark:text-rose-400'}`}>
-                              {formatPnl(h.pnlBase, 'MYR')} ({isProfit ? '+' : ''}{h.returnPercentBase.toFixed(1)}%)
-                            </div>
-                            {h.currency !== 'MYR' && (
-                              <div className="text-[10px] text-slate-500 dark:text-zinc-400 font-mono">
-                                Asset: {formatPnl(h.pnl, h.currency)} ({h.pnl >= 0 ? '+' : ''}{h.returnPercent.toFixed(1)}%)
-                              </div>
+                            {!isClosed ? (
+                              <>
+                                <div className="font-bold text-base text-slate-950 dark:text-white font-mono">
+                                  RM {h.marketValueBase.toFixed(2)}
+                                </div>
+                                {h.currency !== 'MYR' && (
+                                  <div className="text-[10px] text-slate-600 dark:text-zinc-400 font-mono">
+                                    {formatAssetCurrency(h.marketValue, h.currency)} @ {h.currentFxRate.toFixed(4)}
+                                  </div>
+                                )}
+                                <div className={`text-xs font-semibold font-mono ${isProfit ? 'text-emerald-800 dark:text-emerald-400' : 'text-rose-800 dark:text-rose-400'}`}>
+                                  {formatPnl(h.pnlBase, 'MYR')} ({isProfit ? '+' : ''}{h.returnPercentBase.toFixed(1)}%)
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="text-xs font-medium text-slate-500 dark:text-zinc-400">Realized P&L</div>
+                                <div className={`font-bold text-base font-mono ${isRealizedProfit ? 'text-emerald-800 dark:text-emerald-400' : 'text-rose-800 dark:text-rose-400'}`}>
+                                  {formatPnl(h.realizedPLBase, 'MYR')}
+                                </div>
+                                <div className={`text-[10px] font-mono ${isRealizedProfit ? 'text-emerald-700 dark:text-emerald-500' : 'text-rose-700 dark:text-rose-500'}`}>
+                                  {isRealizedProfit ? '+' : ''}{h.realizedReturnPercent.toFixed(1)}% locked
+                                </div>
+                              </>
                             )}
                           </div>
                           <ChevronRight className="h-4 w-4 text-slate-600 dark:text-zinc-300 group-hover:text-slate-600 dark:group-hover:text-zinc-400 transition-colors shrink-0" />
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200 dark:border-zinc-800/60 text-xs">
+                      {/* 4-grid metrics: Units, Avg Buy Price, Capital Used, Realized P&L */}
+                      <div className="grid grid-cols-4 gap-2 pt-2 border-t border-slate-200 dark:border-zinc-800/60 text-xs">
                         <div>
                           <span className="text-slate-500 dark:text-zinc-400 block text-[10px] uppercase">Units</span>
                           <span className="font-medium text-slate-800 dark:text-zinc-200 font-mono">{h.units.toLocaleString()}</span>
                         </div>
                         <div>
-                          <span className="text-slate-500 dark:text-zinc-400 block text-[10px] uppercase">Avg Cost</span>
-                          <span className="font-medium text-slate-700 dark:text-zinc-300 font-mono">{formatAssetCurrency(h.avgCost, h.currency)}</span>
+                          <span className="text-slate-500 dark:text-zinc-400 block text-[10px] uppercase">Avg Buy</span>
+                          <span className="font-medium text-slate-700 dark:text-zinc-300 font-mono">{formatAssetCurrency(h.avgBuyPrice, h.currency)}</span>
                           {h.currency !== 'MYR' && (
-                            <span className="text-[10px] text-slate-500 dark:text-zinc-400 block font-mono">RM {h.avgCostBase.toFixed(2)}</span>
+                            <span className="text-[10px] text-slate-500 dark:text-zinc-400 block font-mono">RM {h.avgBuyPriceBase.toFixed(2)}</span>
+                          )}
+                        </div>
+                        <div>
+                          <span className="text-slate-500 dark:text-zinc-400 block text-[10px] uppercase">Cost Used</span>
+                          <span className="font-medium text-slate-700 dark:text-zinc-300 font-mono">
+                            RM {(isClosed ? h.totalHistoricalCostBase : h.totalCostBase).toFixed(2)}
+                          </span>
+                          {h.currency !== 'MYR' && (
+                            <span className="text-[10px] text-slate-500 dark:text-zinc-400 block font-mono">
+                              {formatAssetCurrency(isClosed ? h.totalHistoricalCostAsset : h.totalCost, h.currency)}
+                            </span>
                           )}
                         </div>
                         <div className="text-right">
-                          <span className="text-slate-500 dark:text-zinc-400 block text-[10px] uppercase">Live Price</span>
-                          <span className="font-medium text-slate-950 dark:text-white font-mono">{formatAssetCurrency(h.livePrice, h.currency)}</span>
+                          <span className="text-slate-500 dark:text-zinc-400 block text-[10px] uppercase">Realized</span>
+                          <span className={`font-semibold font-mono ${
+                            h.realizedPLBase > 0 ? 'text-emerald-800 dark:text-emerald-400' : h.realizedPLBase < 0 ? 'text-rose-800 dark:text-rose-400' : 'text-slate-500'
+                          }`}>
+                            {h.realizedPLBase !== 0 ? formatPnl(h.realizedPLBase, 'MYR') : 'RM 0'}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -1386,24 +1669,36 @@ export default function InvestmentsPage() {
                       <th className="p-4">Asset</th>
                       <th className="p-4">Type</th>
                       <th className="p-4 text-right">Units</th>
-                      <th className="p-4 text-right">Avg Cost</th>
+                      <th className="p-4 text-right">Avg Buy Price</th>
+                      <th className="p-4 text-right">Cost Used</th>
                       <th className="p-4 text-right">Live Price</th>
-                      <th className="p-4 text-right">Market Value (MYR)</th>
-                      <th className="p-4 text-right">Cost Basis (MYR)</th>
-                      <th className="p-4 text-right">True Return (MYR)</th>
+                      <th className="p-4 text-right">Market Value</th>
+                      <th className="p-4 text-right">Unrealized P&L</th>
+                      <th className="p-4 text-right">Realized P&L</th>
+                      <th className="p-4 text-right">Total Gain</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800/60">
-                    {holdings.map((h) => {
+                    {displayedPositions.map((h) => {
+                      const isClosed = h.units <= 0;
                       const isProfit = h.pnlBase >= 0;
+                      const isRealizedProfit = h.realizedPLBase >= 0;
+                      const isTotalProfit = h.totalPLBase >= 0;
                       return (
                         <tr 
                           key={h.ticker} 
                           onClick={() => setSelectedHolding(h)}
-                          className="hover:bg-slate-100 dark:hover:bg-zinc-800/40 transition-colors cursor-pointer group"
+                          className={`hover:bg-slate-100 dark:hover:bg-zinc-800/40 transition-colors cursor-pointer group ${
+                            isClosed ? 'opacity-85 bg-slate-50/50 dark:bg-zinc-900/20' : ''
+                          }`}
                         >
                           <td className="p-4">
-                            <div className="font-bold text-slate-950 dark:text-white group-hover:text-indigo-800 dark:group-hover:text-indigo-300 transition-colors">{h.ticker}</div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold text-slate-950 dark:text-white group-hover:text-indigo-800 dark:group-hover:text-indigo-300 transition-colors">{h.ticker}</span>
+                              {isClosed && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">Closed</span>
+                              )}
+                            </div>
                             <div className="text-xs text-slate-600 dark:text-zinc-400 truncate max-w-[160px]">{h.name}</div>
                           </td>
                           <td className="p-4">
@@ -1411,44 +1706,83 @@ export default function InvestmentsPage() {
                               {h.type}
                             </span>
                           </td>
-                          <td className="p-4 text-right font-medium text-slate-800 dark:text-zinc-200">
+                          <td className="p-4 text-right font-medium text-slate-800 dark:text-zinc-200 font-mono">
                             {h.units.toLocaleString()}
                           </td>
                           <td className="p-4 text-right text-slate-600 dark:text-zinc-400 font-mono">
-                            <div>{formatAssetCurrency(h.avgCost, h.currency)}</div>
+                            <div>{formatAssetCurrency(h.avgBuyPrice, h.currency)}</div>
                             {h.currency !== 'MYR' && (
-                              <div className="text-[11px] text-slate-500 dark:text-zinc-400 font-mono">RM {h.avgCostBase.toFixed(2)}</div>
-                            )}
-                          </td>
-                          <td className="p-4 text-right font-medium text-slate-950 dark:text-white font-mono">
-                            {formatAssetCurrency(h.livePrice, h.currency)}
-                          </td>
-                          <td className="p-4 text-right font-bold text-slate-950 dark:text-white font-mono">
-                            <div>RM {h.marketValueBase.toFixed(2)}</div>
-                            {h.currency !== 'MYR' && (
-                              <div className="text-[11px] text-slate-600 dark:text-zinc-400 font-normal">
-                                {formatAssetCurrency(h.marketValue, h.currency)} @ {h.currentFxRate.toFixed(4)}
-                              </div>
+                              <div className="text-[11px] text-slate-500 dark:text-zinc-400 font-mono">RM {h.avgBuyPriceBase.toFixed(2)}</div>
                             )}
                           </td>
                           <td className="p-4 text-right text-slate-700 dark:text-zinc-300 font-mono">
-                            <div>RM {h.totalCostBase.toFixed(2)}</div>
+                            <div>RM {(isClosed ? h.totalHistoricalCostBase : h.totalCostBase).toFixed(2)}</div>
                             {h.currency !== 'MYR' && (
                               <div className="text-[11px] text-slate-500 dark:text-zinc-400 font-normal">
-                                {formatAssetCurrency(h.totalCost, h.currency)}
+                                {formatAssetCurrency(isClosed ? h.totalHistoricalCostAsset : h.totalCost, h.currency)}
                               </div>
                             )}
                           </td>
-                          <td className="p-4 text-right">
-                            <div className={`font-bold font-mono ${isProfit ? 'text-emerald-800 dark:text-emerald-400' : 'text-rose-800 dark:text-rose-400'}`}>
-                              {formatPnl(h.pnlBase, 'MYR')}
+                          <td className="p-4 text-right font-medium text-slate-950 dark:text-white font-mono">
+                            {!isClosed && h.livePrice > 0 ? formatAssetCurrency(h.livePrice, h.currency) : '—'}
+                          </td>
+                          <td className="p-4 text-right font-bold text-slate-950 dark:text-white font-mono">
+                            {!isClosed ? (
+                              <>
+                                <div>RM {h.marketValueBase.toFixed(2)}</div>
+                                {h.currency !== 'MYR' && (
+                                  <div className="text-[11px] text-slate-600 dark:text-zinc-400 font-normal">
+                                    {formatAssetCurrency(h.marketValue, h.currency)} @ {h.currentFxRate.toFixed(4)}
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <span className="text-slate-400 font-normal">—</span>
+                            )}
+                          </td>
+                          <td className="p-4 text-right font-mono">
+                            {!isClosed ? (
+                              <>
+                                <div className={`font-bold ${isProfit ? 'text-emerald-800 dark:text-emerald-400' : 'text-rose-800 dark:text-rose-400'}`}>
+                                  {formatPnl(h.pnlBase, 'MYR')}
+                                </div>
+                                <div className={`text-xs ${isProfit ? 'text-emerald-700 dark:text-emerald-500' : 'text-rose-700 dark:text-rose-500'}`}>
+                                  {isProfit ? '+' : ''}{h.returnPercentBase.toFixed(2)}%
+                                </div>
+                                {h.currency !== 'MYR' && (
+                                  <div className="text-[10px] text-slate-500 dark:text-zinc-400">
+                                    {formatPnl(h.pnl, h.currency)}
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <span className="text-slate-400">—</span>
+                            )}
+                          </td>
+                          <td className="p-4 text-right font-mono">
+                            <div className={`font-bold ${
+                              h.realizedPLBase > 0 ? 'text-emerald-800 dark:text-emerald-400' : h.realizedPLBase < 0 ? 'text-rose-800 dark:text-rose-400' : 'text-slate-500'
+                            }`}>
+                              {h.realizedPLBase !== 0 ? formatPnl(h.realizedPLBase, 'MYR') : 'RM 0.00'}
                             </div>
-                            <div className={`text-xs font-mono ${isProfit ? 'text-emerald-700 dark:text-emerald-500' : 'text-rose-700 dark:text-rose-500'}`}>
-                              {isProfit ? '+' : ''}{h.returnPercentBase.toFixed(2)}%
+                            {h.currency !== 'MYR' && h.realizedPL !== 0 && (
+                              <div className="text-[10px] text-slate-500 dark:text-zinc-400">
+                                {formatPnl(h.realizedPL, h.currency)}
+                              </div>
+                            )}
+                            {isClosed && (
+                              <div className={`text-[10px] ${isRealizedProfit ? 'text-emerald-700 dark:text-emerald-500' : 'text-rose-700 dark:text-rose-500'}`}>
+                                {isRealizedProfit ? '+' : ''}{h.realizedReturnPercent.toFixed(1)}% locked
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-4 text-right font-mono">
+                            <div className={`font-bold ${isTotalProfit ? 'text-emerald-800 dark:text-emerald-400' : 'text-rose-800 dark:text-rose-400'}`}>
+                              {formatPnl(h.totalPLBase, 'MYR')}
                             </div>
-                            {h.currency !== 'MYR' && (
-                              <div className="text-[10px] text-slate-500 dark:text-zinc-400 font-mono">
-                                Stock: {formatPnl(h.pnl, h.currency)} ({h.pnl >= 0 ? '+' : ''}{h.returnPercent.toFixed(2)}%)
+                            {h.totalDividendsBase > 0 && (
+                              <div className="text-[10px] text-amber-700 dark:text-amber-400 font-normal">
+                                +RM {h.totalDividendsBase.toFixed(2)} div
                               </div>
                             )}
                           </td>
@@ -1478,41 +1812,51 @@ export default function InvestmentsPage() {
             <>
               {/* Mobile Trades Card View */}
               <div className="md:hidden space-y-2.5">
-                {trades.map((t) => (
-                  <div 
-                    key={t.id} 
-                    onClick={() => setSelectedTrade(t)}
-                    className="p-3.5 rounded-2xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 hover:bg-slate-100 dark:hover:bg-zinc-800/50 hover:border-slate-300 dark:hover:border-zinc-700/80 transition-all cursor-pointer group flex items-center justify-between"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className={`px-2.5 py-1 rounded-xl text-xs font-bold ${
-                        t.action === 'BUY'
-                          ? 'bg-indigo-500/20 text-indigo-800 dark:text-indigo-300'
-                          : t.action === 'SELL'
-                          ? 'bg-rose-500/20 text-rose-800 dark:text-rose-300'
-                          : (t.action === 'REINVEST' || t.isReinvested || t.notes.toLowerCase().includes('reinvest'))
-                          ? 'bg-cyan-500/20 text-cyan-800 dark:text-cyan-300'
-                          : 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300'
-                      }`}>
-                        {t.action === 'REINVEST' || t.isReinvested || t.notes.toLowerCase().includes('reinvest') ? 'REINVEST' : t.action}
-                      </span>
-                      <div>
-                        <div className="font-bold text-sm text-slate-950 dark:text-white group-hover:text-indigo-800 dark:group-hover:text-indigo-300 transition-colors">{t.ticker}</div>
-                        <div className="text-[11px] text-slate-600 dark:text-zinc-400 font-mono">{t.date} • {t.quantity} @ {formatAssetCurrency(t.price, t.currency)}</div>
+                {trades.map((t) => {
+                  const realized = tradeRealizedMap[t.id];
+                  return (
+                    <div 
+                      key={t.id} 
+                      onClick={() => setSelectedTrade(t)}
+                      className="p-3.5 rounded-2xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 hover:bg-slate-100 dark:hover:bg-zinc-800/50 hover:border-slate-300 dark:hover:border-zinc-700/80 transition-all cursor-pointer group flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className={`px-2.5 py-1 rounded-xl text-xs font-bold ${
+                          t.action === 'BUY'
+                            ? 'bg-indigo-500/20 text-indigo-800 dark:text-indigo-300'
+                            : t.action === 'SELL'
+                            ? 'bg-rose-500/20 text-rose-800 dark:text-rose-300'
+                            : (t.action === 'REINVEST' || t.isReinvested || t.notes.toLowerCase().includes('reinvest'))
+                            ? 'bg-cyan-500/20 text-cyan-800 dark:text-cyan-300'
+                            : 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300'
+                        }`}>
+                          {t.action === 'REINVEST' || t.isReinvested || t.notes.toLowerCase().includes('reinvest') ? 'REINVEST' : t.action}
+                        </span>
+                        <div>
+                          <div className="font-bold text-sm text-slate-950 dark:text-white group-hover:text-indigo-800 dark:group-hover:text-indigo-300 transition-colors">{t.ticker}</div>
+                          <div className="text-[11px] text-slate-600 dark:text-zinc-400 font-mono">{t.date} • {t.quantity} @ {formatAssetCurrency(t.price, t.currency)}</div>
+                          {t.action === 'SELL' && realized && (
+                            <div className={`text-[11px] font-bold font-mono mt-0.5 ${
+                              realized.pnlBase >= 0 ? 'text-emerald-800 dark:text-emerald-400' : 'text-rose-800 dark:text-rose-400'
+                            }`}>
+                              Realized: {realized.pnlBase >= 0 ? '+' : ''}RM {realized.pnlBase.toFixed(2)} ({realized.returnPercent >= 0 ? '+' : ''}{realized.returnPercent.toFixed(1)}%)
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 text-right">
+                        <div>
+                          <div className="font-bold text-sm text-slate-950 dark:text-white font-mono">{formatAssetCurrency(t.netTotal, t.currency)}</div>
+                          {t.currency !== 'MYR' && (
+                            <div className="text-[11px] text-indigo-800 dark:text-indigo-300 font-mono">RM {t.costInMyr.toFixed(2)}</div>
+                          )}
+                          {t.notes && <div className="text-[10px] text-slate-500 dark:text-zinc-400 truncate max-w-[100px]">{t.notes}</div>}
+                        </div>
+                        <ChevronRight className="h-4 w-4 text-slate-600 dark:text-zinc-300 group-hover:text-slate-600 dark:group-hover:text-zinc-400 transition-colors shrink-0" />
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 text-right">
-                      <div>
-                        <div className="font-bold text-sm text-slate-950 dark:text-white font-mono">{formatAssetCurrency(t.netTotal, t.currency)}</div>
-                        {t.currency !== 'MYR' && (
-                          <div className="text-[11px] text-indigo-800 dark:text-indigo-300 font-mono">RM {t.costInMyr.toFixed(2)}</div>
-                        )}
-                        {t.notes && <div className="text-[10px] text-slate-500 dark:text-zinc-400 truncate max-w-[100px]">{t.notes}</div>}
-                      </div>
-                      <ChevronRight className="h-4 w-4 text-slate-600 dark:text-zinc-300 group-hover:text-slate-600 dark:group-hover:text-zinc-400 transition-colors shrink-0" />
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Desktop Trades Table */}
@@ -1526,56 +1870,82 @@ export default function InvestmentsPage() {
                       <th className="p-4 text-right">Quantity</th>
                       <th className="p-4 text-right">Price</th>
                       <th className="p-4 text-right">Net Total</th>
-                      <th className="p-4 text-right">Cost (MYR)</th>
+                      <th className="p-4 text-right">Cost / Proceeds (MYR)</th>
+                      <th className="p-4 text-right">Realized P&L</th>
                       <th className="p-4">Notes</th>
                       <th className="p-4" aria-label="Actions" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800/60">
-                    {trades.map((t) => (
-                      <tr 
-                        key={t.id} 
-                        onClick={() => setSelectedTrade(t)}
-                        className="hover:bg-slate-100 dark:hover:bg-zinc-800/40 transition-colors cursor-pointer group"
-                      >
-                        <td className="p-4 text-xs text-slate-600 dark:text-zinc-400">{t.date}</td>
-                        <td className="p-4">
-                          <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
-                            t.action === 'BUY'
-                              ? 'bg-indigo-500/20 text-indigo-800 dark:text-indigo-300'
-                              : t.action === 'SELL'
-                              ? 'bg-rose-500/20 text-rose-800 dark:text-rose-300'
-                              : (t.action === 'REINVEST' || t.isReinvested || t.notes.toLowerCase().includes('reinvest'))
-                              ? 'bg-cyan-500/20 text-cyan-800 dark:text-cyan-300'
-                              : 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300'
-                          }`}>
-                            {t.action === 'REINVEST' || t.isReinvested || t.notes.toLowerCase().includes('reinvest') ? 'REINVEST' : t.action}
-                          </span>
-                        </td>
-                        <td className="p-4 font-bold text-slate-950 dark:text-white">
-                          <span className="group-hover:text-indigo-800 dark:group-hover:text-indigo-300 transition-colors">{t.ticker}</span>
-                          {t.name && <span className="text-xs text-slate-600 dark:text-zinc-400 font-normal ml-2">{t.name}</span>}
-                        </td>
-                        <td className="p-4 text-right text-slate-800 dark:text-zinc-200 font-mono">{t.quantity}</td>
-                        <td className="p-4 text-right text-slate-700 dark:text-zinc-300 font-mono">{formatAssetCurrency(t.price, t.currency)}</td>
-                        <td className="p-4 text-right font-bold text-slate-950 dark:text-white font-mono">{formatAssetCurrency(t.netTotal, t.currency)}</td>
-                        <td className="p-4 text-right font-mono text-slate-700 dark:text-zinc-300">
-                          {t.currency === 'MYR' ? `RM ${t.netTotal.toFixed(2)}` : (
-                            <div>
-                              <div className="text-indigo-800 dark:text-indigo-300 font-semibold">RM {t.costInMyr.toFixed(2)}</div>
-                              <div className="text-[10px] text-slate-500 dark:text-zinc-400 font-normal">Rate: {t.rateToMyr ? t.rateToMyr.toFixed(4) : '—'}</div>
+                    {trades.map((t) => {
+                      const realized = tradeRealizedMap[t.id];
+                      return (
+                        <tr 
+                          key={t.id} 
+                          onClick={() => setSelectedTrade(t)}
+                          className="hover:bg-slate-100 dark:hover:bg-zinc-800/40 transition-colors cursor-pointer group"
+                        >
+                          <td className="p-4 text-xs text-slate-600 dark:text-zinc-400">{t.date}</td>
+                          <td className="p-4">
+                            <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
+                              t.action === 'BUY'
+                                ? 'bg-indigo-500/20 text-indigo-800 dark:text-indigo-300'
+                                : t.action === 'SELL'
+                                ? 'bg-rose-500/20 text-rose-800 dark:text-rose-300'
+                                : (t.action === 'REINVEST' || t.isReinvested || t.notes.toLowerCase().includes('reinvest'))
+                                ? 'bg-cyan-500/20 text-cyan-800 dark:text-cyan-300'
+                                : 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300'
+                            }`}>
+                              {t.action === 'REINVEST' || t.isReinvested || t.notes.toLowerCase().includes('reinvest') ? 'REINVEST' : t.action}
+                            </span>
+                          </td>
+                          <td className="p-4 font-bold text-slate-950 dark:text-white">
+                            <span className="group-hover:text-indigo-800 dark:group-hover:text-indigo-300 transition-colors">{t.ticker}</span>
+                            {t.name && <span className="text-xs text-slate-600 dark:text-zinc-400 font-normal ml-2">{t.name}</span>}
+                          </td>
+                          <td className="p-4 text-right text-slate-800 dark:text-zinc-200 font-mono">{t.quantity}</td>
+                          <td className="p-4 text-right text-slate-700 dark:text-zinc-300 font-mono">{formatAssetCurrency(t.price, t.currency)}</td>
+                          <td className="p-4 text-right font-bold text-slate-950 dark:text-white font-mono">{formatAssetCurrency(t.netTotal, t.currency)}</td>
+                          <td className="p-4 text-right font-mono text-slate-700 dark:text-zinc-300">
+                            {t.currency === 'MYR' ? `RM ${t.netTotal.toFixed(2)}` : (
+                              <div>
+                                <div className="text-indigo-800 dark:text-indigo-300 font-semibold">RM {t.costInMyr.toFixed(2)}</div>
+                                <div className="text-[10px] text-slate-500 dark:text-zinc-400 font-normal">Rate: {t.rateToMyr ? t.rateToMyr.toFixed(4) : '—'}</div>
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-4 text-right font-mono">
+                            {t.action === 'SELL' && realized ? (
+                              <div>
+                                <div className={`font-bold ${
+                                  realized.pnlBase >= 0 ? 'text-emerald-800 dark:text-emerald-400' : 'text-rose-800 dark:text-rose-400'
+                                }`}>
+                                  {realized.pnlBase >= 0 ? '+' : ''}RM {realized.pnlBase.toFixed(2)}
+                                </div>
+                                <div className={`text-[11px] ${
+                                  realized.pnlBase >= 0 ? 'text-emerald-700 dark:text-emerald-500' : 'text-rose-700 dark:text-rose-500'
+                                }`}>
+                                  {realized.returnPercent >= 0 ? '+' : ''}{realized.returnPercent.toFixed(1)}%
+                                </div>
+                              </div>
+                            ) : t.action === 'DIVIDEND' ? (
+                              <div className="text-amber-800 dark:text-amber-400 font-bold">
+                                +RM {convertCurrency(t.netTotal, t.currency, 'MYR').toFixed(2)}
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 text-xs">—</span>
+                            )}
+                          </td>
+                          <td className="p-4 text-xs text-slate-600 dark:text-zinc-400">{t.notes || '—'}</td>
+                          <td className="p-4 text-right">
+                            <div className="flex justify-end gap-1">
+                              <button type="button" title="Edit trade" onClick={(e) => { e.stopPropagation(); openTradeEditor(t); }} className="p-1.5 text-slate-500 dark:text-zinc-400 hover:text-indigo-800 dark:hover:text-indigo-400 cursor-pointer"><Edit2 className="h-4 w-4" /></button>
+                              <button type="button" title="Delete trade" onClick={(e) => { e.stopPropagation(); void handleDeleteTrade(t); }} className="p-1.5 text-slate-500 dark:text-zinc-400 hover:text-rose-800 dark:hover:text-rose-400 cursor-pointer"><Trash2 className="h-4 w-4" /></button>
                             </div>
-                          )}
-                        </td>
-                        <td className="p-4 text-xs text-slate-600 dark:text-zinc-400">{t.notes || '—'}</td>
-                        <td className="p-4 text-right">
-                          <div className="flex justify-end gap-1">
-                            <button type="button" title="Edit trade" onClick={(e) => { e.stopPropagation(); openTradeEditor(t); }} className="p-1.5 text-slate-500 dark:text-zinc-400 hover:text-indigo-800 dark:hover:text-indigo-400 cursor-pointer"><Edit2 className="h-4 w-4" /></button>
-                            <button type="button" title="Delete trade" onClick={(e) => { e.stopPropagation(); void handleDeleteTrade(t); }} className="p-1.5 text-slate-500 dark:text-zinc-400 hover:text-rose-800 dark:hover:text-rose-400 cursor-pointer"><Trash2 className="h-4 w-4" /></button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -2147,6 +2517,33 @@ export default function InvestmentsPage() {
                 <p className="text-xs text-slate-600 dark:text-zinc-400 mt-1 font-medium">{selectedTrade.date}</p>
               </div>
 
+              {/* Realized P&L Info for SELL Trades */}
+              {selectedTrade.action === 'SELL' && tradeRealizedMap[selectedTrade.id] && (
+                <div className="p-3.5 rounded-2xl bg-slate-100 dark:bg-zinc-800/90 border border-slate-200 dark:border-zinc-700/80 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-slate-700 dark:text-zinc-300">Realized Profit / Loss</span>
+                    <span className={`font-bold font-mono text-sm ${
+                      tradeRealizedMap[selectedTrade.id].pnlBase >= 0 ? 'text-emerald-800 dark:text-emerald-400' : 'text-rose-800 dark:text-rose-400'
+                    }`}>
+                      {tradeRealizedMap[selectedTrade.id].pnlBase >= 0 ? '+' : ''}RM {tradeRealizedMap[selectedTrade.id].pnlBase.toFixed(2)} ({tradeRealizedMap[selectedTrade.id].returnPercent >= 0 ? '+' : ''}{tradeRealizedMap[selectedTrade.id].returnPercent.toFixed(2)}%)
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600 dark:text-zinc-400 border-t border-slate-200 dark:border-zinc-700/60 pt-1.5">
+                    <div>
+                      <span>Sold Cost Basis:</span>
+                      <span className="font-mono font-medium block text-slate-800 dark:text-zinc-200">RM {tradeRealizedMap[selectedTrade.id].costSoldBase.toFixed(2)}</span>
+                    </div>
+                    <div className="text-right">
+                      <span>Net Proceeds:</span>
+                      <span className="font-mono font-medium block text-slate-800 dark:text-zinc-200">RM {selectedTrade.costInMyr.toFixed(2)}</span>
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-slate-500 dark:text-zinc-400 italic pt-1 border-t border-slate-200 dark:border-zinc-700/50">
+                    💡 Stock sale proceeds are capital returns (not earned income). Only realized capital gains/losses are recorded.
+                  </p>
+                </div>
+              )}
+
               {/* Details List */}
               <div className="space-y-3 rounded-2xl bg-white/90 dark:bg-zinc-900/40 border border-slate-200 dark:border-zinc-800/80 p-4 text-xs">
                 <div>
@@ -2185,7 +2582,7 @@ export default function InvestmentsPage() {
                       <span className="font-semibold text-slate-800 dark:text-zinc-200 font-mono">1 {selectedTrade.currency} = RM {selectedTrade.rateToMyr.toFixed(4)}</span>
                     </div>
                     <div>
-                      <span className="text-slate-500 dark:text-zinc-400 block mb-0.5 font-medium">Total Cost (MYR)</span>
+                      <span className="text-slate-500 dark:text-zinc-400 block mb-0.5 font-medium">Total Cost / Value (MYR)</span>
                       <span className="font-semibold text-indigo-800 dark:text-indigo-400 font-mono">RM {selectedTrade.costInMyr.toFixed(2)}</span>
                     </div>
                   </div>
@@ -2244,30 +2641,47 @@ export default function InvestmentsPage() {
           <CockpitModalHeader
             title={selectedHolding.ticker}
             titleId="investment-holding-details-title"
-            description={`${selectedHolding.name || selectedHolding.ticker} · ${selectedHolding.type}`}
-            descriptionId="investment-holding-details-description"
+            description={`${selectedHolding.name || selectedHolding.ticker} · ${selectedHolding.type} · ${selectedHolding.units > 0 ? 'Active Position' : 'Closed Position'}`}
             icon={<Activity size={20} />}
             onClose={() => setSelectedHolding(null)}
             closeLabel="Close holding details"
           />
 
-              {/* Market Value Display */}
+              {/* Market Value Display or Realized Return */}
               <div className="text-center py-2">
-                <div className="text-3xl sm:text-4xl font-black font-mono tracking-tight text-slate-950 dark:text-white">
-                  RM {selectedHolding.marketValueBase.toFixed(2)}
-                </div>
-                {selectedHolding.currency !== 'MYR' && (
-                  <p className="text-xs text-slate-600 dark:text-zinc-400 font-mono mt-1">
-                    {formatAssetCurrency(selectedHolding.marketValue, selectedHolding.currency)} (@ {selectedHolding.currentFxRate.toFixed(4)})
-                  </p>
+                {selectedHolding.units > 0 ? (
+                  <>
+                    <div className="text-3xl sm:text-4xl font-black font-mono tracking-tight text-slate-950 dark:text-white">
+                      RM {selectedHolding.marketValueBase.toFixed(2)}
+                    </div>
+                    {selectedHolding.currency !== 'MYR' && (
+                      <p className="text-xs text-slate-600 dark:text-zinc-400 font-mono mt-1">
+                        {formatAssetCurrency(selectedHolding.marketValue, selectedHolding.currency)} (@ {selectedHolding.currentFxRate.toFixed(4)})
+                      </p>
+                    )}
+                    <div className={`inline-flex items-center gap-1.5 mt-2 px-3 py-1 rounded-full text-xs font-bold font-mono border ${
+                      selectedHolding.pnlBase >= 0
+                        ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-400 border-emerald-500/30'
+                        : 'bg-rose-500/15 text-rose-800 dark:text-rose-400 border-rose-500/30'
+                    }`}>
+                      Unrealized: {formatPnl(selectedHolding.pnlBase, 'MYR')} ({selectedHolding.pnlBase >= 0 ? '+' : ''}{selectedHolding.returnPercentBase.toFixed(2)}%)
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="text-xs uppercase font-semibold text-slate-500 dark:text-zinc-400 tracking-wider">
+                      Position Closed • Locked Realized Return
+                    </div>
+                    <div className={`text-3xl sm:text-4xl font-black font-mono tracking-tight mt-1 ${
+                      selectedHolding.realizedPLBase >= 0 ? 'text-emerald-800 dark:text-emerald-400' : 'text-rose-800 dark:text-rose-400'
+                    }`}>
+                      {formatPnl(selectedHolding.realizedPLBase, 'MYR')}
+                    </div>
+                    <div className="text-xs font-mono text-slate-600 dark:text-zinc-400 mt-1">
+                      {selectedHolding.realizedReturnPercent >= 0 ? '+' : ''}{selectedHolding.realizedReturnPercent.toFixed(2)}% on historical capital
+                    </div>
+                  </>
                 )}
-                <div className={`inline-flex items-center gap-1.5 mt-2 px-3 py-1 rounded-full text-xs font-bold font-mono border ${
-                  selectedHolding.pnlBase >= 0
-                    ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-400 border-emerald-500/30'
-                    : 'bg-rose-500/15 text-rose-800 dark:text-rose-400 border-rose-500/30'
-                }`}>
-                  {formatPnl(selectedHolding.pnlBase, 'MYR')} ({selectedHolding.pnlBase >= 0 ? '+' : ''}{selectedHolding.returnPercentBase.toFixed(2)}%)
-                </div>
               </div>
 
               {/* Details List */}
@@ -2282,32 +2696,62 @@ export default function InvestmentsPage() {
                 <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-200 dark:border-zinc-800/60">
                   <div>
                     <span className="text-slate-500 dark:text-zinc-400 block mb-0.5 font-medium">Units Held</span>
-                    <span className="font-semibold text-slate-800 dark:text-zinc-200 font-mono">{selectedHolding.units.toLocaleString()}</span>
+                    <span className="font-semibold text-slate-800 dark:text-zinc-200 font-mono">{selectedHolding.units.toLocaleString()} shares</span>
                   </div>
                   <div>
                     <span className="text-slate-500 dark:text-zinc-400 block mb-0.5 font-medium">Live Market Price</span>
-                    <span className="font-semibold text-slate-950 dark:text-white font-mono">{formatAssetCurrency(selectedHolding.livePrice, selectedHolding.currency)}</span>
+                    <span className="font-semibold text-slate-950 dark:text-white font-mono">
+                      {selectedHolding.units > 0 && selectedHolding.livePrice > 0 ? formatAssetCurrency(selectedHolding.livePrice, selectedHolding.currency) : '—'}
+                    </span>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-200 dark:border-zinc-800/60">
                   <div>
-                    <span className="text-slate-500 dark:text-zinc-400 block mb-0.5 font-medium">Average Cost</span>
-                    <span className="font-semibold text-slate-700 dark:text-zinc-300 font-mono">{formatAssetCurrency(selectedHolding.avgCost, selectedHolding.currency)}</span>
+                    <span className="text-slate-500 dark:text-zinc-400 block mb-0.5 font-medium">Average Buy Price</span>
+                    <span className="font-semibold text-slate-700 dark:text-zinc-300 font-mono">
+                      {formatAssetCurrency(selectedHolding.avgBuyPrice || selectedHolding.avgCost, selectedHolding.currency)}
+                    </span>
                     {selectedHolding.currency !== 'MYR' && (
-                      <span className="text-[10px] text-slate-500 dark:text-zinc-400 block font-mono">RM {selectedHolding.avgCostBase.toFixed(2)}</span>
+                      <span className="text-[10px] text-slate-500 dark:text-zinc-400 block font-mono">RM {(selectedHolding.avgBuyPriceBase || selectedHolding.avgCostBase).toFixed(2)}</span>
                     )}
                   </div>
                   <div>
-                    <span className="text-slate-500 dark:text-zinc-400 block mb-0.5 font-medium">Total Cost Basis</span>
-                    <span className="font-semibold text-slate-700 dark:text-zinc-300 font-mono">RM {selectedHolding.totalCostBase.toFixed(2)}</span>
+                    <span className="text-slate-500 dark:text-zinc-400 block mb-0.5 font-medium">
+                      {selectedHolding.units > 0 ? 'Active Capital Deployed' : 'Historical Cost Basis'}
+                    </span>
+                    <span className="font-semibold text-slate-700 dark:text-zinc-300 font-mono">
+                      RM {(selectedHolding.units > 0 ? selectedHolding.totalCostBase : selectedHolding.totalHistoricalCostBase).toFixed(2)}
+                    </span>
+                    {selectedHolding.currency !== 'MYR' && (
+                      <span className="text-[10px] text-slate-500 dark:text-zinc-400 block font-mono">
+                        {formatAssetCurrency(selectedHolding.units > 0 ? selectedHolding.totalCost : selectedHolding.totalHistoricalCostAsset, selectedHolding.currency)}
+                      </span>
+                    )}
                   </div>
                 </div>
 
-                {selectedHolding.currency !== 'MYR' && (
+                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-200 dark:border-zinc-800/60">
+                  <div>
+                    <span className="text-slate-500 dark:text-zinc-400 block mb-0.5 font-medium">Realized Gain/Loss</span>
+                    <span className={`font-semibold font-mono ${
+                      selectedHolding.realizedPLBase > 0 ? 'text-emerald-800 dark:text-emerald-400' : selectedHolding.realizedPLBase < 0 ? 'text-rose-800 dark:text-rose-400' : 'text-slate-600 dark:text-zinc-400'
+                    }`}>
+                      {selectedHolding.realizedPLBase !== 0 ? formatPnl(selectedHolding.realizedPLBase, 'MYR') : 'RM 0.00'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 dark:text-zinc-400 block mb-0.5 font-medium">Dividends Received</span>
+                    <span className="font-semibold text-amber-800 dark:text-amber-400 font-mono">
+                      +RM {(selectedHolding.totalDividendsBase || 0).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+
+                {selectedHolding.units > 0 && selectedHolding.currency !== 'MYR' && (
                   <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-200 dark:border-zinc-800/60">
                     <div>
-                      <span className="text-slate-500 dark:text-zinc-400 block mb-0.5 font-medium">Asset Return</span>
+                      <span className="text-slate-500 dark:text-zinc-400 block mb-0.5 font-medium">Asset Return (Native)</span>
                       <span className={`font-semibold font-mono ${selectedHolding.pnl >= 0 ? 'text-emerald-800 dark:text-emerald-400' : 'text-rose-800 dark:text-rose-400'}`}>
                         {formatPnl(selectedHolding.pnl, selectedHolding.currency)} ({selectedHolding.pnl >= 0 ? '+' : ''}{selectedHolding.returnPercent.toFixed(2)}%)
                       </span>
@@ -2339,6 +2783,7 @@ export default function InvestmentsPage() {
                   </button>
                   <button
                     type="button"
+                    disabled={selectedHolding.units <= 0}
                     onClick={() => {
                       const h = selectedHolding;
                       setSelectedHolding(null);
@@ -2346,7 +2791,7 @@ export default function InvestmentsPage() {
                       selectHoldingForTrade(h, 'SELL');
                       setIsAddTradeOpen(true);
                     }}
-                    className="py-2.5 px-4 rounded-2xl border border-rose-500/35 bg-rose-500/10 hover:bg-rose-500/20 active:scale-[0.98] text-rose-800 dark:text-rose-300 font-semibold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    className="py-2.5 px-4 rounded-2xl border border-rose-500/35 bg-rose-500/10 hover:bg-rose-500/20 active:scale-[0.98] text-rose-800 dark:text-rose-300 font-semibold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <ArrowDownRight className="h-4 w-4" />
                     <span>Sell {selectedHolding.ticker}</span>

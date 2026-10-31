@@ -253,7 +253,12 @@ export default function AnalyticsPage() {
       }
       monthMap[mKey].count += 1;
       const baseAmount = getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount);
-      if (t.type === 'income') monthMap[mKey].income += baseAmount;
+      const isTrade = String(t.id || '').startsWith('tx_trade_') ||
+        t.category === 'Stocks & Crypto' ||
+        t.subCategory?.toUpperCase() === 'SELL' ||
+        t.subCategory?.toUpperCase() === 'BUY' ||
+        /^(SELL|BUY)\s+[0-9]/i.test(t.description || '');
+      if (t.type === 'income' && !isTrade) monthMap[mKey].income += baseAmount;
       if (t.type === 'expense') monthMap[mKey].expense += baseAmount;
     });
 

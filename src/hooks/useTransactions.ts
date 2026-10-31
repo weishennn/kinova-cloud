@@ -41,12 +41,35 @@ export function normalizeTransaction(raw: Record<string, unknown>): Transaction 
   const amountVal = raw.Amount !== undefined ? raw.Amount : raw.amount;
   const numAmount = parseCurrencyAmount(amountVal);
   
-  const rawType = String(raw.Type || raw.type || 'expense').toLowerCase();
-  const type: 'income' | 'expense' | 'investment' = 
-    rawType === 'income' ? 'income' : rawType === 'investment' ? 'investment' : 'expense';
-
+  const rawId = String(raw.Id || raw.id || '');
   const category = String(raw.Category || raw.category || 'Other');
+  const rawSubCategory = String(raw.SubCategory || raw.subCategory || '').trim();
   const description = String(raw.Description || raw.description || raw.title || category);
+
+  // Stock trading check:
+  // Selling stocks is capital return from investments, NOT earned income.
+  // Buying stocks is investment capital outflow.
+  // Neither should be categorized as regular living income or living expense.
+  const isStockTrade = rawId.startsWith('tx_trade_') ||
+    category === 'Stocks & Crypto' ||
+    rawSubCategory.toUpperCase() === 'SELL' ||
+    rawSubCategory.toUpperCase() === 'BUY' ||
+    /^(SELL|BUY)\s+[0-9]/i.test(description);
+
+  const rawType = String(raw.Type || raw.type || 'expense').toLowerCase();
+  let type: 'income' | 'expense' | 'investment';
+  if (isStockTrade) {
+    type = 'investment';
+  } else {
+    type = rawType === 'income' ? 'income' : rawType === 'investment' ? 'investment' : 'expense';
+  }
+
+  let subCategory = rawSubCategory;
+  if (isStockTrade && !subCategory) {
+    if (/^SELL\b/i.test(description)) subCategory = 'SELL';
+    else if (/^BUY\b/i.test(description)) subCategory = 'BUY';
+  }
+
   const trip = String(raw.TripTag || raw.tripTag || raw.tripId || '');
   const rawBaseAmount = raw.BaseAmount !== undefined ? raw.BaseAmount : raw.baseAmount !== undefined ? raw.baseAmount : raw.base_amount;
   const parsedBaseAmount = rawBaseAmount === undefined || rawBaseAmount === null || rawBaseAmount === ''
@@ -57,12 +80,12 @@ export function normalizeTransaction(raw: Record<string, unknown>): Transaction 
   const storedReceiptItems = parseReceiptItemsFromNotes(notes);
 
   return {
-    id: String(raw.Id || raw.id || `tx_${Math.random().toString(36).substring(2, 9)}`),
+    id: rawId || `tx_${Math.random().toString(36).substring(2, 9)}`,
     date: String(raw.Date || raw.date || ''),
     amount: Math.abs(numAmount),
     type: type,
     category: category,
-    subCategory: String(raw.SubCategory || raw.subCategory || ''),
+    subCategory: subCategory,
     description: description,
     account: String(raw.PaymentMethod || raw.paymentMethod || raw.account || ''),
     currency: String(raw.Currency || raw.currency || 'MYR'),

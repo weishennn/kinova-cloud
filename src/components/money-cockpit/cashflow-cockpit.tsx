@@ -81,7 +81,11 @@ function categoryIcon(category: string) {
 
 function signedAmount(transaction: Transaction, formatMoney: (amount: number) => string) {
   const amount = getAmountInBaseCurrency(transaction.amount, transaction.currency, transaction.baseAmount);
-  const sign = transaction.type === 'income' ? '+' : '−';
+  const isSell = transaction.type === 'investment' && (
+    transaction.subCategory?.toUpperCase() === 'SELL' ||
+    /^(SELL)\b/i.test(transaction.description || '')
+  );
+  const sign = transaction.type === 'income' || isSell ? '+' : '−';
   return `${sign}${formatMoney(amount)}`;
 }
 
@@ -214,9 +218,28 @@ export function CashflowCockpit() {
 
   const totals = useMemo(() => visibleTransactions.reduce((result, transaction) => {
     const amount = getAmountInBaseCurrency(transaction.amount, transaction.currency, transaction.baseAmount);
-    if (transaction.type === 'income') result.income += amount;
-    if (transaction.type === 'expense') result.spending += amount;
-    if (transaction.type === 'investment') result.invested += amount;
+    const isTrade = String(transaction.id || '').startsWith('tx_trade_') ||
+      transaction.category === 'Stocks & Crypto' ||
+      transaction.subCategory?.toUpperCase() === 'SELL' ||
+      transaction.subCategory?.toUpperCase() === 'BUY' ||
+      /^(SELL|BUY)\s+[0-9]/i.test(transaction.description || '');
+
+    if (transaction.type === 'income') {
+      if (!isTrade) {
+        result.income += amount;
+      }
+    } else if (transaction.type === 'expense') {
+      result.spending += amount;
+    } else if (transaction.type === 'investment' || isTrade) {
+      const isSell = transaction.subCategory?.toUpperCase() === 'SELL' ||
+        /^(SELL)\b/i.test(transaction.description || '');
+      if (isSell) {
+        // Stock sale proceeds return capital from investment to liquid cash
+        result.invested -= amount;
+      } else {
+        result.invested += amount;
+      }
+    }
     return result;
   }, { income: 0, spending: 0, invested: 0 }), [visibleTransactions]);
 

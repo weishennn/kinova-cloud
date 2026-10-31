@@ -18,16 +18,33 @@ export interface Investment {
 }
 
 export interface InvestmentHolding {
+  ticker: string;
   name: string;
-  type: InvestmentType;
-  totalQuantity: number;
+  type: InvestmentType | string;
+  currency: string;
+  units: number;
   avgBuyPrice: number;
+  avgBuyPriceBase: number;
+  totalCost: number; // cost basis in original currency (e.g. USD)
+  totalCostBase: number; // cost basis in MYR (what user actually paid)
   currentPrice: number;
-  totalInvested: number;
-  currentValue: number;
+  marketValue: number;
+  marketValueBase: number;
   unrealizedPL: number;
+  unrealizedPLBase: number;
   unrealizedPLPercent: number;
-  realizedPL: number;
+  realizedPL: number; // cumulative realized gain/loss in original currency
+  realizedPLBase: number; // cumulative realized gain/loss in MYR
+  totalPLBase: number; // unrealizedPLBase + realizedPLBase
+  totalDividends?: number;
+  totalDividendsBase?: number;
+  currentFxRate: number;
+  status: 'active' | 'closed';
+  closedTradesCount?: number;
+  totalHistoricalCostAsset?: number;
+  totalHistoricalCostBase?: number;
+  totalHistoricalProceedsAsset?: number;
+  totalHistoricalProceedsBase?: number;
 }
 
 export interface PortfolioSummary {

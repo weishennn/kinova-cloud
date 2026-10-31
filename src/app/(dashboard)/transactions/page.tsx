@@ -235,7 +235,12 @@ export default function TransactionsPage() {
     let expense = 0;
     filteredTransactions.forEach(t => {
       const baseAmount = getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount);
-      if (t.type === 'income') income += baseAmount;
+      const isTrade = String(t.id || '').startsWith('tx_trade_') ||
+        t.category === 'Stocks & Crypto' ||
+        t.subCategory?.toUpperCase() === 'SELL' ||
+        t.subCategory?.toUpperCase() === 'BUY' ||
+        /^(SELL|BUY)\s+[0-9]/i.test(t.description || '');
+      if (t.type === 'income' && !isTrade) income += baseAmount;
       if (t.type === 'expense') expense += baseAmount;
     });
     return {
@@ -304,6 +309,7 @@ export default function TransactionsPage() {
   const renderTransactionCard = (t: Transaction, keyId: string | number, isGrouped: boolean = true) => {
     const isIncome = t.type === 'income';
     const isInvestment = t.type === 'investment';
+    const isSell = isInvestment && (t.subCategory?.toUpperCase() === 'SELL' || /^(SELL)\b/i.test(t.description || ''));
     const isTrixpense = String(t.id || '').startsWith('trixpense_');
     const isInst = Boolean(t.description?.includes('(Installment') || t.notes?.includes('[Installment Plan'));
     const instMatch = t.description?.match(/Installment\s*(\d+\/\d+)/i) || t.notes?.match(/Installment\s*Plan\s*(\d+\/\d+)/i);
@@ -328,7 +334,7 @@ export default function TransactionsPage() {
         transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
         onClick={() => setSelectedTx(t)}
         className={`flex cursor-pointer items-center justify-between p-3.5 sm:p-4 rounded-2xl border transition-all group shadow-sm hover:shadow-md focus-visible:ring-2 focus-visible:ring-indigo-400 ${
-          isIncome
+          isIncome || isSell
             ? 'border-slate-200 dark:border-white/[0.06] bg-white/90 dark:bg-zinc-900/60 hover:bg-slate-100 dark:hover:bg-zinc-800/80 hover:border-emerald-500/40'
             : isInvestment
             ? 'border-slate-200 dark:border-white/[0.06] bg-white/90 dark:bg-zinc-900/60 hover:bg-slate-100 dark:hover:bg-zinc-800/80 hover:border-indigo-500/40'
@@ -340,7 +346,7 @@ export default function TransactionsPage() {
         {/* Left: Icon */}
         <div className="flex items-center gap-3.5 min-w-0 flex-1">
           <div className={`flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-2xl border ${
-            isIncome
+            isIncome || isSell
               ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-400 border-emerald-500/25 shadow-[0_0_12px_rgba(16,185,129,0.15)]'
               : isInvestment
               ? 'bg-indigo-500/15 text-indigo-800 dark:text-indigo-400 border-indigo-500/25 shadow-[0_0_12px_rgba(99,102,241,0.15)]'
@@ -348,7 +354,7 @@ export default function TransactionsPage() {
               ? 'bg-purple-500/15 text-violet-800 dark:text-purple-400 border-purple-500/25 shadow-[0_0_12px_rgba(168,85,247,0.15)]'
               : 'bg-rose-500/15 text-rose-800 dark:text-rose-400 border-rose-500/25 shadow-[0_0_12px_rgba(244,63,94,0.15)]'
           }`}>
-            {isIncome ? <ArrowDownRight className="h-5 w-5" /> : isInvestment ? <TrendingUp className="h-5 w-5" /> : isInst ? <CreditCard className="h-5 w-5" /> : <ArrowUpRight className="h-5 w-5" />}
+            {isIncome || isSell ? <ArrowDownRight className="h-5 w-5" /> : isInvestment ? <TrendingUp className="h-5 w-5" /> : isInst ? <CreditCard className="h-5 w-5" /> : <ArrowUpRight className="h-5 w-5" />}
           </div>
 
           {/* Middle: Details */}
@@ -428,9 +434,9 @@ export default function TransactionsPage() {
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <div className="text-right">
             <div className={`text-sm sm:text-base font-bold font-mono tabular-nums tracking-tight ${
-              isIncome ? 'text-emerald-800 dark:text-emerald-400' : isInvestment ? 'text-indigo-800 dark:text-indigo-400' : isInst ? 'text-violet-800 dark:text-purple-300' : 'text-slate-900 dark:text-zinc-100'
+              isIncome || isSell ? 'text-emerald-800 dark:text-emerald-400' : isInvestment ? 'text-indigo-800 dark:text-indigo-400' : isInst ? 'text-violet-800 dark:text-purple-300' : 'text-slate-900 dark:text-zinc-100'
             }`}>
-              {isIncome ? '+' : '-'}{t.currency === 'USD' ? '$' : t.currency === 'CNY' ? '¥' : t.currency === 'SGD' ? 'S$' : (t.currency || 'MYR') + ' '}{t.amount.toFixed(2)}
+              {isIncome || isSell ? '+' : '-'}{t.currency === 'USD' ? '$' : t.currency === 'CNY' ? '¥' : t.currency === 'SGD' ? 'S$' : (t.currency || 'MYR') + ' '}{t.amount.toFixed(2)}
             </div>
             {t.currency && t.currency !== 'MYR' && (
               <div className="text-[10px] text-slate-600 dark:text-zinc-400 font-mono mt-0.5">

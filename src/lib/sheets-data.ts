@@ -114,7 +114,7 @@ function buildTradeFlowRow(trade: SheetRow): SheetRow | null {
   return {
     Id: `tx_trade_${id.replace(/[^A-Za-z0-9_-]/g, '_')}`,
     Date: date,
-    Type: action === 'SELL' ? 'Income' : 'Investment',
+    Type: 'Investment',
     Category: 'Stocks & Crypto',
     SubCategory: action,
     Description: `${action} ${quantity} ${ticker} @ ${price} ${currency}`,
