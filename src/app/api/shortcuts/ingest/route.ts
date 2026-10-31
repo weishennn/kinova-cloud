@@ -391,7 +391,7 @@ Return JSON shape:
       prompt,
       mimeType,
       cleanBase64,
-      timeoutMs: 18000,
+      timeoutMs: 30000,
     });
 
     const ocrSummary =

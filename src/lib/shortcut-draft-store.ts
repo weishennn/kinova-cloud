@@ -854,7 +854,7 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
   modelUsed: string | null;
 }> {
   const fetchFn = options.fetchImpl || fetch;
-  const timeoutMs = options.timeoutMs ?? 18000;
+  const timeoutMs = options.timeoutMs ?? 30000;
   const splitKeys = (raw?: string) =>
     raw
       ? String(raw)
@@ -892,6 +892,30 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
       const activeKey = effectiveKeys[keyIdx];
       attempts += 1;
       try {
+        const buildOcrBody = (omitThinking = false) => {
+          const generationConfig: Record<string, unknown> = {
+            responseMimeType: 'application/json',
+            temperature: 0.1,
+            maxOutputTokens: 2048,
+          };
+          if (!omitThinking) {
+            // Strictly disable thinking tokens to ensure sub-5s response time for iOS Shortcuts OCR
+            generationConfig.thinkingConfig = { thinkingBudget: 0 };
+          }
+          return {
+            contents: [
+              {
+                role: 'user',
+                parts: [
+                  { text: options.prompt },
+                  { inline_data: { mime_type: options.mimeType, data: options.cleanBase64 } },
+                ],
+              },
+            ],
+            generationConfig,
+          };
+        };
+
         let geminiRes = await fetchFn(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
           {
@@ -900,25 +924,34 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
               'Content-Type': 'application/json',
               'x-goog-api-key': activeKey,
             },
-            body: JSON.stringify({
-              contents: [
-                {
-                  role: 'user',
-                  parts: [
-                    { text: options.prompt },
-                    { inline_data: { mime_type: options.mimeType, data: options.cleanBase64 } },
-                  ],
-                },
-              ],
-              generationConfig: {
-                responseMimeType: 'application/json',
-                temperature: 0.1,
-                maxOutputTokens: 2048,
-              },
-            }),
+            body: JSON.stringify(buildOcrBody()),
             signal: AbortSignal.timeout(timeoutMs),
           }
         );
+
+        // Fallback retry if model does not accept thinkingConfig
+        if (geminiRes.status === 400) {
+          try {
+            const errClone = await geminiRes.clone().json();
+            const errMsg = String(errClone?.error?.message || '').toLowerCase();
+            if (errMsg.includes('thinkingconfig') || errMsg.includes('thinkingbudget') || errMsg.includes('thinkinglevel')) {
+              geminiRes = await fetchFn(
+                `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+                {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'x-goog-api-key': activeKey,
+                  },
+                  body: JSON.stringify(buildOcrBody(true)),
+                  signal: AbortSignal.timeout(timeoutMs),
+                }
+              );
+            }
+          } catch {
+            // ignore parse errors
+          }
+        }
 
         // Transient 503 / 500 handling: 1 quick retry with backoff if server is temporarily overloaded
         if ((geminiRes.status === 503 || geminiRes.status === 500) && !options.fetchImpl && timeoutMs > 5000) {
@@ -932,22 +965,7 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
                   'Content-Type': 'application/json',
                   'x-goog-api-key': activeKey,
                 },
-                body: JSON.stringify({
-                  contents: [
-                    {
-                      role: 'user',
-                      parts: [
-                        { text: options.prompt },
-                        { inline_data: { mime_type: options.mimeType, data: options.cleanBase64 } },
-                      ],
-                    },
-                  ],
-                  generationConfig: {
-                    responseMimeType: 'application/json',
-                    temperature: 0.1,
-                    maxOutputTokens: 2048,
-                  },
-                }),
+                body: JSON.stringify(buildOcrBody()),
                 signal: AbortSignal.timeout(timeoutMs),
               }
             );
@@ -958,8 +976,11 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
 
         if (geminiRes.ok) {
           const geminiData = await geminiRes.json();
-          const rawText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-          const cleaned = String(rawText).replace(/```(?:json)?\s*([\s\S]*?)\s*```/, '$1').trim();
+          const parts = geminiData?.candidates?.[0]?.content?.parts;
+          const rawText = Array.isArray(parts)
+            ? parts.filter((p) => p && typeof p.text === 'string' && !p.thought).map((p) => p.text).join('')
+            : (typeof parts?.[0]?.text === 'string' ? parts[0].text : '');
+          const cleaned = String(rawText).replace(/```(?:json)?\s*([\s\S]*?)\s*```/i, '$1').trim();
           if (!cleaned) {
             ocrFallbackNotice = '云端 AI 未返回有效识别内容，请直接手动补充金额与商户';
             break;
