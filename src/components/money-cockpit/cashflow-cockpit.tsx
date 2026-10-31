@@ -316,7 +316,13 @@ export function CashflowCockpit() {
 
   const changePeriod = (direction: -1 | 1) => {
     if (selectedMonth === 'all') {
-      setSelectedMonth(currentMonth);
+      if (direction === -1) {
+        const [year, month] = currentMonth.split('-').map(Number);
+        const prev = new Date(year, month - 2, 1);
+        setSelectedMonth(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`);
+      } else {
+        setSelectedMonth(currentMonth);
+      }
       return;
     }
     if (selectedMonth.startsWith('year-')) {
@@ -420,21 +426,6 @@ export function CashflowCockpit() {
           <button type="button" className={periodKind === 'all' ? 'is-active' : ''} aria-pressed={periodKind === 'all'} onClick={() => setSelectedMonth('all')}>All time</button>
         </div>
         <div className="cockpit-period-select-wrap">
-          {selectedMonth !== currentMonth && (
-            <button
-              type="button"
-              onClick={() => setSelectedMonth(currentMonth)}
-              className="cockpit-current-jump-btn"
-              title={`Jump back to current month (${monthName(currentMonth)})`}
-              aria-label={`Jump back to current month (${monthName(currentMonth)})`}
-            >
-              <RotateCcw size={13} className="cockpit-current-jump-icon" />
-              <span className="cockpit-current-jump-text">
-                <span className="hidden sm:inline">{currentMonthShort} (Current)</span>
-                <span className="sm:hidden">{currentMonthShort}</span>
-              </span>
-            </button>
-          )}
           <button type="button" className="cockpit-period-arrow" aria-label="Previous period" onClick={() => changePeriod(-1)}><ArrowLeft size={15} /></button>
           <label className="cockpit-period-select-label" htmlFor="cockpit-period"><CalendarDays size={14} />
             <select id="cockpit-period" value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)}>
@@ -463,6 +454,21 @@ export function CashflowCockpit() {
             <ChevronDown size={14} className="cockpit-period-chevron" />
           </label>
           <button type="button" className="cockpit-period-arrow" aria-label="Next period" onClick={() => changePeriod(1)}><ArrowRight size={15} /></button>
+          {selectedMonth !== currentMonth && (
+            <button
+              type="button"
+              onClick={() => setSelectedMonth(currentMonth)}
+              className="cockpit-current-jump-btn"
+              title={`Jump back to current month (${monthName(currentMonth)})`}
+              aria-label={`Jump back to current month (${monthName(currentMonth)})`}
+            >
+              <RotateCcw size={13} className="cockpit-current-jump-icon" />
+              <span className="cockpit-current-jump-text">
+                <span className="hidden sm:inline">{currentMonthShort} (Current)</span>
+                <span className="sm:hidden">{currentMonthShort}</span>
+              </span>
+            </button>
+          )}
         </div>
       </div>
 

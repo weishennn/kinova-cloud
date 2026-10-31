@@ -294,7 +294,13 @@ export default function TransactionsPage() {
 
   const changePeriod = (direction: -1 | 1) => {
     if (!selectedMonth || selectedMonth === 'all') {
-      setSelectedMonth(currentMonthStr);
+      if (direction === -1) {
+        const [y, m] = currentMonthStr.split('-').map(Number);
+        const prev = new Date(y, m - 2, 1);
+        setSelectedMonth(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`);
+      } else {
+        setSelectedMonth(currentMonthStr);
+      }
       return;
     }
     if (selectedMonth.startsWith('year-')) {

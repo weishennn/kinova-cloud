@@ -11,7 +11,7 @@ import { CockpitModal, CockpitModalHeader } from '@/components/money-cockpit/coc
 const secondaryLinks = [
   { label: 'Budget', href: '/budget', icon: Wallet },
   { label: 'Invoices & tax', href: '/invoices', icon: Receipt },
-  { label: 'Investments', href: '/investments', icon: TrendingUp },
+  { label: 'Insights & Analytics', href: '/analytics', icon: PieChart },
   { label: 'Trips', href: '/trips', icon: Plane },
   { label: 'What Kinova knows', href: '/settings#kinova-knows', icon: Sparkles },
   { label: 'Settings', href: '/settings', icon: Settings },
@@ -155,8 +155,8 @@ export function FloatingDock() {
         >
           <Plus size={21} aria-hidden="true" /><span className="cockpit-dock-add-label">{isInvestmentRoute ? 'Trade' : 'Add'}</span>
         </button>
-        <Link href="/analytics" onClick={() => { setMenuOpen(false); setInvestmentTradeMenuOpen(false); }} aria-current={pathname === '/analytics' ? 'page' : undefined} className={`cockpit-dock-link ${pathname === '/analytics' ? 'is-active' : ''}`}>
-          <PieChart size={19} aria-hidden="true" /><span>Insights</span>
+        <Link href="/investments" onClick={() => { setMenuOpen(false); setInvestmentTradeMenuOpen(false); }} aria-current={pathname === '/investments' ? 'page' : undefined} className={`cockpit-dock-link ${pathname === '/investments' ? 'is-active' : ''}`}>
+          <TrendingUp size={19} aria-hidden="true" /><span>Investments</span>
         </Link>
         <button ref={moreActionRef} type="button" className={`cockpit-dock-link ${menuOpen || isMoreRoute ? 'is-active' : ''}`} onClick={() => { setInvestmentTradeMenuOpen(false); setMenuOpen((open) => !open); }} aria-label="More destinations" aria-current={isMoreRoute ? 'page' : undefined} aria-expanded={menuOpen} aria-controls="cockpit-more-menu">
           <Ellipsis size={20} aria-hidden="true" /><span>More</span>

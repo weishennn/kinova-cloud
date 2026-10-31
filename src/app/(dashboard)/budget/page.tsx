@@ -105,7 +105,10 @@ export default function BudgetPage() {
       return;
     }
     if (selectedMonth === 'all') {
-      setSelectedMonth(currentMonthStr);
+      const [y, m] = currentMonthStr.split('-').map(Number);
+      const prevDate = new Date(y, m - 2, 1);
+      const prevStr = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+      setSelectedMonth(prevStr);
       return;
     }
     const [y, m] = selectedMonth.split('-').map(Number);
@@ -290,7 +293,7 @@ export default function BudgetPage() {
       {/* Month Selector Bar with Year Optgroups */}
       <div className="bg-white/90 dark:bg-zinc-900/60 p-3.5 sm:p-4 rounded-3xl border border-slate-200 dark:border-white/[0.08] backdrop-blur-xl shadow-lg space-y-3 specular-card">
         {/* Header: Label + Selected Month */}
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center justify-between gap-2 min-h-[44px]">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="p-2 rounded-xl bg-indigo-500/15 text-indigo-700 dark:text-indigo-400 border border-indigo-500/20 shrink-0">
               <Calendar className="h-4 w-4" />
