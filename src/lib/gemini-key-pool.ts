@@ -14,6 +14,8 @@
  *   to the next available key in the pool.
  */
 
+import { normalizeToCanonicalCategory, type CanonicalExpenseCategory } from './canonical-categories.ts';
+
 const NUMBERED_KEY_NAMES = [
   'GEMINI_API_KEY_1',
   'GEMINI_API_KEY_2',
@@ -421,3 +423,61 @@ export async function generateGeminiContent(
 
   throw new Error(lastError || 'Gemini request failed across all keys and models');
 }
+
+/**
+ * Classifies an unknown or ambiguous merchant or purchase description using Gemini LLM reasoning.
+ * Returns the canonical category (e.g. 'Food & Dining') or null if classification fails or resolves to 'Other'.
+ */
+export async function classifyMerchantWithGemini(
+  merchant: string,
+  options?: {
+    timeoutMs?: number;
+    fetchFn?: typeof fetch;
+    env?: NodeJS.ProcessEnv;
+  }
+): Promise<CanonicalExpenseCategory | null> {
+  const clean = String(merchant || '').trim();
+  if (!clean || clean.length < 2) return null;
+
+  try {
+    const prompt = `You are an expert expense classifier.
+Classify this merchant, store, or purchase description into exactly ONE of the canonical categories:
+- Food & Dining (all restaurants, omakase, izakaya, kaiseki, cafes, kopitiams, food courts, hawker stalls, mamak, bakeries, bars, groceries, snacks, beverages, desserts)
+- Transport (petrol, fuel, parking, tolls, Grab, trains, LRT, MRT, taxis, flights, transit)
+- Shopping (retail, clothing, electronics, hardware, department stores, supermarkets, online shopping)
+- Housing & Bills (utilities, rent, electricity, water, telecom, maintenance)
+- Entertainment (movies, games, concerts, streaming, karaoke)
+- Health (clinics, hospitals, pharmacy, dental, medicine)
+- Education (tuition, courses, books, school fees)
+- Sport (gym, badminton, sports gear, fitness)
+- Parents (allowance, parents)
+- Insurance (insurance policies, premiums)
+- Gift (presents, donations, angpow)
+- Other
+
+Merchant: "${clean.replace(/"/g, '\\"')}"
+
+Return ONLY valid JSON:
+{"category": "category_name"}`;
+
+    const res = await generateGeminiContent({
+      prompt,
+      responseMimeType: 'application/json',
+      thinking: false,
+      timeoutMs: options?.timeoutMs ?? 5000,
+      totalTimeoutMs: options?.timeoutMs ?? 6000,
+      fetchFn: options?.fetchFn,
+      env: options?.env,
+    });
+
+    const parsed = JSON.parse(res.text);
+    if (parsed && typeof parsed.category === 'string') {
+      const canonical = normalizeToCanonicalCategory(parsed.category, 'Expense', clean);
+      return canonical !== 'Other' ? (canonical as CanonicalExpenseCategory) : null;
+    }
+  } catch (err) {
+    console.warn(`[Gemini] Merchant classification fallback for "${clean}" skipped:`, err instanceof Error ? err.message : String(err));
+  }
+  return null;
+}
+

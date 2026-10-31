@@ -90,7 +90,7 @@ const MERCHANT_CATEGORY_RULES: Array<{ regex: RegExp; category: string }> = [
     category: 'Transport',
   },
   {
-    regex: /\b(f\s*&?\s*and\s*b|f\s*&\s*b|fnb|fb|starbucks|zus|tealive|chagee|mcdonald|kfc|nando|pelita|kopitiam|cafe|coffee|bakery|bakeshop|bake|roti|pastry|ramen|sushi|bistro|restaurant|restoran|resto|mamak|foodpanda|grabfood|dining|kitchen|hotpot|barbecue|bbq|steamboat|food\s*court|hawker|canteen|cafeteria|catering|eatery|s11|dessert|tea|boba|noodles?|rice|nasi|mee|dim\s*sum|cake|bread|makan|minum|warung|gerai)\b/i,
+    regex: /\b(f\s*&?\s*and\s*b|f\s*&\s*b|fnb|fb|starbucks|zus|tealive|chagee|mcdonald|kfc|nando|pelita|kopitiam|cafe|coffee|bakery|bakeshop|bake|roti|pastry|ramen|sushi|bistro|restaurant|restoran|resto|mamak|foodpanda|grabfood|dining|kitchen|hotpot|barbecue|bbq|steamboat|food\s*court|hawker|canteen|cafeteria|catering|eatery|s11|dessert|tea|boba|noodles?|rice|nasi|mee|dim\s*sum|cake|bread|makan|minum|warung|gerai|omakase|izakaya|kaiseki|kappo|buffet|boulangerie|patisserie|trattoria|pizzeria|taqueria|gelato|yakitori|udon|soba|donburi|teppanyaki|shabu)\b|餐饮|吃饭|餐馆|饮食|外卖|午餐|晚餐|早餐|买菜|超市|零食|饮料|奶茶|茶室|酒楼|食堂|档口|美食|快餐|海鲜|火锅|杂饭|小吃|甜品|面馆|饭店|日料|居酒屋|自助餐|烧烤|烤肉|串串|大排档/i,
     category: 'Food & Dining',
   },
   {

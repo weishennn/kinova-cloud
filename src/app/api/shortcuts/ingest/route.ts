@@ -3,7 +3,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLocalDateString, parseLocalDate } from '@/lib/date-helper';
 import { getValidGoogleSession } from '@/lib/google-auth';
 import { getActiveShortcutOwnerEmail, setActiveShortcutOwner } from '@/lib/admin-registry';
-import { getLoadBalancedGeminiKeys, reportGeminiKeyFailure } from '@/lib/gemini-key-pool';
+import {
+  classifyMerchantWithGemini,
+  getLoadBalancedGeminiKeys,
+  reportGeminiKeyFailure,
+} from '@/lib/gemini-key-pool';
 import { matchHabitMemory } from '@/lib/habit-memory-engine';
 import {
   acknowledgeShortcutDraft,
@@ -199,6 +203,25 @@ export async function POST(req: NextRequest) {
     // Mode A: Apple Pay (iOS Shortcuts Wallet / Transaction Trigger)
     if (mode === 'apple_pay') {
       const normalizedDraft = normalizeApplePayTransactionInput(body, today);
+
+      // AI Brain Reasoning: If category is uncertain or 'Other', use Gemini LLM to reason over
+      // the merchant/description (e.g. "Omakase", "Izakaya", niche boutiques) rather than defaulting to uncertain
+      if (
+        (normalizedDraft.uncertainFields.includes('category') || normalizedDraft.category === 'Other') &&
+        (normalizedDraft.merchant || normalizedDraft.description)
+      ) {
+        const queryText = normalizedDraft.merchant || normalizedDraft.description || '';
+        try {
+          const aiCategory = await classifyMerchantWithGemini(queryText);
+          if (aiCategory && aiCategory !== 'Other') {
+            normalizedDraft.category = aiCategory;
+            normalizedDraft.uncertainFields = normalizedDraft.uncertainFields.filter((f) => f !== 'category');
+          }
+        } catch (err) {
+          console.warn('[Shortcut Ingest] Gemini text classification in Mode A skipped:', err);
+        }
+      }
+
       const saved = saveShortcutQuickDraft({
         ...normalizedDraft,
         ownerEmail: userEmail || undefined,
@@ -474,12 +497,34 @@ Return JSON shape:
       rawMerchant || (items.length > 0 ? items[0].name : ''),
       typeof parsedOcr.category === 'string' ? parsedOcr.category : undefined
     );
-    const catConfidence = typeof parsedOcr.categoryConfidence === 'number' ? parsedOcr.categoryConfidence : 0.5;
+    const hasExplicitCategory = typeof parsedOcr.category === 'string' && catRes.category !== 'Other';
+    const catConfidence = typeof parsedOcr.categoryConfidence === 'number'
+      ? parsedOcr.categoryConfidence
+      : (hasExplicitCategory ? 0.95 : 0.5);
     const dateStr = sanitizeDate(parsedOcr.date) || today;
 
     let effectiveDescription = rawMerchant || (catRes.category && catRes.category !== 'Other' ? catRes.category : '');
     let effectiveCategory = catRes.category;
     let habitNotice = '';
+
+    // If Gemini Vision did not classify category or returned Other, but we have an extracted merchant or item,
+    // trigger Gemini AI text classification to intelligently reason over the merchant name
+    if (
+      (catRes.isUncertain || effectiveCategory === 'Other') &&
+      effectiveDescription &&
+      !habitMatch
+    ) {
+      try {
+        const aiCategory = await classifyMerchantWithGemini(effectiveDescription);
+        if (aiCategory && aiCategory !== 'Other') {
+          effectiveCategory = aiCategory;
+          catRes.category = aiCategory;
+          catRes.isUncertain = false;
+        }
+      } catch (err) {
+        console.warn('[Shortcut Ingest] Gemini classification fallback in Mode B skipped:', err);
+      }
+    }
 
     if (habitMatch) {
       effectiveCategory = habitMatch.resolvedCategory;
@@ -504,7 +549,7 @@ Return JSON shape:
     if (currencyAmbiguous) {
       uncertainFields.push('currency');
     }
-    if ((catRes.isUncertain && !habitMatch) || catConfidence < 0.65) {
+    if ((catRes.isUncertain && !habitMatch) || (typeof parsedOcr.categoryConfidence === 'number' && parsedOcr.categoryConfidence < 0.65)) {
       uncertainFields.push('category');
     }
 

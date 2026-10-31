@@ -7,6 +7,7 @@ import {
   stripJsonFences,
   generateGeminiContent,
   resetGeminiKeyPoolStateForTests,
+  classifyMerchantWithGemini,
 } from '../src/lib/gemini-key-pool.ts';
 
 test('getStandardGeminiModelOrder enforces gemini-3.5-flash then reliable fallbacks by default', () => {
@@ -182,3 +183,47 @@ test('generateGeminiContent stops retrying at the total request deadline', async
   );
   assert.equal(attempts, 1);
 });
+
+test('classifyMerchantWithGemini classifies arbitrary dining concepts via LLM', async () => {
+  resetGeminiKeyPoolStateForTests();
+  const mockFetch = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    const promptText = body.contents[0].parts[0].text;
+    const isOmakase = promptText.includes('Sushi Shin Omakase');
+    return new Response(
+      JSON.stringify({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: JSON.stringify({ category: isOmakase ? 'Food & Dining' : 'Transport' }) }],
+            },
+          },
+        ],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  };
+
+  const category = await classifyMerchantWithGemini('Sushi Shin Omakase', {
+    env: { GEMINI_API_KEY: 'test-key' },
+    fetchFn: mockFetch,
+  });
+
+  assert.equal(category, 'Food & Dining');
+});
+
+test('classifyMerchantWithGemini safely returns null on failure or empty input', async () => {
+  resetGeminiKeyPoolStateForTests();
+  assert.equal(await classifyMerchantWithGemini(''), null);
+  assert.equal(await classifyMerchantWithGemini('   '), null);
+
+  const failingFetch = async () => {
+    throw new Error('Network error');
+  };
+  const result = await classifyMerchantWithGemini('Random Store', {
+    env: { GEMINI_API_KEY: 'test-key' },
+    fetchFn: failingFetch,
+  });
+  assert.equal(result, null);
+});
+

@@ -65,6 +65,10 @@ test('3. Context-aware category fallback when category is missing or invalid', (
   assert.equal(normalizeToCanonicalCategory('', 'Expense', 'Uncle Lim Kopitiam Section 17'), 'Food & Dining');
   assert.equal(normalizeToCanonicalCategory('', 'Expense', 'Jaya Grocer weekly groceries'), 'Food & Dining');
   assert.equal(normalizeToCanonicalCategory('', 'Expense', 'Village Grocer vegetables'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('', 'Expense', 'Sushi Shin Omakase'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('', 'Expense', 'Omakase'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('', 'Expense', 'Izakaya Shinjuku'), 'Food & Dining');
+  assert.equal(normalizeToCanonicalCategory('', 'Expense', '日料 Omakase 晚餐'), 'Food & Dining');
 });
 
 test('4. Income categories normalization', () => {

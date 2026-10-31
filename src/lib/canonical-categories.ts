@@ -378,7 +378,7 @@ function inferExpenseCategoryFromContext(text: string): CanonicalExpenseCategory
   if (/\b(?:shell|petronas|caltex|bhpetrol|petron|grab|parking|toll|fuel|petrol|ron95|ron97|diesel|fuelsave|stesen\s*minyak|transit|train|mrt|lrt|ktm|erl|bus|taxi|cab|uber|airline|airasia|flight|budi\s*madani|touch\s*n\s*go|tng|rapidkl)\b|交通|打车|加油|汽油|油费|停车|过路费|车费|地铁|公交|机票/i.test(lower)) {
     return 'Transport';
   }
-  if (/\b(?:f\s*&?\s*and\s*b|f\s*&\s*b|fnb|fb|food|dining|restaurant|restoran|resto|kopitiam|food\s*court|hawker|canteen|cafeteria|bistro|cafe|coffee|kopi|tea|bakery|bakeshop|bake|roti|cake|bread|pastry|dessert|rice|noodles?|nasi|mee|laksa|burger|pizza|sushi|ramen|chicken|steamboat|hotpot|bbq|barbecue|zapfan|chap\s*fan|economy\s*rice|dim\s*sum|s11|makan|minum|warung|gerai|grocer|groceries|supermarket|market|pasar|hypermarket|catering|bar|pub|boba|eatery|takeaway|kitchen)\b|餐饮|吃饭|餐馆|饮食|外卖|午餐|晚餐|早餐|买菜|超市|零食|饮料|奶茶|茶室|酒楼|食堂|档口|美食|快餐|海鲜|火锅|杂饭|小吃|甜品|面馆|饭店/i.test(lower)) {
+  if (/\b(?:f\s*&?\s*and\s*b|f\s*&\s*b|fnb|fb|food|dining|restaurant|restoran|resto|kopitiam|food\s*court|hawker|canteen|cafeteria|bistro|cafe|coffee|kopi|tea|bakery|bakeshop|bake|roti|cake|bread|pastry|dessert|rice|noodles?|nasi|mee|laksa|burger|pizza|sushi|ramen|chicken|steamboat|hotpot|bbq|barbecue|zapfan|chap\s*fan|economy\s*rice|dim\s*sum|s11|makan|minum|warung|gerai|grocer|groceries|supermarket|market|pasar|hypermarket|catering|bar|pub|boba|eatery|takeaway|kitchen|omakase|izakaya|kaiseki|kappo|buffet|boulangerie|patisserie|trattoria|pizzeria|taqueria|gelato|gelateria|yakitori|udon|soba|donburi|teppanyaki|shabu)\b|餐饮|吃饭|餐馆|饮食|外卖|午餐|晚餐|早餐|买菜|超市|零食|饮料|奶茶|茶室|酒楼|食堂|档口|美食|快餐|海鲜|火锅|杂饭|小吃|甜品|面馆|饭店|日料|居酒屋|自助餐|烧烤|烤肉|串串|大排档/i.test(lower)) {
     return 'Food & Dining';
   }
   if (/\b(?:doctor|clinic|klinik|pharmacy|farmasi|hospital|panadol|watson|guardian|dental|dentist|optical|optometry|medical|medicine|healthcare)\b|医疗|看病|医院|诊所|药房|买药|看牙|牙医/i.test(lower)) {
@@ -419,7 +419,7 @@ export function isLegacyFoodOrGrocery(rawVal: string | null | undefined): boolea
   const normalized = lower.replace(/[^a-z0-9\u4e00-\u9fa5]/g, '');
 
   if (
-    /^(groceries|grocery|grocer|food|dining|fooddining|foodanddining|foodndining|foodandbeverage|foodbeverage|foodanddrink|fooddrink|fandb|fb|fnb|supermarket|supermarkets|foodbeverage|fooddrink|meals|meal|lunch|dinner|breakfast|makan|kopitiam|foodcourt|hawker|canteen|cafeteria|bistro|bakery|dessert|restaurant|restoran|cafe|fastfood|seafood|买菜|食品|餐饮|饮食|食物|外卖|午餐|晚餐|早餐|零食|饮料|奶茶|超市|茶室|酒楼|档口|美食|快餐|海鲜|火锅|杂饭)$/i.test(
+    /^(groceries|grocery|grocer|food|dining|fooddining|foodanddining|foodndining|foodandbeverage|foodbeverage|foodanddrink|fooddrink|fandb|fb|fnb|supermarket|supermarkets|foodbeverage|fooddrink|meals|meal|lunch|dinner|breakfast|makan|kopitiam|foodcourt|hawker|canteen|cafeteria|bistro|bakery|dessert|restaurant|restoran|cafe|fastfood|seafood|omakase|izakaya|kaiseki|buffet|买菜|食品|餐饮|饮食|食物|外卖|午餐|晚餐|早餐|零食|饮料|奶茶|超市|茶室|酒楼|档口|美食|快餐|海鲜|火锅|杂饭|日料|居酒屋|自助餐)$/i.test(
       normalized
     )
   ) {
