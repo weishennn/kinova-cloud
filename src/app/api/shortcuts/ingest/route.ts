@@ -196,9 +196,14 @@ export async function POST(req: NextRequest) {
     const mode = rawMode === 'apple_pay' || (!hasScreenshot && rawMode !== 'screenshot')
       ? 'apple_pay'
       : 'screenshot';
-    // Shortcut payments must stay as drafts until the user reviews the assistant assessment
-    // and taps Save in Kinova. The request body cannot bypass that confirmation.
-    const shouldAutoRecord = false;
+    // Auto-record policy: By default, when all required fields (amount, merchant) are cleanly identified,
+    // automatically record directly to the ledger (Google Sheets) and return a success notification.
+    // Only fall back to pending draft mode when fields are missing/ambiguous, or if explicitly requested.
+    const explicitAutoRecordParam = req.nextUrl.searchParams.get('autoRecord');
+    const requestedAutoRecord =
+      explicitAutoRecordParam !== null
+        ? explicitAutoRecordParam === 'true' || explicitAutoRecordParam === '1'
+        : body?.autoRecord !== false;
 
     // Mode A: Apple Pay (iOS Shortcuts Wallet / Transaction Trigger)
     if (mode === 'apple_pay') {
@@ -226,8 +231,15 @@ export async function POST(req: NextRequest) {
         ...normalizedDraft,
         ownerEmail: userEmail || undefined,
       });
+
+      const canAutoRecord =
+        requestedAutoRecord &&
+        normalizedDraft.amount !== null &&
+        normalizedDraft.amount > 0 &&
+        Boolean(normalizedDraft.merchant || normalizedDraft.description);
+
       const ledgerRes = await recordShortcutDraftToLedger(saved, {
-        autoRecord: shouldAutoRecord,
+        autoRecord: canAutoRecord,
         userEmail,
       });
 
@@ -607,9 +619,16 @@ Return JSON shape:
         '截图仅通过服务端加密发送至 Google Gemini Vision API 进行一次性字段提取，不会写入任何服务器日志或公开 URL。',
     });
 
+    const canAutoRecord =
+      requestedAutoRecord &&
+      moneyRes.amount !== null &&
+      moneyRes.amount > 0 &&
+      Boolean(effectiveDescription) &&
+      missingFields.length === 0;
+
     const ledgerRes = await recordShortcutDraftToLedger(saved, {
       fallbackNotice: ocrFallbackNotice,
-      autoRecord: shouldAutoRecord,
+      autoRecord: canAutoRecord,
       userEmail,
     });
 
