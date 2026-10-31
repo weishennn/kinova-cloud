@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Search,
@@ -47,6 +47,15 @@ export default function TransactionsPage() {
   const [filterType, setFilterType] = useState<'all' | 'expense' | 'income' | 'investment' | 'tax'>('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const typeParam = params.get('type')?.toLowerCase();
+    if (typeParam === 'investment' || typeParam === 'expense' || typeParam === 'income' || typeParam === 'tax') {
+      setFilterType(typeParam as any);
+    }
+  }, []);
 
   // Current active month in YYYY-MM format, e.g. "2026-10"
   const currentMonthStr = useMemo(() => {
@@ -233,6 +242,8 @@ export default function TransactionsPage() {
   const displaySummary = useMemo(() => {
     let income = 0;
     let expense = 0;
+    let investedBuys = 0;
+    let investedSells = 0;
     filteredTransactions.forEach(t => {
       const baseAmount = getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount);
       const isTrade = String(t.id || '').startsWith('tx_trade_') ||
@@ -242,10 +253,21 @@ export default function TransactionsPage() {
         /^(SELL|BUY)\s+[0-9]/i.test(t.description || '');
       if (t.type === 'income' && !isTrade) income += baseAmount;
       if (t.type === 'expense') expense += baseAmount;
+      if (t.type === 'investment' || isTrade) {
+        const isSell = t.subCategory?.toUpperCase() === 'SELL' || /^(SELL)\b/i.test(t.description || '');
+        if (isSell) {
+          investedSells += baseAmount;
+        } else {
+          investedBuys += baseAmount;
+        }
+      }
     });
     return {
       totalIncome: income,
       totalExpense: expense,
+      totalInvested: investedBuys - investedSells,
+      investedBuys,
+      investedSells,
       balance: income - expense
     };
   }, [filteredTransactions]);
@@ -615,27 +637,59 @@ export default function TransactionsPage() {
         </div>
       </div>
 
-      {/* Summary Bar: Income & Expenses Only */}
-      <div className="grid grid-cols-2 gap-3 rounded-2xl border border-slate-200 dark:border-white/[0.08] bg-card/60 p-4.5 shadow-xl specular-card">
-        <div className="text-center">
-          <div className="min-w-0 px-1 text-xs leading-tight text-slate-700 dark:text-zinc-300 font-medium">
-            <span className="block">Income</span>
-            {selectedMonth && <span className="block text-[10px] text-slate-500 dark:text-zinc-400">{formatPeriodLabel(selectedMonth)}</span>}
+      {/* Summary Bar */}
+      {filterType === 'investment' ? (
+        <div className="grid grid-cols-3 gap-2.5 rounded-2xl border border-indigo-500/25 bg-card/60 p-4 shadow-xl specular-card">
+          <div className="text-center">
+            <span className="block text-xs font-semibold text-slate-700 dark:text-zinc-300">Net Invested</span>
+            <div className="text-base md:text-lg font-bold text-indigo-700 dark:text-indigo-400 font-mono tabular-nums mt-0.5">
+              <AnimatedNumber value={displaySummary.totalInvested} animateOnMount />
+            </div>
+            <span className="block text-[10px] text-slate-500 dark:text-zinc-400">Deployed Capital</span>
           </div>
-          <div className="text-base md:text-lg font-bold text-emerald-800 dark:text-emerald-400 font-mono tabular-nums mt-0.5">
-            <AnimatedNumber value={displaySummary.totalIncome} animateOnMount />
+          <div className="text-center border-l border-slate-200 dark:border-white/[0.08]">
+            <span className="block text-xs font-semibold text-slate-700 dark:text-zinc-300">Total Purchases</span>
+            <div className="text-base md:text-lg font-bold text-slate-900 dark:text-white font-mono tabular-nums mt-0.5">
+              <AnimatedNumber value={displaySummary.investedBuys} animateOnMount />
+            </div>
+            <span className="block text-[10px] text-indigo-600 dark:text-indigo-400">BUY orders</span>
+          </div>
+          <div className="text-center border-l border-slate-200 dark:border-white/[0.08]">
+            <span className="block text-xs font-semibold text-slate-700 dark:text-zinc-300">Total Liquidated</span>
+            <div className="text-base md:text-lg font-bold text-emerald-700 dark:text-emerald-400 font-mono tabular-nums mt-0.5">
+              <AnimatedNumber value={displaySummary.investedSells} animateOnMount />
+            </div>
+            <span className="block text-[10px] text-emerald-600 dark:text-emerald-400">SELL capital returned</span>
           </div>
         </div>
-        <div className="text-center border-l border-slate-200 dark:border-white/[0.08]">
-          <div className="min-w-0 px-1 text-xs leading-tight text-slate-700 dark:text-zinc-300 font-medium">
-            <span className="block">Expenses</span>
-            {selectedMonth && <span className="block text-[10px] text-slate-500 dark:text-zinc-400">{formatPeriodLabel(selectedMonth)}</span>}
+      ) : (
+        <div className="grid grid-cols-3 gap-3 rounded-2xl border border-slate-200 dark:border-white/[0.08] bg-card/60 p-4 shadow-xl specular-card">
+          <div className="text-center">
+            <div className="min-w-0 px-1 text-xs leading-tight text-slate-700 dark:text-zinc-300 font-medium">
+              <span className="block">Income</span>
+            </div>
+            <div className="text-base md:text-lg font-bold text-emerald-800 dark:text-emerald-400 font-mono tabular-nums mt-0.5">
+              <AnimatedNumber value={displaySummary.totalIncome} animateOnMount />
+            </div>
           </div>
-          <div className="text-base md:text-lg font-bold text-rose-800 dark:text-rose-400 font-mono tabular-nums mt-0.5">
-            <AnimatedNumber value={displaySummary.totalExpense} animateOnMount />
+          <div className="text-center border-l border-slate-200 dark:border-white/[0.08]">
+            <div className="min-w-0 px-1 text-xs leading-tight text-slate-700 dark:text-zinc-300 font-medium">
+              <span className="block">Expenses</span>
+            </div>
+            <div className="text-base md:text-lg font-bold text-rose-800 dark:text-rose-400 font-mono tabular-nums mt-0.5">
+              <AnimatedNumber value={displaySummary.totalExpense} animateOnMount />
+            </div>
+          </div>
+          <div className="text-center border-l border-slate-200 dark:border-white/[0.08]">
+            <div className="min-w-0 px-1 text-xs leading-tight text-slate-700 dark:text-zinc-300 font-medium">
+              <span className="block">Invested</span>
+            </div>
+            <div className="text-base md:text-lg font-bold text-indigo-800 dark:text-indigo-400 font-mono tabular-nums mt-0.5">
+              <AnimatedNumber value={displaySummary.totalInvested} animateOnMount />
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Transaction List */}
       <div className="space-y-4">
