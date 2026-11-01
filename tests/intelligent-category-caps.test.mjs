@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {
   generateIntelligentCategoryCaps,
   getPaydayCycleIntelligence,
-  getCategoryRealtimeBudgetStatus
+  getCategoryRealtimeBudgetStatus,
+  predictMonthlySavingsAndInvestments,
+  fitCapsToLivingBudget,
 } from '../src/lib/category-budget-helper.ts';
 
 test('Intelligent Category Caps: Identifies fixed, quasi-fixed, trend, and discretionary spending', () => {
@@ -35,6 +37,12 @@ test('Intelligent Category Caps: Identifies fixed, quasi-fixed, trend, and discr
   assert.equal(plan.targetSavingsAmount, 1200); // 40% of 3000
   assert.equal(plan.targetLivingBudget, 1800); // 3000 - 1200
 
+  // STRICT REQUIREMENT: All cap sum MUST be lower than or equal to income - savings!
+  assert.ok(
+    plan.totalSuggestedCaps <= plan.targetLivingBudget,
+    `Total caps (${plan.totalSuggestedCaps}) must be <= living budget (${plan.targetLivingBudget} = income - savings)`
+  );
+
   // Insurance must be identified as fixed recurring ~250
   const insurance = plan.suggestions.find((s) => s.category === 'Insurance');
   assert.ok(insurance);
@@ -57,7 +65,7 @@ test('Intelligent Category Caps: Identifies fixed, quasi-fixed, trend, and discr
   const food = plan.suggestions.find((s) => s.category === 'Food & Dining');
   assert.ok(food);
   assert.equal(food.nature, 'discretionary');
-  assert.ok(food.suggestedCap >= 600);
+  assert.ok(food.suggestedCap >= 450);
   assert.ok(food.dailyAllowance > 0);
 });
 
@@ -107,4 +115,85 @@ test('Category Real-Time Status: Computes remaining budget, impact of proposed e
   assert.equal(statusOver.isOverCapAfter, true);
   assert.equal(statusOver.badgeColor, 'rose');
   assert.match(statusOver.badgeText, /Will exceed cap by RM 80\.00/);
+});
+
+test('Monthly Savings & Investment Prediction: Follows daily spend to predict savings and investments as percentage', () => {
+  // Scenario 1: Controlled spending
+  // Suppose today is day 10 of a 30-day month, user has spent RM 400 total.
+  // Burn rate: RM 40/day. Remaining 20 days: 40 * 20 = RM 800.
+  // Total projected spend: RM 1200.
+  // Monthly income: RM 3000. Surplus: RM 1800.
+  // Target: 20% savings (RM 600) + 20% investments (RM 600) = 40% (RM 1200).
+  const txsControlled = [
+    { id: '1', date: '2026-11-02', type: 'expense', amount: 150 },
+    { id: '2', date: '2026-11-05', type: 'expense', amount: 100 },
+    { id: '3', date: '2026-11-09', type: 'expense', amount: 150 },
+  ];
+
+  const prediction = predictMonthlySavingsAndInvestments(txsControlled, {
+    baselineIncome: 3000,
+    savingsTargetPct: 20,
+    investmentTargetPct: 20,
+    selectedMonth: '2026-11',
+    referenceDate: new Date(2026, 10, 10), // Nov 10
+  });
+
+  assert.equal(prediction.baselineIncome, 3000);
+  assert.equal(prediction.spentSoFar, 400);
+  assert.equal(prediction.daysPassed, 10);
+  assert.equal(prediction.currentDailySpend, 40);
+  assert.equal(prediction.projectedTotalSpend, 1200);
+  assert.equal(prediction.projectedMonthEndSurplus, 1800);
+
+  // Equal 50/50 split of surplus between savings and investments
+  assert.equal(prediction.predictedSavingsAmount, 900);
+  assert.equal(prediction.predictedSavingsPct, 30.0); // 900 / 3000 = 30%
+  assert.equal(prediction.predictedInvestmentAmount, 900);
+  assert.equal(prediction.predictedInvestmentPct, 30.0); // 900 / 3000 = 30%
+  assert.equal(prediction.predictedTotalSavedPct, 60.0);
+  assert.equal(prediction.pacingStatus, 'ahead_of_target');
+
+  // Scenario 2: Deficit / Overspending
+  // Day 10, user already spent RM 2200.
+  // Burn rate: RM 220/day.
+  // Projected spend: 2200 + 220 * 20 = RM 6600 (> 3000).
+  const txsOver = [
+    { id: '1', date: '2026-11-05', type: 'expense', amount: 2200 },
+  ];
+  const predDeficit = predictMonthlySavingsAndInvestments(txsOver, {
+    baselineIncome: 3000,
+    savingsTargetPct: 20,
+    investmentTargetPct: 20,
+    selectedMonth: '2026-11',
+    referenceDate: new Date(2026, 10, 10),
+  });
+
+  assert.equal(predDeficit.spentSoFar, 2200);
+  assert.equal(predDeficit.projectedMonthEndSurplus, 0);
+  assert.equal(predDeficit.predictedSavingsAmount, 0);
+  assert.equal(predDeficit.predictedSavingsPct, 0);
+  assert.equal(predDeficit.predictedInvestmentAmount, 0);
+  assert.equal(predDeficit.predictedInvestmentPct, 0);
+  assert.equal(predDeficit.pacingStatus, 'in_deficit');
+});
+
+test('fitCapsToLivingBudget: Strictly ensures sum of all caps <= income - savings', () => {
+  const bloatedCaps = {
+    'Food & Dining': 1200,
+    'Housing & Bills': 800,
+    'Transport': 400,
+    'Shopping': 500,
+    'Entertainment': 300,
+    'Sport': 250,
+  }; // Total = 3450
+
+  const maxLivingBudget = 1800; // Income RM 3000 - Savings RM 1200
+  const fitted = fitCapsToLivingBudget(bloatedCaps, maxLivingBudget);
+
+  const fittedSum = Object.values(fitted).reduce((a, b) => a + b, 0);
+  assert.ok(
+    fittedSum <= maxLivingBudget,
+    `Fitted sum (${fittedSum}) must be <= living budget (${maxLivingBudget})`
+  );
+  assert.ok(fitted['Food & Dining'] >= 400); // Food & Dining preserves living floor
 });

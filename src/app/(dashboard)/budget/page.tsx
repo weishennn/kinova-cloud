@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   AlertCircle, Wallet, Edit2, Check, Inbox, Sparkles,
-  Clock, TrendingDown, ShieldAlert, ArrowUpRight, DollarSign, X,
+  Clock, TrendingDown, TrendingUp, ShieldAlert, ArrowUpRight, DollarSign, X,
   Calendar, ChevronLeft, ChevronRight, RotateCcw,
   ShieldCheck, Utensils, Info, CheckCircle2, Sliders
 } from 'lucide-react';
@@ -23,8 +23,11 @@ import {
   DEFAULT_CATEGORY_CAPS,
   generateIntelligentCategoryCaps,
   getPaydayCycleIntelligence,
+  predictMonthlySavingsAndInvestments,
+  fitCapsToLivingBudget,
   type IntelligentBudgetPlan,
   type IntelligentCapSuggestion,
+  type MonthlySavingsPrediction,
 } from '@/lib/category-budget-helper';
 import { saveSettingWithCloudSync, SETTINGS_UPDATED_EVENT } from '@/lib/cloud-settings-sync';
 import { useMonthList } from '@/hooks/useSheets';
@@ -320,8 +323,45 @@ export default function BudgetPage() {
     };
   }, [categoryCaps, monthlyExpenses, allTransactions, transactions, dailyInfo.daysRemaining]);
 
+  // Real-time Month-End Savings & Investments Prediction based on daily spend
+  const savingsPrediction = useMemo(() => {
+    return predictMonthlySavingsAndInvestments(monthlyTransactions, {
+      selectedMonth,
+      baselineIncome: intelligentPlan.baselineIncome,
+      savingsTargetPct: intelligentPlan.savingsTargetPct,
+      investmentTargetPct: intelligentPlan.investmentTargetPct,
+    });
+  }, [monthlyTransactions, selectedMonth, intelligentPlan]);
+
+  // Cap Sum strictly lower than or equal to Income - Savings
+  const configuredCapsSum = useMemo(() => {
+    return Object.values(categoryCaps).reduce((sum, v) => sum + (Number(v) || 0), 0);
+  }, [categoryCaps]);
+
+  const maxLivingBudget = intelligentPlan.targetLivingBudget;
+  const isCapsSumExceeded = configuredCapsSum > maxLivingBudget;
+
+  const handleAutoFitCaps = () => {
+    const fitted = fitCapsToLivingBudget(categoryCaps, maxLivingBudget);
+    setCategoryCaps(fitted);
+    saveCategoryCaps(fitted);
+    toast.success(`Caps scaled down to RM ${maxLivingBudget.toLocaleString()} to strictly protect your savings target!`);
+  };
+
   const [isAutoTuneOpen, setIsAutoTuneOpen] = useState(false);
   const [customCapsDraft, setCustomCapsDraft] = useState<Record<string, number>>({});
+
+  const draftSum = useMemo(() => {
+    return Object.values(customCapsDraft).reduce((sum, v) => sum + (Number(v) || 0), 0);
+  }, [customCapsDraft]);
+
+  const isDraftSumExceeded = draftSum > maxLivingBudget;
+
+  const handleAutoFitDraft = () => {
+    const fitted = fitCapsToLivingBudget(customCapsDraft, maxLivingBudget);
+    setCustomCapsDraft(fitted);
+    toast.info(`Adjusted caps to RM ${maxLivingBudget.toLocaleString()} (Income - Savings target)`);
+  };
 
   useEffect(() => {
     if (isAutoTuneOpen && intelligentPlan?.suggestions) {
@@ -334,7 +374,8 @@ export default function BudgetPage() {
   }, [isAutoTuneOpen, intelligentPlan]);
 
   const handleApplySmartCaps = () => {
-    const updated = { ...categoryCaps, ...customCapsDraft };
+    const safeCaps = isDraftSumExceeded ? fitCapsToLivingBudget(customCapsDraft, maxLivingBudget) : customCapsDraft;
+    const updated = { ...categoryCaps, ...safeCaps };
     setCategoryCaps(updated);
     saveCategoryCaps(updated);
     toast.success('AI Smart Category Caps applied and saved to cloud sync!');
@@ -591,6 +632,145 @@ export default function BudgetPage() {
         </motion.div>
       </div>
 
+      {/* Month-End Savings & Investment Predictor Card */}
+      <motion.div
+        whileHover={{ y: -2 }}
+        transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
+        className="rounded-3xl border border-indigo-500/25 bg-gradient-to-br from-indigo-950/25 via-slate-50 dark:via-zinc-900/40 to-white dark:to-zinc-950 p-5 sm:p-6 backdrop-blur-xl shadow-xl specular-card space-y-4"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2.5 rounded-2xl bg-indigo-500/15 text-indigo-700 dark:text-indigo-400 border border-indigo-500/30">
+              <TrendingUp className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-slate-950 dark:text-white uppercase tracking-wider block">
+                  Month-End Savings & Investment Predictor
+                </span>
+                <span
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider border ${
+                    savingsPrediction.pacingStatus === 'ahead_of_target'
+                      ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-emerald-500/30'
+                      : savingsPrediction.pacingStatus === 'on_track'
+                      ? 'bg-blue-500/15 text-blue-800 dark:text-blue-300 border-blue-500/30'
+                      : savingsPrediction.pacingStatus === 'risk_of_under_saving'
+                      ? 'bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-500/30'
+                      : 'bg-rose-500/15 text-rose-800 dark:text-rose-300 border-rose-500/30'
+                  }`}
+                >
+                  {savingsPrediction.pacingStatus === 'ahead_of_target'
+                    ? 'Ahead of Goal'
+                    : savingsPrediction.pacingStatus === 'on_track'
+                    ? 'On Track'
+                    : savingsPrediction.pacingStatus === 'risk_of_under_saving'
+                    ? 'Under-Saving Risk'
+                    : 'In Deficit'}
+                </span>
+              </div>
+              <span className="text-[11px] text-slate-600 dark:text-zinc-400">
+                Paced by your daily spend of <strong className="font-mono text-slate-900 dark:text-white">RM {savingsPrediction.currentDailySpend.toFixed(2)}/day</strong> (RM {savingsPrediction.spentSoFar.toFixed(2)} in {savingsPrediction.daysPassed} days)
+              </span>
+            </div>
+          </div>
+
+          <div className="text-right text-xs">
+            <span className="text-slate-500 dark:text-zinc-400 block text-[11px]">Monthly Baseline Income</span>
+            <span className="font-mono font-bold text-slate-900 dark:text-white">
+              RM {savingsPrediction.baselineIncome.toLocaleString()}
+            </span>
+          </div>
+        </div>
+
+        {/* 3 Metric Pillars Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* Pillar 1: Predicted Savings */}
+          <div className="p-4 rounded-2xl bg-white/90 dark:bg-zinc-900/60 border border-slate-200 dark:border-white/[0.08] space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-slate-600 dark:text-zinc-400 uppercase text-[11px]">
+                Predicted Savings
+              </span>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+                {savingsPrediction.predictedSavingsPct}% of Income
+              </span>
+            </div>
+            <div className="text-2xl font-black font-mono text-emerald-800 dark:text-emerald-400">
+              RM {savingsPrediction.predictedSavingsAmount.toLocaleString()}
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-zinc-400">
+                <span>Target: {savingsPrediction.savingsTargetPct}% (RM {savingsPrediction.targetSavingsAmount.toLocaleString()})</span>
+                <span>{((savingsPrediction.predictedSavingsAmount / (savingsPrediction.targetSavingsAmount || 1)) * 100).toFixed(0)}%</span>
+              </div>
+              <div className="h-1.5 w-full bg-slate-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                  style={{ width: `${Math.min(100, (savingsPrediction.predictedSavingsAmount / (savingsPrediction.targetSavingsAmount || 1)) * 100)}%` }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Pillar 2: Predicted Investments */}
+          <div className="p-4 rounded-2xl bg-white/90 dark:bg-zinc-900/60 border border-slate-200 dark:border-white/[0.08] space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-slate-600 dark:text-zinc-400 uppercase text-[11px]">
+                Predicted Investments
+              </span>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-700 dark:text-indigo-300">
+                {savingsPrediction.predictedInvestmentPct}% of Income
+              </span>
+            </div>
+            <div className="text-2xl font-black font-mono text-indigo-800 dark:text-indigo-400">
+              RM {savingsPrediction.predictedInvestmentAmount.toLocaleString()}
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-zinc-400">
+                <span>Target: {savingsPrediction.investmentTargetPct}% (RM {savingsPrediction.targetInvestmentAmount.toLocaleString()})</span>
+                <span>{((savingsPrediction.predictedInvestmentAmount / (savingsPrediction.targetInvestmentAmount || 1)) * 100).toFixed(0)}%</span>
+              </div>
+              <div className="h-1.5 w-full bg-slate-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-indigo-500 rounded-full transition-all duration-500"
+                  style={{ width: `${Math.min(100, (savingsPrediction.predictedInvestmentAmount / (savingsPrediction.targetInvestmentAmount || 1)) * 100)}%` }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Pillar 3: Projected Living Spend */}
+          <div className="p-4 rounded-2xl bg-white/90 dark:bg-zinc-900/60 border border-slate-200 dark:border-white/[0.08] space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-slate-600 dark:text-zinc-400 uppercase text-[11px]">
+                Projected Living Spend
+              </span>
+              <span className="text-[10px] font-mono text-slate-500 dark:text-zinc-400">
+                Limit: RM {savingsPrediction.targetLivingBudget.toLocaleString()}
+              </span>
+            </div>
+            <div className={`text-2xl font-black font-mono ${
+              savingsPrediction.projectedTotalSpend > savingsPrediction.targetLivingBudget
+                ? 'text-rose-800 dark:text-rose-400'
+                : 'text-slate-900 dark:text-white'
+            }`}>
+              RM {savingsPrediction.projectedTotalSpend.toLocaleString()}
+            </div>
+            <div className="text-[10px] text-slate-500 dark:text-zinc-400">
+              Living Budget: Income RM {savingsPrediction.baselineIncome.toLocaleString()} - Target Savings RM {(savingsPrediction.targetSavingsAmount + savingsPrediction.targetInvestmentAmount).toLocaleString()}
+            </div>
+            <div className="text-[10px] font-mono text-slate-600 dark:text-zinc-300">
+              Safe Daily Pace: <strong className="text-emerald-700 dark:text-emerald-400">RM {savingsPrediction.safeDailyLivingAllowance.toFixed(2)}/day</strong> ({savingsPrediction.daysRemaining}d left)
+            </div>
+          </div>
+        </div>
+
+        {/* Actionable Prediction Insight Banner */}
+        <div className="p-3.5 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-xs text-indigo-950 dark:text-indigo-200 flex items-start gap-2.5 leading-relaxed">
+          <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+          <span>{savingsPrediction.insightMessage}</span>
+        </div>
+      </motion.div>
+
       {/* Payday Cycle & Savings Shield Card */}
       <motion.div
         whileHover={{ y: -2 }}
@@ -804,24 +984,63 @@ export default function BudgetPage() {
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h3 className="text-xs uppercase font-semibold text-slate-600 dark:text-zinc-400 tracking-wider">
-              Category Spending Caps & Daily Allowances
-            </h3>
-            <span className="text-[11px] text-slate-500 dark:text-zinc-400">
-              Personalized caps dynamically balanced against your income & target savings
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-xs uppercase font-semibold text-slate-600 dark:text-zinc-400 tracking-wider">
+                Category Spending Caps & Daily Allowances
+              </h3>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                isCapsSumExceeded
+                  ? 'bg-rose-500/15 text-rose-800 dark:text-rose-300 border-rose-500/30'
+                  : 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-emerald-500/30'
+              }`}>
+                Cap Sum: RM {configuredCapsSum.toLocaleString()} / Max Living: RM {maxLivingBudget.toLocaleString()}
+              </span>
+            </div>
+            <span className="text-[11px] text-slate-500 dark:text-zinc-400 block mt-0.5">
+              Strict constraint: Cap sum must be lower than or equal to Income (RM {intelligentPlan.baselineIncome.toLocaleString()}) - Savings (RM {intelligentPlan.targetSavingsAmount.toLocaleString()})
             </span>
           </div>
-          <motion.button
-            whileHover={{ scale: 1.04 }}
-            whileTap={{ scale: 0.96 }}
-            type="button"
-            onClick={() => setIsAutoTuneOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-semibold text-xs shadow-md shadow-indigo-500/20 cursor-pointer"
-          >
-            <Sparkles className="h-3.5 w-3.5" />
-            <span>AI Auto-Tune Caps</span>
-          </motion.button>
+          <div className="flex items-center gap-2">
+            {isCapsSumExceeded && (
+              <button
+                type="button"
+                onClick={handleAutoFitCaps}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm cursor-pointer transition-all active:scale-95"
+              >
+                <span>Auto-Fit Caps to RM {maxLivingBudget.toLocaleString()}</span>
+              </button>
+            )}
+            <motion.button
+              whileHover={{ scale: 1.04 }}
+              whileTap={{ scale: 0.96 }}
+              type="button"
+              onClick={() => setIsAutoTuneOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-semibold text-xs shadow-md shadow-indigo-500/20 cursor-pointer"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>AI Auto-Tune Caps</span>
+            </motion.button>
+          </div>
         </div>
+
+        {/* Warning banner when cap sum exceeds living budget */}
+        {isCapsSumExceeded && (
+          <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-950 dark:text-rose-200 flex flex-wrap items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 text-rose-600 dark:text-rose-400 shrink-0" />
+              <span>
+                <strong>Cap Sum Alert:</strong> Total category caps (<strong>RM {configuredCapsSum.toLocaleString()}</strong>) exceed your Living Budget (<strong>RM {maxLivingBudget.toLocaleString()}</strong> = Income RM {intelligentPlan.baselineIncome.toLocaleString()} - Savings RM {intelligentPlan.targetSavingsAmount.toLocaleString()}). To preserve your {intelligentPlan.savingsTargetPct + intelligentPlan.investmentTargetPct}% savings target, reduce caps by RM {(configuredCapsSum - maxLivingBudget).toLocaleString()}.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleAutoFitCaps}
+              className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm cursor-pointer transition-all active:scale-95 shrink-0"
+            >
+              Auto-Fit Caps
+            </button>
+          </div>
+        )}
 
         {breakdown.length === 0 ? (
           <div className="text-center py-10 rounded-2xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/20">
@@ -1077,12 +1296,32 @@ export default function BudgetPage() {
             <div className="pt-3 border-t border-slate-200 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-3">
               <div className="text-xs">
                 <span className="text-slate-500 dark:text-zinc-400 block">Total Configured Caps:</span>
-                <span className="font-mono font-bold text-slate-900 dark:text-white text-sm">
-                  RM {Object.values(customCapsDraft).reduce((a, b) => a + (Number(b) || 0), 0).toLocaleString()}
-                </span>
-                <span className="text-[11px] text-slate-500 dark:text-zinc-400 ml-1">
-                  (Living target: RM {intelligentPlan.targetLivingBudget.toLocaleString()})
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className={`font-mono font-bold text-sm ${isDraftSumExceeded ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white'}`}>
+                    RM {draftSum.toLocaleString()}
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-zinc-400">
+                    / Living limit: RM {maxLivingBudget.toLocaleString()} (Income - Savings)
+                  </span>
+                </div>
+                {isDraftSumExceeded ? (
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-[11px] text-rose-600 dark:text-rose-400 font-semibold">
+                      ⚠️ Exceeds limit by RM {(draftSum - maxLivingBudget).toLocaleString()}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleAutoFitDraft}
+                      className="px-2 py-0.5 rounded-lg bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/30 text-[10px] font-bold hover:bg-rose-500/25 transition-all cursor-pointer"
+                    >
+                      Auto-Fit to RM {maxLivingBudget.toLocaleString()}
+                    </button>
+                  </div>
+                ) : (
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block mt-0.5">
+                    ✨ Strictly within your RM {maxLivingBudget.toLocaleString()} living pool. Full savings protected!
+                  </span>
+                )}
               </div>
 
               <div className="flex items-center gap-2">

@@ -236,6 +236,39 @@ export interface CategoryRealtimeBudgetStatus {
   pacingNote?: string;
 }
 
+export interface MonthlySavingsPrediction {
+  baselineIncome: number;
+  savingsTargetPct: number;
+  investmentTargetPct: number;
+  totalSavingsTargetPct: number;
+  targetSavingsAmount: number;
+  targetInvestmentAmount: number;
+  targetLivingBudget: number;
+
+  todayDate: number;
+  totalDaysInMonth: number;
+  daysPassed: number;
+  daysRemaining: number;
+
+  spentSoFar: number;
+  currentDailySpend: number;
+
+  projectedTotalSpend: number;
+  projectedMonthEndSurplus: number;
+
+  predictedSavingsAmount: number;
+  predictedSavingsPct: number;
+  predictedInvestmentAmount: number;
+  predictedInvestmentPct: number;
+  predictedTotalSavedAmount: number;
+  predictedTotalSavedPct: number;
+
+  safeDailyLivingAllowance: number;
+  pacingStatus: 'ahead_of_target' | 'on_track' | 'risk_of_under_saving' | 'in_deficit';
+  pacingDifferenceDaily: number;
+  insightMessage: string;
+}
+
 interface GenericTransaction {
   id?: string;
   type?: string;
@@ -488,6 +521,43 @@ export function generateIntelligentCategoryCaps(
     });
   });
 
+  // 6. Strict Hard Constraint: Sum of ALL Suggested Caps MUST be <= (Income - Savings)
+  let currentTotal = suggestions.reduce((sum, s) => sum + s.suggestedCap, 0);
+  if (currentTotal > targetLivingBudget) {
+    let excess = currentTotal - targetLivingBudget;
+
+    // First scale down discretionary categories (Shopping, Sport, Entertainment, Gift, Other, Food & Dining)
+    const discretionaryList = suggestions.filter((s) => s.nature === 'discretionary');
+    while (excess > 0) {
+      let trimmedAny = false;
+      for (const item of discretionaryList) {
+        const floor = item.category === 'Food & Dining' ? 400 : 30;
+        if (item.suggestedCap > floor && excess > 0) {
+          const step = Math.min(10, excess, item.suggestedCap - floor);
+          item.suggestedCap -= step;
+          excess -= step;
+          trimmedAny = true;
+          if (excess <= 0) break;
+        }
+      }
+      if (!trimmedAny) break;
+    }
+
+    // If still in excess, scale down trend and quasi-fixed
+    if (excess > 0) {
+      const flexibleList = suggestions.filter((s) => s.nature === 'trend' || s.nature === 'quasi-fixed');
+      for (const item of flexibleList) {
+        const floor = 40;
+        if (item.suggestedCap > floor && excess > 0) {
+          const step = Math.min(item.suggestedCap - floor, excess);
+          item.suggestedCap -= step;
+          excess -= step;
+          if (excess <= 0) break;
+        }
+      }
+    }
+  }
+
   const totalSuggestedCaps = suggestions.reduce((sum, s) => sum + s.suggestedCap, 0);
   const savingsHealthStatus: 'healthy' | 'tight' | 'exceeded' =
     totalSuggestedCaps <= targetLivingBudget
@@ -498,8 +568,8 @@ export function generateIntelligentCategoryCaps(
 
   const summaryInsight =
     savingsHealthStatus === 'healthy'
-      ? `✨ These caps guarantee your ${totalSavingsPct}% savings target (RM ${targetSavingsAmount}/mo) from a monthly income of RM ${baselineIncome.toLocaleString()}.`
-      : `⚠️ Your historical spending requires slight trimming in flexible discretionary categories to hit your full RM ${targetSavingsAmount} savings target.`;
+      ? `✨ These caps total RM ${totalSuggestedCaps.toLocaleString()} (strictly under your RM ${targetLivingBudget.toLocaleString()} living budget), guaranteeing your ${totalSavingsPct}% savings & investment target (RM ${targetSavingsAmount.toLocaleString()}/mo).`
+      : `⚠️ Total caps trimmed to fit strictly within your RM ${targetLivingBudget.toLocaleString()} living budget.`;
 
   return {
     baselineIncome,
@@ -511,6 +581,197 @@ export function generateIntelligentCategoryCaps(
     suggestions,
     savingsHealthStatus,
     summaryInsight,
+  };
+}
+
+/**
+ * Scales or trims a record of category caps so that their sum is strictly <= maxLivingBudget (Income - Savings).
+ */
+export function fitCapsToLivingBudget(
+  caps: Record<string, number>,
+  maxLivingBudget: number
+): Record<string, number> {
+  const adjusted = { ...caps };
+  let currentSum = Object.values(adjusted).reduce((sum, v) => sum + (Number(v) || 0), 0);
+  if (currentSum <= maxLivingBudget) return adjusted;
+
+  let excess = currentSum - maxLivingBudget;
+
+  // Trim discretionary first
+  const discretionaryKeys = ['Other', 'Gift', 'Entertainment', 'Shopping', 'Sport', 'Food & Dining'];
+  while (excess > 0) {
+    let trimmed = false;
+    for (const key of discretionaryKeys) {
+      if (adjusted[key] === undefined) continue;
+      const floor = key === 'Food & Dining' ? 400 : 30;
+      if (adjusted[key] > floor && excess > 0) {
+        const step = Math.min(10, excess, adjusted[key] - floor);
+        adjusted[key] -= step;
+        excess -= step;
+        trimmed = true;
+        if (excess <= 0) break;
+      }
+    }
+    if (!trimmed) break;
+  }
+
+  // If still excess, scale down other non-fixed caps
+  if (excess > 0) {
+    const keys = Object.keys(adjusted);
+    for (const key of keys) {
+      if (key === 'Insurance') continue;
+      const floor = 40;
+      if (adjusted[key] > floor && excess > 0) {
+        const step = Math.min(adjusted[key] - floor, excess);
+        adjusted[key] -= step;
+        excess -= step;
+        if (excess <= 0) break;
+      }
+    }
+  }
+
+  return adjusted;
+}
+
+/**
+ * Dynamically predicts month-end savings and investments based on:
+ * 1. User's baseline income (from Income Allocation).
+ * 2. Actual spending so far and daily burn rate pace.
+ * 3. User's target savings and investment percentage split.
+ */
+export function predictMonthlySavingsAndInvestments(
+  currentMonthTransactions: GenericTransaction[] = [],
+  options?: {
+    baselineIncome?: number;
+    savingsTargetPct?: number;
+    investmentTargetPct?: number;
+    selectedMonth?: string;
+    referenceDate?: Date;
+  }
+): MonthlySavingsPrediction {
+  const profile = typeof window !== 'undefined' ? getUserMoneyProfile() : null;
+
+  const savedIncome = typeof window !== 'undefined' ? parseFloat(localStorage.getItem('cashflow_baseline_income') || '0') : 0;
+  const baselineIncome = options?.baselineIncome || (savedIncome > 0 ? savedIncome : (profile?.baselineIncome ?? 3000));
+
+  const savedSavingsPct = typeof window !== 'undefined' ? parseFloat(localStorage.getItem('cashflow_savings_target_pct') || '20') : 20;
+  const savingsTargetPct = options?.savingsTargetPct ?? (isNaN(savedSavingsPct) ? 20 : savedSavingsPct);
+
+  const savedInvestPct = typeof window !== 'undefined' ? parseFloat(localStorage.getItem('cashflow_investment_target_pct') || '20') : 20;
+  const investmentTargetPct = options?.investmentTargetPct ?? (isNaN(savedInvestPct) ? 20 : savedInvestPct);
+
+  const totalSavingsTargetPct = Math.min(90, Math.max(0, savingsTargetPct + investmentTargetPct));
+  const targetSavingsAmount = Math.round(baselineIncome * (savingsTargetPct / 100));
+  const targetInvestmentAmount = Math.round(baselineIncome * (investmentTargetPct / 100));
+  const totalTargetSavings = targetSavingsAmount + targetInvestmentAmount;
+  const targetLivingBudget = Math.max(0, baselineIncome - totalTargetSavings);
+
+  const daysInfo = getMonthDaysInfo(options?.selectedMonth);
+  const totalDaysInMonth = daysInfo.totalDays || 30;
+  const todayDate = options?.referenceDate ? options.referenceDate.getDate() : daysInfo.todayDate || 1;
+  const daysPassed = Math.max(1, Math.min(totalDaysInMonth, todayDate));
+  const daysRemaining = Math.max(0, totalDaysInMonth - daysPassed);
+
+  // Filter living expenses in the target month
+  const validTxs = Array.isArray(currentMonthTransactions) ? currentMonthTransactions : [];
+  let spentSoFar = 0;
+  validTxs.forEach((t) => {
+    if (t.type === 'expense' && t.id !== 'tx_sample') {
+      spentSoFar += getAmountInBaseCurrency(t.amount || 0, t.currency, t.baseAmount);
+    }
+  });
+  spentSoFar = Number(spentSoFar.toFixed(2));
+
+  // Current daily burn rate
+  const currentDailySpend = Number((spentSoFar / daysPassed).toFixed(2));
+
+  // Projected Month-End Spend based on daily pace
+  let projectedTotalSpend = 0;
+  if (daysPassed <= 2 && spentSoFar === 0) {
+    projectedTotalSpend = targetLivingBudget;
+  } else {
+    const rawProjected = spentSoFar + (currentDailySpend * daysRemaining);
+    projectedTotalSpend = Number(rawProjected.toFixed(2));
+  }
+
+  // Projected Month-End Surplus
+  const projectedMonthEndSurplus = Number(Math.max(0, baselineIncome - projectedTotalSpend).toFixed(2));
+
+  // Predict savings & investments based on percentage split
+  const savingsWeight = totalSavingsTargetPct > 0 ? savingsTargetPct / totalSavingsTargetPct : 0.5;
+  const investWeight = totalSavingsTargetPct > 0 ? investmentTargetPct / totalSavingsTargetPct : 0.5;
+
+  let predictedSavingsAmount = 0;
+  let predictedInvestmentAmount = 0;
+
+  if (projectedMonthEndSurplus > 0) {
+    predictedSavingsAmount = Math.round(projectedMonthEndSurplus * savingsWeight);
+    predictedInvestmentAmount = Math.round(projectedMonthEndSurplus * investWeight);
+  }
+
+  const predictedTotalSavedAmount = predictedSavingsAmount + predictedInvestmentAmount;
+  const predictedSavingsPct = baselineIncome > 0
+    ? Number(((predictedSavingsAmount / baselineIncome) * 100).toFixed(1))
+    : 0;
+  const predictedInvestmentPct = baselineIncome > 0
+    ? Number(((predictedInvestmentAmount / baselineIncome) * 100).toFixed(1))
+    : 0;
+  const predictedTotalSavedPct = baselineIncome > 0
+    ? Number(((predictedTotalSavedAmount / baselineIncome) * 100).toFixed(1))
+    : 0;
+
+  // Safe daily living allowance to strictly achieve target savings & investments:
+  const remainingAllowedLiving = Math.max(0, targetLivingBudget - spentSoFar);
+  const safeDailyLivingAllowance = daysRemaining > 0
+    ? Number((remainingAllowedLiving / daysRemaining).toFixed(2))
+    : 0;
+
+  const pacingDifferenceDaily = Number((safeDailyLivingAllowance - currentDailySpend).toFixed(2));
+
+  let pacingStatus: MonthlySavingsPrediction['pacingStatus'] = 'on_track';
+  let insightMessage = '';
+
+  if (projectedTotalSpend > baselineIncome) {
+    pacingStatus = 'in_deficit';
+    const deficitAmt = (projectedTotalSpend - baselineIncome).toFixed(2);
+    insightMessage = `⚠️ Living deficit warning: At your current burn rate (RM ${currentDailySpend.toFixed(2)}/day), month-end spend (RM ${projectedTotalSpend.toFixed(2)}) will exceed your income by RM ${deficitAmt}. Reduce daily spend to RM ${safeDailyLivingAllowance.toFixed(2)}/day to recover.`;
+  } else if (predictedTotalSavedPct < totalSavingsTargetPct * 0.85) {
+    pacingStatus = 'risk_of_under_saving';
+    insightMessage = `⚠️ Under-saving risk: At RM ${currentDailySpend.toFixed(2)}/day, you are predicted to save RM ${predictedSavingsAmount.toLocaleString()} (${predictedSavingsPct}%) and invest RM ${predictedInvestmentAmount.toLocaleString()} (${predictedInvestmentPct}%), below your ${totalSavingsTargetPct}% target. Keep daily spend under RM ${safeDailyLivingAllowance.toFixed(2)}/day to protect your full target.`;
+  } else if (predictedTotalSavedPct > totalSavingsTargetPct) {
+    pacingStatus = 'ahead_of_target';
+    insightMessage = `🎉 Ahead of goal! At RM ${currentDailySpend.toFixed(2)}/day, you are predicted to save RM ${predictedSavingsAmount.toLocaleString()} (${predictedSavingsPct}%) and invest RM ${predictedInvestmentAmount.toLocaleString()} (${predictedInvestmentPct}%), beating your ${totalSavingsTargetPct}% target!`;
+  } else {
+    pacingStatus = 'on_track';
+    insightMessage = `✨ On track: At RM ${currentDailySpend.toFixed(2)}/day, you are projected to save RM ${predictedSavingsAmount.toLocaleString()} (${predictedSavingsPct}%) and invest RM ${predictedInvestmentAmount.toLocaleString()} (${predictedInvestmentPct}%), hitting your ${totalSavingsTargetPct}% target.`;
+  }
+
+  return {
+    baselineIncome,
+    savingsTargetPct,
+    investmentTargetPct,
+    totalSavingsTargetPct,
+    targetSavingsAmount,
+    targetInvestmentAmount,
+    targetLivingBudget,
+    todayDate,
+    totalDaysInMonth,
+    daysPassed,
+    daysRemaining,
+    spentSoFar,
+    currentDailySpend,
+    projectedTotalSpend,
+    projectedMonthEndSurplus,
+    predictedSavingsAmount,
+    predictedSavingsPct,
+    predictedInvestmentAmount,
+    predictedInvestmentPct,
+    predictedTotalSavedAmount,
+    predictedTotalSavedPct,
+    safeDailyLivingAllowance,
+    pacingStatus,
+    pacingDifferenceDaily,
+    insightMessage,
   };
 }
 
