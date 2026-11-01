@@ -1175,7 +1175,7 @@ export default function BudgetPage() {
                   </div>
                 )}
 
-                {/* Daily Safe Limit for this Category */}
+                {/* Daily Safe Limit only for Food & Dining; Capped Monthly Bucket for all others */}
                 <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-zinc-400 pt-0.5">
                   <span>
                     {isCatOver ? (
@@ -1184,9 +1184,15 @@ export default function BudgetPage() {
                       <span>Remaining: <strong className="text-slate-800 dark:text-zinc-200 font-mono">RM {remainingCat.toFixed(2)}</strong></span>
                     )}
                   </span>
-                  <span className="font-mono text-slate-700 dark:text-zinc-300">
-                    Daily limit: <strong className={isCatOver ? 'text-rose-800 dark:text-rose-400' : 'text-emerald-800 dark:text-emerald-400'}>RM {dailyCat.toFixed(2)} / day</strong>
-                  </span>
+                  {item.name === 'Food & Dining' ? (
+                    <span className="font-mono text-slate-700 dark:text-zinc-300">
+                      Daily pace: <strong className={isCatOver ? 'text-rose-800 dark:text-rose-400' : 'text-emerald-800 dark:text-emerald-400'}>RM {dailyCat.toFixed(2)} / day</strong>
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium">
+                      Monthly Capped Bucket (spend once, use whole month)
+                    </span>
+                  )}
                 </div>
               </div>
             );

@@ -2075,7 +2075,7 @@ export function RecordPaymentModal() {
                 </div>
 
                 {/* Food & Dining Specific Daily Burn Rate & Pacing */}
-                {categoryBudgetStatus.isDailyCategory && (
+                {categoryBudgetStatus.isDailyCategory ? (
                   <div className="mt-1 pt-2 border-t border-black/10 dark:border-white/10 flex flex-wrap items-center justify-between gap-2 text-[11px]">
                     <div className="flex items-center gap-1.5 font-medium text-amber-900 dark:text-amber-200">
                       <Utensils className="h-3.5 w-3.5 shrink-0" />
@@ -2089,6 +2089,16 @@ export function RecordPaymentModal() {
                     <div className="text-right text-slate-600 dark:text-zinc-400">
                       Safe Food Pace: <strong className="font-mono text-slate-900 dark:text-white">RM {categoryBudgetStatus.dailyAllowanceRemaining.toFixed(2)}/day</strong> ({categoryBudgetStatus.daysRemainingInMonth}d left)
                     </div>
+                  </div>
+                ) : (
+                  <div className="mt-1 pt-2 border-t border-black/10 dark:border-white/10 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-zinc-400">
+                    <span className="inline-flex items-center gap-1 text-indigo-700 dark:text-indigo-300 font-medium">
+                      <span>🏷️ Monthly Capped Bucket</span>
+                      <span className="text-[10px] text-slate-500 dark:text-zinc-400">(Spend one time, use whole month)</span>
+                    </span>
+                    <span>
+                      Cap buffer: <strong className="font-mono text-slate-900 dark:text-white">RM {Math.max(0, categoryBudgetStatus.remainingAfter).toFixed(2)}</strong> left
+                    </span>
                   </div>
                 )}
               </motion.div>

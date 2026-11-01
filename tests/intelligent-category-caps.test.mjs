@@ -247,3 +247,36 @@ test('fitCapsToLivingBudget: Strictly ensures sum of all caps <= income - saving
   );
   assert.ok(fitted['Food & Dining'] >= 400); // Food & Dining preserves living floor
 });
+
+test('Only Food & Dining is daily; other categories (Sport, Transport, Shopping) are monthly budget-capped', () => {
+  // On Day 2, user spent:
+  // - Food & Dining: RM 40 (daily variable expense: RM 20/day)
+  // - Sport: RM 50 (monthly capped bucket: spend one time, use whole month)
+  // - Transport: RM 60 (monthly capped bucket: e.g. reload Touch 'n Go)
+  const txs = [
+    { id: 'f1', date: '2026-11-01', type: 'expense', category: 'Food & Dining', amount: 20 },
+    { id: 'f2', date: '2026-11-02', type: 'expense', category: 'Food & Dining', amount: 20 },
+    { id: 's1', date: '2026-11-02', type: 'expense', category: 'Sport', amount: 50 },
+    { id: 't1', date: '2026-11-02', type: 'expense', category: 'Transport', amount: 60 },
+  ];
+
+  const pred = predictMonthlySavingsAndInvestments(txs, {
+    baselineIncome: 3000,
+    savingsTargetPct: 20,
+    investmentTargetPct: 20,
+    selectedMonth: '2026-11',
+    referenceDate: new Date(2026, 10, 2), // Day 2
+  });
+
+  assert.equal(pred.daysPassed, 2);
+  assert.equal(pred.spentSoFar, 150); // 40 food + 50 sport + 60 transport
+  assert.equal(pred.dailyVariableSpent, 40); // ONLY food is daily
+  assert.equal(pred.lumpSumSpent, 110); // Sport (50) + Transport (60) are monthly-capped buckets
+
+  // Daily burn rate must ONLY reflect Food: RM 40 / 2 days = RM 20.00/day
+  // It must NOT treat Sport or Transport as daily burn! (which would have been 150 / 2 = 75/day)
+  assert.equal(pred.currentDailySpend, 20.0);
+
+  // Month-end savings and investments remain protected!
+  assert.ok(pred.pacingStatus === 'on_track' || pred.pacingStatus === 'ahead_of_target');
+});

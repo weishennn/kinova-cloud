@@ -507,8 +507,8 @@ export function generateIntelligentCategoryCaps(
     suggestedCap: suggestedFoodCap,
     historicalAvg: Math.round(discretionaryAvgs['Food & Dining']),
     nature: 'discretionary',
-    natureLabel: 'Primary Daily Sustenance',
-    reasoning: `Allocated RM ${suggestedFoodCap} (RM ${foodDaily}/day) ensuring healthy daily nutrition while strictly reserving your ${totalSavingsPct}% savings goal.`,
+    natureLabel: 'Daily Sustenance (Paced Daily)',
+    reasoning: `Allocated RM ${suggestedFoodCap} (RM ${foodDaily}/day) for active daily meal pacing while strictly reserving your ${totalSavingsPct}% savings goal.`,
     dailyAllowance: foodDaily,
     sharePercent: Math.round(effectiveFoodWeight * 100),
   });
@@ -537,8 +537,12 @@ export function generateIntelligentCategoryCaps(
       suggestedCap: allocated,
       historicalAvg: Math.round(st?.avg || discretionaryAvgs[cat]),
       nature: 'discretionary',
-      natureLabel: 'Flexible Discretionary',
-      reasoning,
+      natureLabel: 'Monthly Capped Bucket',
+      reasoning: cat === 'Sport'
+        ? `Monthly sports & gym cap (RM ${allocated}). Spend one time, use whole month.`
+        : cat === 'Shopping'
+        ? `Monthly retail & lifestyle cap (RM ${allocated}). Spend one time, use whole month.`
+        : `Monthly capped budget (RM ${allocated}). Spend one time, use whole month.`,
       sharePercent: Math.round(weight * 100),
     });
   });
@@ -619,21 +623,22 @@ export function generateIntelligentCategoryCaps(
 }
 
 /**
- * Determines whether an expense is an episodic / lump-sum / periodic expense
- * (e.g. Education, Insurance, Rent, large medical fee) rather than a routine daily burn-rate expense.
+ * Only Food & Dining is a daily variable expense category.
+ * All other categories are budget-capped buckets ("spend one time, use whole month").
  */
-export function isLumpSumExpense(category: string, amount: number): boolean {
-  const episodicCategories = new Set([
-    'Insurance',
-    'Housing & Bills',
-    'Education',
-    'Parents',
-    'Health',
-  ]);
-  if (episodicCategories.has(category)) return true;
-  // Non-routine large purchases in other categories (e.g. appliances, flights)
-  if (amount >= 150 && category !== 'Food & Dining') return true;
-  return false;
+export function isDailyCategory(category?: string): boolean {
+  if (!category) return false;
+  const normalized = category.trim().toLowerCase();
+  return normalized === 'food & dining' || normalized === 'food';
+}
+
+/**
+ * Determines whether an expense belongs to a monthly-capped bucket ("spend one time, use whole month")
+ * rather than a daily variable burn-rate routine.
+ * Per user architecture: Only Food & Dining is daily; all other categories are monthly budget-capped.
+ */
+export function isLumpSumExpense(category: string, _amount?: number): boolean {
+  return !isDailyCategory(category);
 }
 
 /**
