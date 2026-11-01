@@ -119,15 +119,15 @@ test('Category Real-Time Status: Computes remaining budget, impact of proposed e
 
 test('Monthly Savings & Investment Prediction: Follows daily spend to predict savings and investments as percentage', () => {
   // Scenario 1: Controlled spending
-  // Suppose today is day 10 of a 30-day month, user has spent RM 400 total.
+  // Suppose today is day 10 of a 30-day month, user has spent RM 400 total in Food & Dining.
   // Burn rate: RM 40/day. Remaining 20 days: 40 * 20 = RM 800.
   // Total projected spend: RM 1200.
   // Monthly income: RM 3000. Surplus: RM 1800.
   // Target: 20% savings (RM 600) + 20% investments (RM 600) = 40% (RM 1200).
   const txsControlled = [
-    { id: '1', date: '2026-11-02', type: 'expense', amount: 150 },
-    { id: '2', date: '2026-11-05', type: 'expense', amount: 100 },
-    { id: '3', date: '2026-11-09', type: 'expense', amount: 150 },
+    { id: '1', date: '2026-11-02', type: 'expense', category: 'Food & Dining', amount: 150 },
+    { id: '2', date: '2026-11-05', type: 'expense', category: 'Food & Dining', amount: 100 },
+    { id: '3', date: '2026-11-09', type: 'expense', category: 'Food & Dining', amount: 150 },
   ];
 
   const prediction = predictMonthlySavingsAndInvestments(txsControlled, {
@@ -154,11 +154,11 @@ test('Monthly Savings & Investment Prediction: Follows daily spend to predict sa
   assert.equal(prediction.pacingStatus, 'ahead_of_target');
 
   // Scenario 2: Deficit / Overspending
-  // Day 10, user already spent RM 2200.
+  // Day 10, user already spent RM 2200 in Food & Dining daily burn.
   // Burn rate: RM 220/day.
   // Projected spend: 2200 + 220 * 20 = RM 6600 (> 3000).
   const txsOver = [
-    { id: '1', date: '2026-11-05', type: 'expense', amount: 2200 },
+    { id: '1', date: '2026-11-05', type: 'expense', category: 'Food & Dining', amount: 2200 },
   ];
   const predDeficit = predictMonthlySavingsAndInvestments(txsOver, {
     baselineIncome: 3000,
@@ -175,6 +175,56 @@ test('Monthly Savings & Investment Prediction: Follows daily spend to predict sa
   assert.equal(predDeficit.predictedInvestmentAmount, 0);
   assert.equal(predDeficit.predictedInvestmentPct, 0);
   assert.equal(predDeficit.pacingStatus, 'in_deficit');
+});
+
+test('Day 1 Lump Sum Education: Does NOT collapse predicted savings to 0% on Day 1', () => {
+  // User scenario:
+  // Nov 1 (Day 1 of 30 days). User pays RM 200 for Education.
+  // Income: RM 3000. Target savings: 20% (600), Target investments: 20% (600).
+  // Total savings target: 40% (1200). Living budget: RM 1800.
+  //
+  // OLD FLAWED BUG:
+  // Naive burn rate was 200 / 1 = 200/day -> Month projected spend = 200 + 200*29 = 6000.
+  // Deficit RM 3000, predicted saving = 0%!
+  //
+  // NEW CORRECT BEHAVIOR:
+  // Education is an episodic lump sum (lumpSumSpent = 200, dailyVariableSpent = 0).
+  // Daily variable spend rate is 0 (not 200!).
+  // Remaining living budget: 1800 - 200 = 1600.
+  // Safe daily allowance for remaining 29 days: 1600 / 29 = 55.17/day.
+  // Predicted month-end savings and investments remain 100% on track at 20% + 20%!
+  const txsDay1Education = [
+    { id: 'edu_1', date: '2026-11-01', type: 'expense', category: 'Education', amount: 200 },
+  ];
+
+  const pred = predictMonthlySavingsAndInvestments(txsDay1Education, {
+    baselineIncome: 3000,
+    savingsTargetPct: 20,
+    investmentTargetPct: 20,
+    selectedMonth: '2026-11',
+    referenceDate: new Date(2026, 10, 1), // Nov 1
+  });
+
+  assert.equal(pred.daysPassed, 1);
+  assert.equal(pred.daysRemaining, 29);
+  assert.equal(pred.spentSoFar, 200);
+  assert.equal(pred.lumpSumSpent, 200);
+  assert.equal(pred.dailyVariableSpent, 0);
+
+  // Daily spend must NOT be 200!
+  assert.equal(pred.currentDailySpend, 0);
+
+  // Safe daily allowance adjusts to absorb the lump sum (1600 / 29 = 55.17)
+  assert.equal(pred.safeDailyLivingAllowance, 55.17);
+
+  // Predicted savings & investments MUST stay intact at 20% + 20% (RM 600 + RM 600)
+  assert.equal(pred.predictedSavingsAmount, 600);
+  assert.equal(pred.predictedSavingsPct, 20.0);
+  assert.equal(pred.predictedInvestmentAmount, 600);
+  assert.equal(pred.predictedInvestmentPct, 20.0);
+  assert.equal(pred.predictedTotalSavedPct, 40.0);
+  assert.equal(pred.pacingStatus, 'on_track');
+  assert.match(pred.insightMessage, /Lump sum \(RM 200\.00\) absorbed/);
 });
 
 test('fitCapsToLivingBudget: Strictly ensures sum of all caps <= income - savings', () => {

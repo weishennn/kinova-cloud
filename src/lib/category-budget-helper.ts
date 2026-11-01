@@ -9,24 +9,25 @@ export interface CategoryBudgetCap {
 }
 
 export const DEFAULT_CATEGORY_CAPS: Record<string, number> = {
-  'Food & Dining': 1200,
-  'Transport': 400,
-  'Shopping': 500,
-  'Housing & Bills': 1000,
-  'Parents': 500,
-  'Insurance': 350,
-  'Entertainment': 250,
-  'Health': 200,
-  'Education': 150,
-  'Sport': 200,
-  'Gift': 150,
-  'Other': 200,
+  'Food & Dining': 600,
+  'Housing & Bills': 500,
+  'Insurance': 250,
+  'Transport': 150,
+  'Education': 100,
+  'Health': 100,
+  'Shopping': 100,
+  'Sport': 50,
+  'Entertainment': 50,
+  'Gift': 50,
+  'Other': 50,
+  'Parents': 0,
 };
 
 const STORAGE_KEY = 'cashflow_category_caps';
 
 /**
- * Loads category budget caps from localStorage with sensible defaults.
+ * Loads category budget caps from localStorage.
+ * If user has saved caps, returns the saved caps directly so ghost defaults don't inflate the sum.
  */
 export function getSavedCategoryCaps(): Record<string, number> {
   if (typeof window === 'undefined') return DEFAULT_CATEGORY_CAPS;
@@ -34,8 +35,8 @@ export function getSavedCategoryCaps(): Record<string, number> {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (typeof parsed === 'object' && parsed !== null) {
-        return { ...DEFAULT_CATEGORY_CAPS, ...parsed };
+      if (typeof parsed === 'object' && parsed !== null && Object.keys(parsed).length > 0) {
+        return parsed as Record<string, number>;
       }
     }
   } catch {}
@@ -251,6 +252,8 @@ export interface MonthlySavingsPrediction {
   daysRemaining: number;
 
   spentSoFar: number;
+  lumpSumSpent: number;
+  dailyVariableSpent: number;
   currentDailySpend: number;
 
   projectedTotalSpend: number;
@@ -430,16 +433,18 @@ export function generateIntelligentCategoryCaps(
   if (parentsStats && parentsStats.avg > 0) {
     parentsCap = Math.round(parentsStats.median / 50) * 50;
     committedCapsSum += parentsCap;
-    suggestions.push({
-      category: 'Parents',
-      currentCap: currentCaps['Parents'] || DEFAULT_CATEGORY_CAPS['Parents'] || 500,
-      suggestedCap: parentsCap,
-      historicalAvg: Math.round(parentsStats.avg),
-      nature: 'fixed',
-      natureLabel: 'Family Commitment',
-      reasoning: `Regular family support commitment locked at RM ${parentsCap}/mo.`,
-    });
   }
+  suggestions.push({
+    category: 'Parents',
+    currentCap: currentCaps['Parents'] || DEFAULT_CATEGORY_CAPS['Parents'] || 0,
+    suggestedCap: parentsCap,
+    historicalAvg: Math.round(parentsStats?.avg || 0),
+    nature: 'fixed',
+    natureLabel: 'Family Commitment',
+    reasoning: parentsCap > 0
+      ? `Regular family support commitment locked at RM ${parentsCap}/mo.`
+      : `No regular family support detected (set to RM 0; adjust if needed).`,
+  });
 
   // Health baseline
   const healthStats = statsMap.get('Health');
@@ -456,6 +461,23 @@ export function generateIntelligentCategoryCaps(
     nature: 'quasi-fixed',
     natureLabel: 'Wellness & Medical Baseline',
     reasoning: `Essential medical, clinic, and pharmacy safety net.`,
+  });
+
+  // Education baseline (Periodic / Self-learning Reserve)
+  const educationStats = statsMap.get('Education');
+  let educationCap = 100;
+  if (educationStats && educationStats.avg > 0) {
+    educationCap = Math.max(50, Math.round(educationStats.avg / 10) * 10);
+  }
+  committedCapsSum += educationCap;
+  suggestions.push({
+    category: 'Education',
+    currentCap: currentCaps['Education'] || DEFAULT_CATEGORY_CAPS['Education'] || 150,
+    suggestedCap: educationCap,
+    historicalAvg: Math.round(educationStats?.avg || educationCap),
+    nature: 'quasi-fixed',
+    natureLabel: 'Periodic Education / Courses',
+    reasoning: `Occasional self-learning & course reserve (RM ${educationCap}/mo). Handled as a flexible lump sum so it does not distort daily living burn rate.`,
   });
 
   // 5. Allocate Remaining Discretionary Living Pool
@@ -556,6 +578,18 @@ export function generateIntelligentCategoryCaps(
         }
       }
     }
+
+    // Final micro-pass: guarantee totalSuggestedCaps <= targetLivingBudget
+    if (excess > 0) {
+      for (const item of suggestions) {
+        if (item.suggestedCap > 0 && excess > 0) {
+          const cut = Math.min(item.suggestedCap, excess);
+          item.suggestedCap -= cut;
+          excess -= cut;
+          if (excess <= 0) break;
+        }
+      }
+    }
   }
 
   const totalSuggestedCaps = suggestions.reduce((sum, s) => sum + s.suggestedCap, 0);
@@ -585,58 +619,101 @@ export function generateIntelligentCategoryCaps(
 }
 
 /**
+ * Determines whether an expense is an episodic / lump-sum / periodic expense
+ * (e.g. Education, Insurance, Rent, large medical fee) rather than a routine daily burn-rate expense.
+ */
+export function isLumpSumExpense(category: string, amount: number): boolean {
+  const episodicCategories = new Set([
+    'Insurance',
+    'Housing & Bills',
+    'Education',
+    'Parents',
+    'Health',
+  ]);
+  if (episodicCategories.has(category)) return true;
+  // Non-routine large purchases in other categories (e.g. appliances, flights)
+  if (amount >= 150 && category !== 'Food & Dining') return true;
+  return false;
+}
+
+/**
  * Scales or trims a record of category caps so that their sum is strictly <= maxLivingBudget (Income - Savings).
  */
 export function fitCapsToLivingBudget(
   caps: Record<string, number>,
   maxLivingBudget: number
 ): Record<string, number> {
-  const adjusted = { ...caps };
-  let currentSum = Object.values(adjusted).reduce((sum, v) => sum + (Number(v) || 0), 0);
-  if (currentSum <= maxLivingBudget) return adjusted;
+  const result: Record<string, number> = {};
+  const keys = Object.keys(caps).length > 0 ? Object.keys(caps) : Array.from(CANONICAL_EXPENSE_CATEGORIES);
 
-  let excess = currentSum - maxLivingBudget;
+  keys.forEach((cat) => {
+    result[cat] = Math.max(0, Number(caps[cat]) || 0);
+  });
 
-  // Trim discretionary first
-  const discretionaryKeys = ['Other', 'Gift', 'Entertainment', 'Shopping', 'Sport', 'Food & Dining'];
-  while (excess > 0) {
-    let trimmed = false;
-    for (const key of discretionaryKeys) {
-      if (adjusted[key] === undefined) continue;
-      const floor = key === 'Food & Dining' ? 400 : 30;
-      if (adjusted[key] > floor && excess > 0) {
-        const step = Math.min(10, excess, adjusted[key] - floor);
-        adjusted[key] -= step;
-        excess -= step;
-        trimmed = true;
+  const currentSum = Object.values(result).reduce((sum, v) => sum + v, 0);
+  if (currentSum <= maxLivingBudget && currentSum > 0) return result;
+
+  // Preserve fixed recurring commitments if possible (e.g. Insurance ~250)
+  const fixedCategories = new Set(['Insurance']);
+  let fixedSum = 0;
+  fixedCategories.forEach((cat) => {
+    if (result[cat]) fixedSum += result[cat];
+  });
+
+  if (fixedSum >= maxLivingBudget) {
+    const scale = maxLivingBudget / (currentSum || 1);
+    keys.forEach((cat) => {
+      result[cat] = Math.max(0, Math.floor((result[cat] * scale) / 10) * 10);
+    });
+  } else {
+    const availableForFlexible = maxLivingBudget - fixedSum;
+    const flexibleSum = Object.entries(result)
+      .filter(([cat]) => !fixedCategories.has(cat))
+      .reduce((sum, [, v]) => sum + v, 0);
+
+    if (flexibleSum > 0) {
+      const scale = availableForFlexible / flexibleSum;
+      keys.forEach((cat) => {
+        if (!fixedCategories.has(cat)) {
+          result[cat] = Math.max(0, Math.floor((result[cat] * scale) / 10) * 10);
+        }
+      });
+    }
+  }
+
+  // Micro-adjustment pass down to exact dollar: ensure adjustedSum <= maxLivingBudget
+  let adjustedSum = Object.values(result).reduce((sum, v) => sum + v, 0);
+  if (adjustedSum > maxLivingBudget) {
+    let excess = adjustedSum - maxLivingBudget;
+    const trimOrder = ['Other', 'Gift', 'Entertainment', 'Shopping', 'Sport', 'Education', 'Health', 'Transport', 'Housing & Bills', 'Food & Dining'];
+    for (const cat of trimOrder) {
+      if (result[cat] > 0 && excess > 0) {
+        const cut = Math.min(result[cat], excess);
+        result[cat] -= cut;
+        excess -= cut;
         if (excess <= 0) break;
       }
     }
-    if (!trimmed) break;
-  }
-
-  // If still excess, scale down other non-fixed caps
-  if (excess > 0) {
-    const keys = Object.keys(adjusted);
-    for (const key of keys) {
-      if (key === 'Insurance') continue;
-      const floor = 40;
-      if (adjusted[key] > floor && excess > 0) {
-        const step = Math.min(adjusted[key] - floor, excess);
-        adjusted[key] -= step;
-        excess -= step;
-        if (excess <= 0) break;
+    if (excess > 0) {
+      for (const cat of Object.keys(result)) {
+        if (result[cat] > 0 && excess > 0) {
+          const cut = Math.min(result[cat], excess);
+          result[cat] -= cut;
+          excess -= cut;
+          if (excess <= 0) break;
+        }
       }
     }
   }
 
-  return adjusted;
+  return result;
 }
 
 /**
  * Dynamically predicts month-end savings and investments based on:
  * 1. User's baseline income (from Income Allocation).
- * 2. Actual spending so far and daily burn rate pace.
+ * 2. Distinction between one-time / episodic lump sums (Education, Insurance, Bills)
+ *    and routine daily burn rate (Food, Transport).
  * 3. User's target savings and investment percentage split.
  */
 export function predictMonthlySavingsAndInvestments(
@@ -672,27 +749,53 @@ export function predictMonthlySavingsAndInvestments(
   const daysPassed = Math.max(1, Math.min(totalDaysInMonth, todayDate));
   const daysRemaining = Math.max(0, totalDaysInMonth - daysPassed);
 
-  // Filter living expenses in the target month
+  // Separate episodic lump sums vs routine daily expenses
   const validTxs = Array.isArray(currentMonthTransactions) ? currentMonthTransactions : [];
-  let spentSoFar = 0;
+  let lumpSumSpent = 0;
+  let dailyVariableSpent = 0;
+  const paidCategories = new Set<string>();
+
   validTxs.forEach((t) => {
     if (t.type === 'expense' && t.id !== 'tx_sample') {
-      spentSoFar += getAmountInBaseCurrency(t.amount || 0, t.currency, t.baseAmount);
+      const amt = getAmountInBaseCurrency(t.amount || 0, t.currency, t.baseAmount);
+      const cat = t.category || 'Other';
+      paidCategories.add(cat);
+      if (isLumpSumExpense(cat, amt)) {
+        lumpSumSpent += amt;
+      } else {
+        dailyVariableSpent += amt;
+      }
     }
   });
-  spentSoFar = Number(spentSoFar.toFixed(2));
 
-  // Current daily burn rate
-  const currentDailySpend = Number((spentSoFar / daysPassed).toFixed(2));
+  lumpSumSpent = Number(lumpSumSpent.toFixed(2));
+  dailyVariableSpent = Number(dailyVariableSpent.toFixed(2));
+  const spentSoFar = Number((lumpSumSpent + dailyVariableSpent).toFixed(2));
 
-  // Projected Month-End Spend based on daily pace
-  let projectedTotalSpend = 0;
-  if (daysPassed <= 2 && spentSoFar === 0) {
-    projectedTotalSpend = targetLivingBudget;
-  } else {
-    const rawProjected = spentSoFar + (currentDailySpend * daysRemaining);
-    projectedTotalSpend = Number(rawProjected.toFixed(2));
+  // Current daily variable burn rate (only reflects daily routine like food & transport)
+  const currentDailySpend = Number((dailyVariableSpent / daysPassed).toFixed(2));
+
+  // Dynamic remaining living budget
+  // Note: One-time / episodic expenses (like Education RM 200) deduct directly from the living pool,
+  // reducing the safe daily allowance for the remaining days so savings target is preserved!
+  const remainingLivingPool = Math.max(0, targetLivingBudget - spentSoFar);
+  const safeDailyLivingAllowance = daysRemaining > 0
+    ? Number((remainingLivingPool / daysRemaining).toFixed(2))
+    : 0;
+
+  // Effective projected daily burn rate:
+  // When early in the month (e.g. days 1-3) or dailyVariableSpent is low,
+  // do not hallucinate huge spikes or 0 burn rate.
+  let effectiveDailyRate = safeDailyLivingAllowance;
+  if (daysPassed >= 3 && dailyVariableSpent > 0) {
+    const dayWeight = Math.min(1, (daysPassed - 2) / 7);
+    effectiveDailyRate = (dayWeight * currentDailySpend) + ((1 - dayWeight) * safeDailyLivingAllowance);
+  } else if (dailyVariableSpent > 0) {
+    effectiveDailyRate = currentDailySpend;
   }
+
+  const projectedRemainingDaily = Number((effectiveDailyRate * daysRemaining).toFixed(2));
+  const projectedTotalSpend = Number((lumpSumSpent + dailyVariableSpent + projectedRemainingDaily).toFixed(2));
 
   // Projected Month-End Surplus
   const projectedMonthEndSurplus = Number(Math.max(0, baselineIncome - projectedTotalSpend).toFixed(2));
@@ -720,30 +823,30 @@ export function predictMonthlySavingsAndInvestments(
     ? Number(((predictedTotalSavedAmount / baselineIncome) * 100).toFixed(1))
     : 0;
 
-  // Safe daily living allowance to strictly achieve target savings & investments:
-  const remainingAllowedLiving = Math.max(0, targetLivingBudget - spentSoFar);
-  const safeDailyLivingAllowance = daysRemaining > 0
-    ? Number((remainingAllowedLiving / daysRemaining).toFixed(2))
-    : 0;
-
   const pacingDifferenceDaily = Number((safeDailyLivingAllowance - currentDailySpend).toFixed(2));
 
   let pacingStatus: MonthlySavingsPrediction['pacingStatus'] = 'on_track';
   let insightMessage = '';
 
+  const hasLumpSum = lumpSumSpent > 0;
+
   if (projectedTotalSpend > baselineIncome) {
     pacingStatus = 'in_deficit';
     const deficitAmt = (projectedTotalSpend - baselineIncome).toFixed(2);
-    insightMessage = `⚠️ Living deficit warning: At your current burn rate (RM ${currentDailySpend.toFixed(2)}/day), month-end spend (RM ${projectedTotalSpend.toFixed(2)}) will exceed your income by RM ${deficitAmt}. Reduce daily spend to RM ${safeDailyLivingAllowance.toFixed(2)}/day to recover.`;
+    insightMessage = `⚠️ Living deficit warning: At your current burn rate (RM ${currentDailySpend.toFixed(2)}/day), month-end spend (RM ${projectedTotalSpend.toFixed(2)}) will exceed income by RM ${deficitAmt}. Reduce daily living to RM ${safeDailyLivingAllowance.toFixed(2)}/day to recover.`;
   } else if (predictedTotalSavedPct < totalSavingsTargetPct * 0.85) {
     pacingStatus = 'risk_of_under_saving';
-    insightMessage = `⚠️ Under-saving risk: At RM ${currentDailySpend.toFixed(2)}/day, you are predicted to save RM ${predictedSavingsAmount.toLocaleString()} (${predictedSavingsPct}%) and invest RM ${predictedInvestmentAmount.toLocaleString()} (${predictedInvestmentPct}%), below your ${totalSavingsTargetPct}% target. Keep daily spend under RM ${safeDailyLivingAllowance.toFixed(2)}/day to protect your full target.`;
+    insightMessage = `⚠️ Under-saving risk: At RM ${currentDailySpend.toFixed(2)}/day, predicted savings is RM ${predictedSavingsAmount.toLocaleString()} (${predictedSavingsPct}%) and investments RM ${predictedInvestmentAmount.toLocaleString()} (${predictedInvestmentPct}%), below your ${totalSavingsTargetPct}% target. Keep daily spend under RM ${safeDailyLivingAllowance.toFixed(2)}/day to protect your full target.`;
   } else if (predictedTotalSavedPct > totalSavingsTargetPct) {
     pacingStatus = 'ahead_of_target';
-    insightMessage = `🎉 Ahead of goal! At RM ${currentDailySpend.toFixed(2)}/day, you are predicted to save RM ${predictedSavingsAmount.toLocaleString()} (${predictedSavingsPct}%) and invest RM ${predictedInvestmentAmount.toLocaleString()} (${predictedInvestmentPct}%), beating your ${totalSavingsTargetPct}% target!`;
+    insightMessage = hasLumpSum
+      ? `🎉 Ahead of goal! One-off / lump-sum spend (RM ${lumpSumSpent.toFixed(2)}) absorbed. Daily living pace (RM ${currentDailySpend.toFixed(2)}/day) keeps savings on track at RM ${predictedSavingsAmount.toLocaleString()} (${predictedSavingsPct}%) and investments at RM ${predictedInvestmentAmount.toLocaleString()} (${predictedInvestmentPct}%)!`
+      : `🎉 Ahead of goal! At RM ${currentDailySpend.toFixed(2)}/day, predicted savings is RM ${predictedSavingsAmount.toLocaleString()} (${predictedSavingsPct}%) and investments RM ${predictedInvestmentAmount.toLocaleString()} (${predictedInvestmentPct}%), outperforming your ${totalSavingsTargetPct}% target!`;
   } else {
     pacingStatus = 'on_track';
-    insightMessage = `✨ On track: At RM ${currentDailySpend.toFixed(2)}/day, you are projected to save RM ${predictedSavingsAmount.toLocaleString()} (${predictedSavingsPct}%) and invest RM ${predictedInvestmentAmount.toLocaleString()} (${predictedInvestmentPct}%), hitting your ${totalSavingsTargetPct}% target.`;
+    insightMessage = hasLumpSum
+      ? `✨ On track: Lump sum (RM ${lumpSumSpent.toFixed(2)}) absorbed. Safe daily allowance adjusted to RM ${safeDailyLivingAllowance.toFixed(2)}/day, preserving your ${totalSavingsTargetPct}% savings target (RM ${predictedSavingsAmount.toLocaleString()} savings + RM ${predictedInvestmentAmount.toLocaleString()} investments).`
+      : `✨ On track: At RM ${currentDailySpend.toFixed(2)}/day, you are projected to save RM ${predictedSavingsAmount.toLocaleString()} (${predictedSavingsPct}%) and invest RM ${predictedInvestmentAmount.toLocaleString()} (${predictedInvestmentPct}%), hitting your ${totalSavingsTargetPct}% target.`;
   }
 
   return {
@@ -759,6 +862,8 @@ export function predictMonthlySavingsAndInvestments(
     daysPassed,
     daysRemaining,
     spentSoFar,
+    lumpSumSpent,
+    dailyVariableSpent,
     currentDailySpend,
     projectedTotalSpend,
     projectedMonthEndSurplus,

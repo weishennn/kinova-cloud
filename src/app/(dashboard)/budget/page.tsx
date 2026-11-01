@@ -374,10 +374,9 @@ export default function BudgetPage() {
   }, [isAutoTuneOpen, intelligentPlan]);
 
   const handleApplySmartCaps = () => {
-    const safeCaps = isDraftSumExceeded ? fitCapsToLivingBudget(customCapsDraft, maxLivingBudget) : customCapsDraft;
-    const updated = { ...categoryCaps, ...safeCaps };
-    setCategoryCaps(updated);
-    saveCategoryCaps(updated);
+    const safeCaps = fitCapsToLivingBudget(customCapsDraft, maxLivingBudget);
+    setCategoryCaps(safeCaps);
+    saveCategoryCaps(safeCaps);
     toast.success('AI Smart Category Caps applied and saved to cloud sync!');
     setIsAutoTuneOpen(false);
   };
@@ -669,7 +668,13 @@ export default function BudgetPage() {
                 </span>
               </div>
               <span className="text-[11px] text-slate-600 dark:text-zinc-400">
-                Paced by your daily spend of <strong className="font-mono text-slate-900 dark:text-white">RM {savingsPrediction.currentDailySpend.toFixed(2)}/day</strong> (RM {savingsPrediction.spentSoFar.toFixed(2)} in {savingsPrediction.daysPassed} days)
+                Daily living burn: <strong className="font-mono text-slate-900 dark:text-white">RM {savingsPrediction.currentDailySpend.toFixed(2)}/day</strong>
+                {savingsPrediction.lumpSumSpent > 0 && (
+                  <span className="text-indigo-700 dark:text-indigo-300 font-medium">
+                    {' '}· Lump sums: <strong className="font-mono">RM {savingsPrediction.lumpSumSpent.toFixed(2)}</strong> (absorbed flexibly)
+                  </span>
+                )}
+                {' '}· Total: RM {savingsPrediction.spentSoFar.toFixed(2)} ({savingsPrediction.daysPassed}d passed, {savingsPrediction.daysRemaining}d left)
               </span>
             </div>
           </div>
@@ -761,6 +766,11 @@ export default function BudgetPage() {
             <div className="text-[10px] font-mono text-slate-600 dark:text-zinc-300">
               Safe Daily Pace: <strong className="text-emerald-700 dark:text-emerald-400">RM {savingsPrediction.safeDailyLivingAllowance.toFixed(2)}/day</strong> ({savingsPrediction.daysRemaining}d left)
             </div>
+            {savingsPrediction.lumpSumSpent > 0 && (
+              <div className="text-[10px] text-indigo-700 dark:text-indigo-300">
+                ✨ RM {savingsPrediction.lumpSumSpent.toFixed(2)} lump sum absorbed into month without distorting daily living pace.
+              </div>
+            )}
           </div>
         </div>
 
