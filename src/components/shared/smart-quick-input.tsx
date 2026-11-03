@@ -22,6 +22,7 @@ import {
   type AssistantTurnMessage,
 } from '@/lib/kinova-assistant';
 import { routeLocalIntent, type LocalRouteResult } from '@/lib/intent-router';
+import { getSavedCategoryCaps, saveCategoryCaps } from '@/lib/category-budget-helper';
 import {
   getUserMoneyProfile,
   updateUserMoneyProfile,
@@ -1111,6 +1112,23 @@ export function SmartQuickInput() {
     if (e) e.preventDefault();
     if (isSubmitting || isAssistantThinking) return;
 
+    if (localRoute && localRoute.mode === 'set_preference') {
+      const pref = localRoute.preference;
+      if (pref.key === 'categoryBudgetCap') {
+        const { category, amount } = pref.value as { category: string; amount: number };
+        saveCategoryCaps({ ...getSavedCategoryCaps(), [category]: amount });
+      } else if (pref.key === 'paydayDay') {
+        updateUserMoneyProfile({ paydayDay: pref.value as number });
+      } else if (pref.key === 'monthlyBudgetCap') {
+        updateUserMoneyProfile({ monthlyBudgetCap: pref.value as number });
+      } else if (pref.key === 'language') {
+        updateUserMoneyProfile({ language: pref.value as any });
+      }
+      toast.success(`Saved preference: ${pref.label}`);
+      setInput('');
+      return;
+    }
+
     let commandToProcess = activeCommand;
     // If no local transaction command is resolved, send to Kinova Assistant
     if (!commandToProcess) {
@@ -1691,7 +1709,10 @@ export function SmartQuickInput() {
               type="button"
               onClick={() => {
                 const pref = localRoute.preference;
-                if (pref.key === 'paydayDay') updateUserMoneyProfile({ paydayDay: pref.value as number });
+                if (pref.key === 'categoryBudgetCap') {
+                  const { category, amount } = pref.value as { category: string; amount: number };
+                  saveCategoryCaps({ ...getSavedCategoryCaps(), [category]: amount });
+                } else if (pref.key === 'paydayDay') updateUserMoneyProfile({ paydayDay: pref.value as number });
                 else if (pref.key === 'monthlyBudgetCap') updateUserMoneyProfile({ monthlyBudgetCap: pref.value as number });
                 else if (pref.key === 'language') updateUserMoneyProfile({ language: pref.value as any });
                 toast.success(`Saved preference: ${pref.label}`);

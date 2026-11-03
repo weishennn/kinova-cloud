@@ -32,6 +32,7 @@ import { confirmAction } from '@/stores/confirm-dialog-store';
 import { buildTransactionBaseRecord } from '@/lib/conflict-policy';
 import { getTransactionRecordedInfo } from '@/lib/date-helper';
 import { stripReceiptItemsFromNotes, withReceiptItemsInNotes } from '@/lib/receipt-items';
+import { getCategoryRealtimeBudgetStatus } from '@/lib/category-budget-helper';
 
 interface TransactionDetailModalProps {
   transaction: Transaction | null;
@@ -175,6 +176,21 @@ function TransactionDetailContent({
 
   const isIncome = transaction?.type === 'income';
   const isInvestment = transaction?.type === 'investment';
+
+  const categoryBudgetStatus = useMemo(() => {
+    if (isIncome || !transaction?.category) return null;
+    const targetMonth = (transaction.date || '').slice(0, 7);
+    return getCategoryRealtimeBudgetStatus(
+      transaction.category,
+      transactions,
+      undefined,
+      0,
+      {
+        targetMonth,
+        referenceDate: transaction.date ? new Date(transaction.date) : undefined,
+      }
+    );
+  }, [isIncome, transaction, transactions]);
 
   const handleEdit = () => {
     const tx = transaction;
@@ -541,6 +557,34 @@ function TransactionDetailContent({
                     ⚠️ Missing receipt for LHDN audit — tap &ldquo;Edit Transaction&rdquo; below to attach a photo or PDF receipt.
                   </p>
                 )}
+              </div>
+            )}
+
+            {/* Category Budget Status */}
+            {categoryBudgetStatus && (
+              <div className="pt-2 border-t border-slate-200 dark:border-zinc-800/60 space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-500 dark:text-zinc-400 font-medium">Category Budget ({transaction.category})</span>
+                  <span className={`text-[11px] font-mono font-semibold ${
+                    categoryBudgetStatus.isOverCapBefore
+                      ? 'text-rose-700 dark:text-rose-400'
+                      : 'text-emerald-700 dark:text-emerald-400'
+                  }`}>
+                    RM {categoryBudgetStatus.spentSoFar.toFixed(2)} / RM {categoryBudgetStatus.cap.toFixed(0)} ({categoryBudgetStatus.spentPercentBefore.toFixed(0)}%)
+                  </span>
+                </div>
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-zinc-800">
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      categoryBudgetStatus.isOverCapBefore
+                        ? 'bg-rose-500'
+                        : categoryBudgetStatus.spentPercentBefore > 80
+                        ? 'bg-amber-400'
+                        : 'bg-indigo-500'
+                    }`}
+                    style={{ width: `${Math.min(100, categoryBudgetStatus.spentPercentBefore)}%` }}
+                  />
+                </div>
               </div>
             )}
 

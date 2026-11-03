@@ -103,10 +103,6 @@ export const DEFAULT_HABIT_MEMORIES: HabitMemoryItem[] = [
   },
 ];
 
-/**
- * Retrieves all stored habit memories, seamlessly bootstrapping with defaults and
- * incorporating existing merchant category rules.
- */
 export function getHabitMemories(): HabitMemoryItem[] {
   if (typeof window === 'undefined' && typeof localStorage === 'undefined') return DEFAULT_HABIT_MEMORIES;
 
@@ -120,7 +116,6 @@ export function getHabitMemories(): HabitMemoryItem[] {
       }
     }
 
-    // Merge with legacy merchant rules if they exist and aren't represented yet
     const legacyRules = getMerchantCategoryRules();
     const existingPatterns = new Set(items.map((it) => it.rawPattern.toLowerCase()));
 
@@ -154,16 +149,12 @@ export function getHabitMemories(): HabitMemoryItem[] {
   }
 }
 
-/**
- * Saves habit memories locally and syncs to Google Sheets Settings in the cloud.
- */
 function persistHabitMemories(memories: HabitMemoryItem[]): void {
   if (typeof window === 'undefined' && typeof localStorage === 'undefined') return;
   try {
     const serialized = JSON.stringify(memories);
     localStorage.setItem(HABIT_STORAGE_KEY, serialized);
 
-    // Also mirror to legacy merchant rules for backwards compatibility
     const legacyRules: MerchantCategoryRule[] = memories.map((m) => ({
       id: m.id,
       merchantPattern: m.rawPattern,
@@ -174,7 +165,6 @@ function persistHabitMemories(memories: HabitMemoryItem[]): void {
     }));
     localStorage.setItem('cashflow_merchant_category_rules', JSON.stringify(legacyRules));
 
-    // Cloud settings sync
     import('./cloud-settings-sync')
       .then((m) => {
         m.saveSettingWithCloudSync(HABIT_STORAGE_KEY, serialized);
@@ -190,7 +180,6 @@ function persistHabitMemories(memories: HabitMemoryItem[]): void {
 
 /**
  * Cleans bank transfer noise, DuitNow prefixes, and recipient markers.
- * e.g. "DuitNow Transfer to abc" -> "abc", "Payment to TAN CHIN HONG" -> "TAN CHIN HONG"
  */
 export function cleanPayeeOrMerchantPattern(input: string): string {
   let cleaned = normalizePattern(input);
@@ -200,9 +189,39 @@ export function cleanPayeeOrMerchantPattern(input: string): string {
   return cleaned;
 }
 
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Safe pattern matcher that prevents short ASCII aliases (e.g. "abc") from matching inside
+ * unrelated English words (e.g. "gr[abc]ar").
+ * - CJK patterns match via substring (>=2 chars).
+ * - ASCII patterns < 6 chars MUST match on word boundaries (`\bpattern\b`).
+ * - ASCII patterns >= 6 chars can match via word boundary or substring.
+ */
+function matchesPatternSafely(haystackLower: string, patternLower: string): boolean {
+  const pat = patternLower.trim();
+  if (!pat || pat.length < 2) return false;
+  if (haystackLower === pat) return true;
+
+  const hasCjk = /[\u4e00-\u9fa5]/.test(pat);
+  if (hasCjk) {
+    return haystackLower.includes(pat);
+  }
+
+  const wordBoundaryRegex = new RegExp(`(?:^|[^a-z0-9])${escapeRegex(pat)}(?:$|[^a-z0-9])`, 'i');
+  if (wordBoundaryRegex.test(haystackLower)) {
+    return true;
+  }
+
+  // Only allow substring containment without word boundaries for longer multi-char patterns (>= 6 chars)
+  return pat.length >= 6 && haystackLower.includes(pat);
+}
+
 /**
  * Matches input text against learned habit memories.
- * Evaluates both rawPattern and preferredAlias. Longer, high-confidence patterns match first.
+ * Evaluates both rawPattern and preferredAlias with word-boundary protection.
  */
 export function matchHabitMemory(
   textOrPayee: string,
@@ -218,7 +237,6 @@ export function matchHabitMemory(
   const textLower = text.toLowerCase();
   const cleanedText = cleanPayeeOrMerchantPattern(text).toLowerCase();
 
-  // Sort descending by pattern length and confidence so specific habits take precedence
   const sorted = memories.slice().sort((a, b) => {
     const lenA = a.rawPattern.length;
     const lenB = b.rawPattern.length;
@@ -227,17 +245,16 @@ export function matchHabitMemory(
   });
 
   for (const memory of sorted) {
-    const patLower = memory.rawPattern.toLowerCase();
-    const aliasLower = memory.preferredAlias.toLowerCase();
+    const patLower = memory.rawPattern.toLowerCase().trim();
+    const aliasLower = memory.preferredAlias.toLowerCase().trim();
 
-    // Check exact or containment matches
-    const isExactRaw = textLower === patLower || cleanedText === patLower;
-    const isContainsRaw = textLower.includes(patLower) || (patLower.length >= 3 && cleanedText.includes(patLower));
-    const isExactAlias = textLower === aliasLower || cleanedText === aliasLower;
-    const isContainsAlias = textLower.includes(aliasLower) || (aliasLower.length >= 3 && cleanedText.includes(aliasLower));
+    const matchedRaw =
+      matchesPatternSafely(textLower, patLower) || matchesPatternSafely(cleanedText, patLower);
+    const matchedAlias =
+      matchesPatternSafely(textLower, aliasLower) || matchesPatternSafely(cleanedText, aliasLower);
 
-    if (isExactRaw || isContainsRaw || isExactAlias || isContainsAlias) {
-      const isAlias = memory.rawPattern.toLowerCase() !== memory.preferredAlias.toLowerCase();
+    if (matchedRaw || matchedAlias) {
+      const isAlias = patLower !== aliasLower;
       return {
         matchedItem: memory,
         resolvedDescription: memory.preferredAlias,
@@ -251,11 +268,6 @@ export function matchHabitMemory(
   return null;
 }
 
-/**
- * Learns or strengthens a habit dynamically.
- * e.g. User pays "abc", but enters "zapfan", category "Food & Dining".
- * This records/updates the habit: abc -> zapfan, Food & Dining.
- */
 export function learnOrStrengthenHabit(params: {
   rawInputOrMerchant: string;
   aliasOrDescription: string;
@@ -325,9 +337,6 @@ export function learnOrStrengthenHabit(params: {
   return updatedItem;
 }
 
-/**
- * Deletes a habit memory by ID or pattern.
- */
 export function deleteHabitMemory(idOrPattern: string): boolean {
   if (typeof window === 'undefined' && typeof localStorage === 'undefined') return false;
   const memories = getHabitMemories();
@@ -340,15 +349,9 @@ export function deleteHabitMemory(idOrPattern: string): boolean {
   return true;
 }
 
-/**
- * Mines historical ledger transactions to automatically discover repeat transfer habits.
- * Detects patterns like notes containing "[转账给: abc]" or raw merchant "abc" consistently
- * mapped to description "zapfan" or category "Food & Dining".
- */
 export function mineHabitsFromLedger(transactions: MinimalLedgerRecord[]): HabitMemoryItem[] {
   if (!Array.isArray(transactions) || transactions.length === 0) return [];
 
-  // Map: rawPayee -> Map<alias, count>
   const candidateMap = new Map<string, {
     raw: string;
     aliasCounts: Map<string, number>;
@@ -364,7 +367,6 @@ export function mineHabitsFromLedger(transactions: MinimalLedgerRecord[]): Habit
     const notes = (tx.notes || '').trim();
     const cat = (tx.category || '').trim();
 
-    // Check if notes contains raw transfer payee info like "[转账给: abc]" or "转账给: abc"
     let rawPayee = '';
     const noteMatch = notes.match(/(?:\[转账给:\s*|转账给:\s*|DuitNow to:\s*|Payment to:\s*)([^\]\n]+)/i);
     if (noteMatch && noteMatch[1]) {
@@ -401,8 +403,7 @@ export function mineHabitsFromLedger(transactions: MinimalLedgerRecord[]): Habit
   const minedHabits: HabitMemoryItem[] = [];
   const now = new Date().toISOString();
 
-  for (const [_, data] of candidateMap.entries()) {
-    // Pick top alias
+  for (const [, data] of candidateMap.entries()) {
     let topAlias = '';
     let topAliasCount = 0;
     for (const [alias, count] of data.aliasCounts.entries()) {
@@ -412,7 +413,6 @@ export function mineHabitsFromLedger(transactions: MinimalLedgerRecord[]): Habit
       }
     }
 
-    // Pick top category
     let topCat = 'Food & Dining';
     let topCatCount = 0;
     for (const [cat, count] of data.categoryCounts.entries()) {
@@ -422,11 +422,11 @@ export function mineHabitsFromLedger(transactions: MinimalLedgerRecord[]): Habit
       }
     }
 
-    // Require at least 2 occurrences or strong agreement
     if (topAlias && topAliasCount >= 2) {
-      const avgAmount = data.amounts.length > 0
-        ? Number((data.amounts.reduce((a, b) => a + b, 0) / data.amounts.length).toFixed(2))
-        : undefined;
+      const avgAmount =
+        data.amounts.length > 0
+          ? Number((data.amounts.reduce((a, b) => a + b, 0) / data.amounts.length).toFixed(2))
+          : undefined;
 
       minedHabits.push({
         id: `mined_${data.raw.toLowerCase()}`,

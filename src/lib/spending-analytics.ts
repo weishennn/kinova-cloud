@@ -1,3 +1,5 @@
+import { getAmountInBaseCurrency } from './currency.ts';
+
 function getLocalDateString(d: Date = new Date()): string {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -9,6 +11,7 @@ export interface SpendingTransaction {
   id: string;
   date: string;
   amount: number;
+  baseAmount?: number;
   type: string;
   category?: string;
   description?: string;
@@ -56,12 +59,32 @@ export const KNOWN_CATEGORY_TARGETS: SpendingCategoryTarget[] = [
   {
     key: 'Bills',
     label: '水电账单 (Bills & Utilities)',
-    synonyms: ['bill', 'bills', 'utilities', 'telco', 'wifi', 'phone', 'electricity', 'water', '账单', '水电', '话费', '网费', '电话费'],
+    synonyms: ['housing', 'bill', 'bills', 'utilities', 'telco', 'wifi', 'phone', 'electricity', 'water', 'rent', 'rental', '账单', '水电', '话费', '网费', '电话费', '房租', '居家'],
   },
   {
     key: 'Health',
     label: '医疗健康 (Health & Medical)',
     synonyms: ['health', 'medical', 'medicine', 'doctor', 'clinic', 'hospital', 'pharmacy', '医疗', '看病', '药', '诊所', '保健'],
+  },
+  {
+    key: 'Insurance',
+    label: '保险保障 (Insurance)',
+    synonyms: ['insurance', 'takaful', 'aia', 'prudential', 'great eastern', 'allianz', 'medical card', '保险', '保费', '保单', '医药卡'],
+  },
+  {
+    key: 'Parents',
+    label: '孝亲家用 (Parents)',
+    synonyms: ['parents', 'parent', 'mom', 'dad', 'mother', 'father', '父母', '家用', '孝亲', '妈妈', '爸爸'],
+  },
+  {
+    key: 'Sport',
+    label: '运动健身 (Sport)',
+    synonyms: ['sport', 'sports', 'badminton', 'gym', 'fitness', 'workout', 'running', 'swimming', 'pickleball', '运动', '羽毛球', '健身', '跑步', '球场'],
+  },
+  {
+    key: 'Gift',
+    label: '礼物红包 (Gift)',
+    synonyms: ['gift', 'gifts', 'present', 'angpow', 'angpao', 'hongbao', 'red packet', 'donation', '礼物', '红包', '送礼', '人情', '礼金'],
   },
   {
     key: 'Travel',
@@ -97,8 +120,7 @@ const SPENDING_INTENT_REGEX = /(花了多少|消费了多少|支出了多少|总
 export function isSpendingAnalyticsQuery(query: string): boolean {
   const clean = query.trim().toLowerCase();
   if (SPENDING_INTENT_REGEX.test(clean)) return true;
-  // Patterns like "food 这个月", "food 支出"
-  if (/(food|transport|shopping|餐饮|交通|开销|支出).*(这个月|上个月|今年|总共|花了)/i.test(clean)) return true;
+  if (/(food|transport|shopping|sport|insurance|parents|gift|bills|餐饮|交通|运动|保险|购物|水电|开销|支出).*(这个月|上个月|今年|总共|花了)/i.test(clean)) return true;
   return false;
 }
 
@@ -109,7 +131,29 @@ export function resolveTimeframe(query: string, referenceDateStr?: string): Spen
 
   const clean = query.toLowerCase();
 
-  // 1. Last month / 上个月
+  // 1. Explicit YYYY年M月 or Month Name (e.g. "9月", "10月")
+  const cnMonthMatch = clean.match(/(?:(\d{4})\s*年\s*)?(1[0-2]|0?[1-9])\s*月/);
+  if (cnMonthMatch && !/(这个月|本月|上个月|上月)/.test(clean)) {
+    const targetY = cnMonthMatch[1] ? parseInt(cnMonthMatch[1], 10) : year;
+    const targetM = parseInt(cnMonthMatch[2], 10); // 1-12
+    const lastDay = new Date(targetY, targetM, 0).getDate();
+    const prevDate = new Date(targetY, targetM - 2, 1);
+    const pYear = prevDate.getFullYear();
+    const pMonth = prevDate.getMonth() + 1;
+    const pLastDay = new Date(pYear, pMonth, 0).getDate();
+
+    return {
+      key: 'custom_month',
+      label: `${targetY}年${targetM}月`,
+      startDate: `${targetY}-${String(targetM).padStart(2, '0')}-01`,
+      endDate: `${targetY}-${String(targetM).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`,
+      prevStartDate: `${pYear}-${String(pMonth).padStart(2, '0')}-01`,
+      prevEndDate: `${pYear}-${String(pMonth).padStart(2, '0')}-${String(pLastDay).padStart(2, '0')}`,
+      prevLabel: `${pYear}年${pMonth}月`,
+    };
+  }
+
+  // 2. Last month / 上个月
   if (/(上个?月|last\s*month|previous\s*month)/i.test(clean)) {
     const prevMonthDate = new Date(year, month - 1, 1);
     const pYear = prevMonthDate.getFullYear();
@@ -119,7 +163,6 @@ export function resolveTimeframe(query: string, referenceDateStr?: string): Spen
     const startDate = `${pYear}-${String(pMonth + 1).padStart(2, '0')}-01`;
     const endDate = `${pYear}-${String(pMonth + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
-    // Two months ago for comparison
     const twoMonthsAgo = new Date(pYear, pMonth - 1, 1);
     const twoYear = twoMonthsAgo.getFullYear();
     const twoMonth = twoMonthsAgo.getMonth();
@@ -136,7 +179,7 @@ export function resolveTimeframe(query: string, referenceDateStr?: string): Spen
     };
   }
 
-  // 2. This year / 今年
+  // 3. This year / 今年
   if (/(今年|this\s*year)/i.test(clean)) {
     return {
       key: 'this_year',
@@ -149,7 +192,7 @@ export function resolveTimeframe(query: string, referenceDateStr?: string): Spen
     };
   }
 
-  // 3. All time / 全部
+  // 4. All time / 全部
   if (/(全部|所有|all\s*time|一直以来)/i.test(clean)) {
     return {
       key: 'all_time',
@@ -159,7 +202,7 @@ export function resolveTimeframe(query: string, referenceDateStr?: string): Spen
     };
   }
 
-  // 4. Default: This month / 这个月
+  // 5. Default: This month / 这个月
   const thisMonthLastDay = new Date(year, month + 1, 0).getDate();
   const startDate = `${year}-${String(month + 1).padStart(2, '0')}-01`;
   const endDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(thisMonthLastDay).padStart(2, '0')}`;
@@ -183,14 +226,14 @@ export function resolveTimeframe(query: string, referenceDateStr?: string): Spen
 export function resolveTargetCategory(query: string, availableCategories: string[] = []): { key: string; label: string } | null {
   const clean = query.toLowerCase();
 
-  // First check predefined targets
+  // 1. Check predefined targets (preserving canonical short keys like 'Food' and 'Bills')
   for (const target of KNOWN_CATEGORY_TARGETS) {
     if (target.synonyms.some((syn) => clean.includes(syn))) {
       return { key: target.key, label: target.label };
     }
   }
 
-  // Check available ledger categories
+  // 2. Check available ledger categories
   for (const cat of availableCategories) {
     if (!cat) continue;
     const catLower = cat.toLowerCase();
@@ -216,6 +259,10 @@ function formatAmount(currency: string, amount: number): string {
   }
 }
 
+function getTxBaseMyr(t: SpendingTransaction): number {
+  return getAmountInBaseCurrency(t.amount || 0, t.currency, t.baseAmount);
+}
+
 export function computeSpendingAnalytics<T extends SpendingTransaction = SpendingTransaction>(
   query: string,
   transactions: T[],
@@ -229,38 +276,37 @@ export function computeSpendingAnalytics<T extends SpendingTransaction = Spendin
   );
   const targetCategory = resolveTargetCategory(query, distinctCategories);
 
-  // Filter expenses within target timeframe
   const periodExpenses = transactions.filter((t) => {
     if (String(t.type || '').toLowerCase() !== 'expense') return false;
     return t.date >= timeframe.startDate && t.date <= timeframe.endDate;
   });
 
-  // Filter matching category if requested
-  const matchingTransactions = periodExpenses.filter((t) => {
-    if (!targetCategory) return true;
-    const catLower = (t.category || '').toLowerCase();
-    const descLower = (t.description || '').toLowerCase();
-    const targetKeyLower = targetCategory.key.toLowerCase();
+  const matchingTransactions = periodExpenses
+    .filter((t) => {
+      if (!targetCategory) return true;
+      const catLower = (t.category || '').toLowerCase();
+      const descLower = (t.description || '').toLowerCase();
+      const targetKeyLower = targetCategory.key.toLowerCase();
 
-    if (catLower.includes(targetKeyLower) || targetKeyLower.includes(catLower)) return true;
+      if (catLower.includes(targetKeyLower) || targetKeyLower.includes(catLower)) return true;
 
-    // Also check synonym matches
-    const known = KNOWN_CATEGORY_TARGETS.find((k) => k.key.toLowerCase() === targetKeyLower);
-    if (known && known.synonyms.some((syn) => catLower.includes(syn) || descLower.includes(syn))) {
-      return true;
-    }
-    return false;
-  }).sort((a, b) => b.date.localeCompare(a.date) || b.amount - a.amount);
+      const known = KNOWN_CATEGORY_TARGETS.find((k) => k.key.toLowerCase() === targetKeyLower);
+      if (known && known.synonyms.some((syn) => catLower.includes(syn) || descLower.includes(syn))) {
+        return true;
+      }
+      return false;
+    })
+    .sort((a, b) => b.date.localeCompare(a.date) || getTxBaseMyr(b) - getTxBaseMyr(a));
 
   const currency = matchingTransactions[0]?.currency || transactions[0]?.currency || 'MYR';
-  const totalSpent = Number(matchingTransactions.reduce((acc, t) => acc + (t.amount || 0), 0).toFixed(2));
+  const totalSpent = Number(matchingTransactions.reduce((acc, t) => acc + getTxBaseMyr(t), 0).toFixed(2));
   const transactionCount = matchingTransactions.length;
 
-  const largestExpense = matchingTransactions.length > 0
-    ? [...matchingTransactions].sort((a, b) => b.amount - a.amount)[0]
-    : null;
+  const largestExpense =
+    matchingTransactions.length > 0
+      ? [...matchingTransactions].sort((a, b) => getTxBaseMyr(b) - getTxBaseMyr(a))[0]
+      : null;
 
-  // Daily average
   const todayStr = referenceDateStr || getLocalDateString();
   let daysCount = 30;
   if (timeframe.key === 'this_month') {
@@ -273,7 +319,6 @@ export function computeSpendingAnalytics<T extends SpendingTransaction = Spendin
   }
   const dailyAverage = Number((totalSpent / daysCount).toFixed(2));
 
-  // Compute previous period comparison
   let previousPeriodSpent: number | null = null;
   let percentageChange: number | null = null;
 
@@ -295,19 +340,18 @@ export function computeSpendingAnalytics<T extends SpendingTransaction = Spendin
       return false;
     });
 
-    previousPeriodSpent = Number(prevPeriodExpenses.reduce((acc, t) => acc + (t.amount || 0), 0).toFixed(2));
+    previousPeriodSpent = Number(prevPeriodExpenses.reduce((acc, t) => acc + getTxBaseMyr(t), 0).toFixed(2));
     if (previousPeriodSpent > 0) {
       percentageChange = Number((((totalSpent - previousPeriodSpent) / previousPeriodSpent) * 100).toFixed(1));
     }
   }
 
-  // Category breakdown if user asked for all expenses
   let categoryBreakdown: Array<{ category: string; amount: number; percentage: number }> | undefined;
   if (!targetCategory && periodExpenses.length > 0 && totalSpent > 0) {
     const catMap = new Map<string, number>();
     for (const t of periodExpenses) {
       const cat = t.category || 'Other';
-      catMap.set(cat, (catMap.get(cat) || 0) + t.amount);
+      catMap.set(cat, (catMap.get(cat) || 0) + getTxBaseMyr(t));
     }
     categoryBreakdown = Array.from(catMap.entries())
       .map(([category, amount]) => ({
@@ -319,7 +363,6 @@ export function computeSpendingAnalytics<T extends SpendingTransaction = Spendin
       .slice(0, 5);
   }
 
-  // Generate conversational natural language summary
   const catText = targetCategory ? `在「${targetCategory.label}」分类` : '总共';
   let conversationalSummary = `你${timeframe.label}${catText}支出了 ${formatAmount(currency, totalSpent)}（共 ${transactionCount} 笔账单）。`;
 
@@ -334,7 +377,8 @@ export function computeSpendingAnalytics<T extends SpendingTransaction = Spendin
   }
 
   if (largestExpense) {
-    conversationalSummary += ` 其中单笔最高的一笔是 ${largestExpense.date} 的「${largestExpense.description || largestExpense.category}」(${formatAmount(currency, largestExpense.amount)})。`;
+    const largestMyr = getTxBaseMyr(largestExpense);
+    conversationalSummary += ` 其中单笔最高的一笔是 ${largestExpense.date} 的「${largestExpense.description || largestExpense.category}」(${formatAmount(currency, largestMyr)})。`;
   }
 
   return {

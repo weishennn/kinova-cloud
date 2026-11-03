@@ -519,11 +519,12 @@ export function RecordPaymentModal() {
       getCachedRatesToMyr()
     );
     const targetMonthStr = date ? date.slice(0, 7) : undefined;
-    const monthTxs = targetMonthStr
-      ? yearTransactions.filter((t) => t.date && t.date.startsWith(targetMonthStr))
-      : yearTransactions;
-    return getCategoryRealtimeBudgetStatus(category, monthTxs, undefined, numAmount);
-  }, [type, category, amount, transactionCurrency, date, yearTransactions]);
+    const ignoreTxId = editTransaction ? String(editTransaction.id || editTransaction.Id || '') : undefined;
+    return getCategoryRealtimeBudgetStatus(category, yearTransactions, undefined, numAmount, {
+      targetMonth: targetMonthStr,
+      ignoreTransactionId: ignoreTxId,
+    });
+  }, [type, category, amount, transactionCurrency, date, yearTransactions, editTransaction]);
 
   useEffect(() => {
     if (!editTransaction) return;
@@ -2087,7 +2088,23 @@ export function RecordPaymentModal() {
                       )}
                     </div>
                     <div className="text-right text-slate-600 dark:text-zinc-400">
-                      Safe Food Pace: <strong className="font-mono text-slate-900 dark:text-white">RM {categoryBudgetStatus.dailyAllowanceRemaining.toFixed(2)}/day</strong> ({categoryBudgetStatus.daysRemainingInMonth}d left)
+                      Safe Food Pace:{' '}
+                      {parseFloat(amount) > 0 ? (
+                        <>
+                          <span className="line-through text-slate-400 dark:text-zinc-500 font-mono">
+                            RM {categoryBudgetStatus.dailyAllowanceRemaining.toFixed(2)}
+                          </span>
+                          {' → '}
+                          <strong className="font-mono text-slate-900 dark:text-white">
+                            RM {categoryBudgetStatus.dailyAllowanceAfter.toFixed(2)}/day
+                          </strong>
+                        </>
+                      ) : (
+                        <strong className="font-mono text-slate-900 dark:text-white">
+                          RM {categoryBudgetStatus.dailyAllowanceRemaining.toFixed(2)}/day
+                        </strong>
+                      )}{' '}
+                      ({categoryBudgetStatus.daysRemainingInMonth}d left)
                     </div>
                   </div>
                 ) : (

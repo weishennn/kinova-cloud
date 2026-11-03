@@ -22,10 +22,11 @@ import {
 import { parseNaturalExpense } from './natural-expense-parser.ts';
 import { getUserMoneyProfile, type UserMoneyProfile } from './user-money-profile.ts';
 import { getLocalDateString } from './date-helper.ts';
+import { getAmountInBaseCurrency } from './currency.ts';
+import { getSavedCategoryCaps } from './category-budget-helper.ts';
 import type { AiCommand } from '../types/ai-command.ts';
 import {
   computeDeterministicLedgerFacts as computeCopilotFacts,
-  type DeterministicLedgerFacts as CopilotFactsResult,
 } from './copilot-ledger-facts.ts';
 import { mineUserHabitSuggestions } from './habit-suggestions.ts';
 
@@ -103,6 +104,7 @@ export interface DeterministicLedgerFacts {
   currentMonthTotalSpent: number;
   currentMonthBudgetRemaining: number | null;
   categorySpending: Record<string, number>;
+  categoryCaps?: Record<string, number>;
   categoryMedians: Record<string, number>;
   matchedRecordCount: number;
   matchedExactSpent: number;
@@ -158,8 +160,8 @@ export type KinovaTurnResult =
     };
 
 /**
- * Computes deterministic facts across 100% of the user's ledger transactions.
- * Never ask the AI to do math on a sample.
+ * Computes deterministic facts across 100% of the user's ledger transactions in base MYR.
+ * Includes active categoryCaps so Gemini can answer "can I afford this?" against both category cap and monthly cap.
  */
 export function computeDeterministicLedgerFacts(
   transactions: Array<{
@@ -169,6 +171,8 @@ export function computeDeterministicLedgerFacts(
     category?: string;
     description?: string;
     amount?: number;
+    currency?: string;
+    baseAmount?: number;
     notes?: string;
     receiptItems?: any[];
   }>,
@@ -187,31 +191,29 @@ export function computeDeterministicLedgerFacts(
   for (const t of transactions) {
     if (!t || typeof t !== 'object') continue;
     const isExpense = String(t.type || '').toLowerCase() === 'expense';
-    const amount = Number(t.amount) || 0;
+    const rawAmount = Number(t.amount) || 0;
+    const baseAmount = getAmountInBaseCurrency(rawAmount, t.currency, t.baseAmount);
     const dateStr = String(t.date || '');
     const category = String(t.category || 'Other');
     const description = String(t.description || '');
 
-    if (isExpense && amount > 0) {
-      // Month-to-date total
+    if (isExpense && baseAmount > 0) {
       if (dateStr.startsWith(currentYearMonth)) {
-        currentMonthTotalSpent += amount;
-        categorySpending[category] = (categorySpending[category] || 0) + amount;
+        currentMonthTotalSpent += baseAmount;
+        categorySpending[category] = Number(((categorySpending[category] || 0) + baseAmount).toFixed(2));
       }
 
-      // Collect amounts for median calculation (last 90 days)
       if (!categoryValues[category]) categoryValues[category] = [];
-      categoryValues[category].push(amount);
+      categoryValues[category].push(baseAmount);
 
-      // Check duplicate against pending receipt
       if (pendingReceipt && pendingReceipt.amount > 0) {
-        if (Math.abs(amount - pendingReceipt.amount) < 0.05) {
+        if (Math.abs(rawAmount - pendingReceipt.amount) < 0.05 || Math.abs(baseAmount - pendingReceipt.amount) < 0.05) {
           const merchantA = description.toLowerCase().replace(/[^a-z0-9]/g, '');
           const merchantB = (pendingReceipt.merchant || '').toLowerCase().replace(/[^a-z0-9]/g, '');
           if (merchantA && merchantB && (merchantA.includes(merchantB) || merchantB.includes(merchantA))) {
             potentialDuplicate = {
               date: dateStr,
-              amount,
+              amount: baseAmount,
               description,
             };
           }
@@ -220,22 +222,28 @@ export function computeDeterministicLedgerFacts(
     }
   }
 
-  // Calculate medians
   const categoryMedians: Record<string, number> = {};
   for (const [cat, vals] of Object.entries(categoryValues)) {
     if (vals.length === 0) continue;
     vals.sort((a, b) => a - b);
     const mid = Math.floor(vals.length / 2);
-    categoryMedians[cat] =
-      vals.length % 2 === 0 ? (vals[mid - 1] + vals[mid]) / 2 : vals[mid];
+    categoryMedians[cat] = Number(
+      (vals.length % 2 === 0 ? (vals[mid - 1] + vals[mid]) / 2 : vals[mid]).toFixed(2)
+    );
   }
 
-  const currentMonthBudgetRemaining =
+  const categoryCaps = getSavedCategoryCaps();
+  const sumOfCategoryCaps = Object.values(categoryCaps).reduce((s, v) => s + (Number(v) || 0), 0);
+  const effectiveMonthlyBudget =
     profile.monthlyBudgetCap && profile.monthlyBudgetCap > 0
-      ? profile.monthlyBudgetCap - currentMonthTotalSpent
+      ? profile.monthlyBudgetCap
+      : sumOfCategoryCaps > 0
+      ? sumOfCategoryCaps
       : null;
 
-  // Use deep deterministic copilot ledger intelligence for the query
+  const currentMonthBudgetRemaining =
+    effectiveMonthlyBudget !== null ? effectiveMonthlyBudget - currentMonthTotalSpent : null;
+
   let matchedRecordCount = 0;
   let matchedExactSpent = 0;
   let queryItemFoundInLedger = false;
@@ -260,7 +268,7 @@ export function computeDeterministicLedgerFacts(
           date: t.date,
           description: t.description || '',
           category: t.category || '',
-          amount: t.amount,
+          amount: Number(getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount).toFixed(2)),
           type: t.type,
         }));
       }
@@ -274,20 +282,19 @@ export function computeDeterministicLedgerFacts(
       console.warn('[computeDeterministicLedgerFacts] Copilot facts error:', err);
     }
 
-    // Direct fallback if query wasn't an analytics/item lookup or returned 0
     if (!queryItemFoundInLedger) {
       const lowerQ = cleanQuery.toLowerCase();
       for (const t of transactions) {
         if (!t || typeof t !== 'object') continue;
         const isExpense = String(t.type || '').toLowerCase() === 'expense';
-        const amount = Number(t.amount) || 0;
+        const baseAmt = getAmountInBaseCurrency(Number(t.amount) || 0, t.currency, t.baseAmount);
         const category = String(t.category || 'Other');
         const description = String(t.description || '');
 
-        if (isExpense && amount > 0) {
+        if (isExpense && baseAmt > 0) {
           if (description.toLowerCase().includes(lowerQ) || category.toLowerCase().includes(lowerQ)) {
             matchedRecordCount += 1;
-            matchedExactSpent += amount;
+            matchedExactSpent += baseAmt;
             queryItemFoundInLedger = true;
           }
         }
@@ -300,6 +307,7 @@ export function computeDeterministicLedgerFacts(
     currentMonthBudgetRemaining:
       currentMonthBudgetRemaining !== null ? Number(currentMonthBudgetRemaining.toFixed(2)) : null,
     categorySpending,
+    categoryCaps,
     categoryMedians,
     matchedRecordCount,
     matchedExactSpent: Number(matchedExactSpent.toFixed(2)),
@@ -329,11 +337,6 @@ export interface RunKinovaTurnOptions {
   signal?: AbortSignal;
 }
 
-/**
- * Executes a turn of Kinova.
- * If text has an instant local match, returns instantly.
- * Otherwise, calls the Gemini Assistant endpoint.
- */
 export async function runKinovaTurn(
   options: RunKinovaTurnOptions
 ): Promise<KinovaTurnResult> {
@@ -341,7 +344,6 @@ export async function runKinovaTurn(
   const profile = options.profile || getUserMoneyProfile(options.transactions);
   const text = (options.text || '').trim();
   const parserCandidate = options.imageBase64 ? null : buildAssistantParserCandidate(text);
-  // If text-only and not forced to assistant, check local router first (0ms latency)
   if (text && !options.imageBase64 && !options.forceAssistant) {
     const localMatch = routeLocalIntent(text, profile, today);
     if (localMatch) {
@@ -352,7 +354,6 @@ export async function runKinovaTurn(
     }
   }
 
-  // Assistant path (Gemini)
   const allTx = options.transactions || [];
   const useExtendedReasoning = requiresExtendedReasoning(text, Boolean(options.imageBase64));
   const includeLedgerContext =
@@ -368,7 +369,6 @@ export async function runKinovaTurn(
       )
     : undefined;
 
-  // Take small sample of matching or recent transactions
   const ledgerSample = deterministicFacts
     ? deterministicFacts.relevantTransactionsSample && deterministicFacts.relevantTransactionsSample.length > 0
       ? deterministicFacts.relevantTransactionsSample.slice(0, 20)
@@ -376,7 +376,7 @@ export async function runKinovaTurn(
           date: String(t.date || ''),
           description: String(t.description || ''),
           category: String(t.category || ''),
-          amount: Number(t.amount) || 0,
+          amount: Number(getAmountInBaseCurrency(Number(t.amount) || 0, t.currency, t.baseAmount).toFixed(2)),
           type: String(t.type || 'Expense'),
         }))
     : undefined;
@@ -435,17 +435,12 @@ export async function runKinovaTurn(
   };
 }
 
-/**
- * Safely parses raw assistant text output into structured JSON,
- * stripping markdown fences and thought blocks.
- */
 export function parseAssistantJsonResponse(rawText: string): Record<string, unknown> {
   if (!rawText || typeof rawText !== 'string') {
     throw new Error('Empty assistant response');
   }
 
   let clean = rawText.trim();
-  // Strip code fences if present
   const fenceMatch = clean.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
   if (fenceMatch) {
     clean = fenceMatch[1].trim();
@@ -465,4 +460,3 @@ export function parseAssistantJsonResponse(rawText: string): Record<string, unkn
     throw new Error('Assistant returned invalid JSON');
   }
 }
-

@@ -1,7 +1,7 @@
 import { getLocalDateString, getRelativeDateString, getDaysInMonth } from './date-helper.ts';
 import { evaluateMoneyExpression } from './money-calculator-helper.ts';
 import { matchMerchantCategoryRule } from './merchant-rules.ts';
-import { matchHabitMemory, type HabitMemoryMatch } from './habit-memory-engine.ts';
+import { matchHabitMemory } from './habit-memory-engine.ts';
 
 export interface ParsedExpense {
   amount: number;
@@ -35,47 +35,52 @@ const CATEGORY_KEYWORDS: Record<string, string[]> = {
     'lunch', 'dinner', 'breakfast', 'brunch', 'supper', 'mamak', 'mcd', 'mcdonald', 'kfc',
     'starbucks', 'coffee', 'cafe', 'teh', 'kopi', 'roti', 'nasi', 'mee', 'rice', 'noodle',
     'burger', 'pizza', 'sushi', 'ramen', 'boba', 'tea', 'bakery', 'bread', 'food', 'makan',
-    'restaurant', 'cafe', 'grabfood', 'foodpanda', 'shopeefood', 'subway', 'mixue', 'chagee',
+    'restaurant', 'grabfood', 'foodpanda', 'shopeefood', 'subway', 'mixue', 'chagee',
     'village park', 'oriental kopi', 'tea garden', 'groceries', 'grocery', 'supermarket',
     'market', 'pasar', 'jaya grocer', 'village grocer', 'lotus', 'giant', 'aeon', 'econsave',
-    'mydin', 'nsk', '买菜', '超市'
+    'mydin', 'nsk', 'zapfan', 'chap fan', '买菜', '超市', '早餐', '午餐', '晚餐', '宵夜', '杂饭', '咖啡', '奶茶'
   ],
   'Transport': [
-    'petrol', 'fuel', 'gas', 'shell', 'petronas', 'caltex', 'bhp', 'petron', 'grab', 'ride',
+    'petrol', 'fuel', 'gas', 'shell', 'petronas', 'caltex', 'bhp', 'petron', 'grab', 'grabcar', 'ride',
     'taxi', 'toll', 'plus', 'tng', 'touch n go', 'rfid', 'parking', 'train', 'lrt', 'mrt',
-    'monorail', 'ktm', 'bus', 'flight', 'airasia', 'malaysia airlines', 'car wash', 'service'
+    'monorail', 'ktm', 'bus', 'flight', 'airasia', 'malaysia airlines', 'car wash', 'car service',
+    '打车', '汽油', '添油', '停车', '泊车', '过路费'
   ],
   'Shopping': [
     'shopee', 'lazada', 'taobao', 'amazon', 'uniqlo', 'zara', 'h&m', 'clothes', 'shoes',
     'bag', 'shopping', 'buy', 'mall', 'mid valley', 'pavilion', 'sunway', 'ikea', 'decathlon',
-    'gadget', 'phone', 'laptop', 'ipad', 'electronics', 'books'
+    'gadget', 'phone', 'laptop', 'ipad', 'electronics', '购物', '淘宝', '买衣服'
   ],
   'Housing & Bills': [
     'unifi', 'time internet', 'maxis', 'celcom', 'digi', 'umobile', 'wifi', 'internet',
     'electric', 'electricity', 'tnb', 'water', 'air selangor', 'sada', 'rent', 'rental',
-    'maintenance', 'cukai', 'indah water', 'bill', 'utilities', 'management fee'
+    'maintenance', 'cukai', 'indah water', 'bill', 'utilities', 'management fee', 'aircond service',
+    '水电', '电费', '水费', '网费', '房租', '话费'
   ],
   'Parents': [
-    'parent', 'parents', 'mom', 'mother', 'dad', 'father', 'mama', 'papa', 'family allowance', 'allowance'
+    'parent', 'parents', 'mom', 'mother', 'dad', 'father', 'mama', 'papa', 'family allowance', 'allowance',
+    '父母', '家用', '给妈妈', '给爸爸'
   ],
   'Insurance': [
     'insurance', 'takaful', 'prudential', 'prulife', 'great eastern', 'aia', 'allianz', 'zurich',
-    'etiqa', 'manulife', 'medical card', 'life insurance'
+    'etiqa', 'manulife', 'medical card', 'life insurance', '保险', '保费', '医药卡'
   ],
   'Health': [
     'clinic', 'doctor', 'hospital', 'pharmacy', 'medicine', 'panadol', 'watsons', 'guardian',
-    'caring', 'dentist', 'dental', 'teeth', 'optical', 'glasses', 'supplement', 'vitamin'
+    'caring', 'dentist', 'dental', 'teeth', 'optical', 'glasses', 'supplement', 'vitamin',
+    '看病', '诊所', '买药', '洗牙', '牙医'
   ],
   'Entertainment': [
     'movie', 'cinema', 'tgv', 'gsc', 'netflix', 'spotify', 'youtube', 'disney', 'game',
-    'steam', 'playstation', 'nintendo', 'concert', 'ticket', 'karaoke', 'ktv'
+    'steam', 'playstation', 'nintendo', 'concert', 'ticket', 'karaoke', 'ktv', '电影', '娱乐', '唱k'
   ],
   'Education': [
-    'course', 'tuition', 'class', 'book', 'exam', 'udemy', 'coursera', 'school', 'university'
+    'course', 'tuition', 'class', 'book', 'books', 'exam', 'udemy', 'coursera', 'school', 'university',
+    '学费', '课程', '买书', '补习'
   ],
   'Sport': [
     'badminton', 'gym', 'fitness', 'workout', 'running', 'sport', 'sports', 'court',
-    'shuttlecock', 'racket', 'yonex', 'decathlon', 'anytime fitness', 'celebrity fitness',
+    'shuttlecock', 'racket', 'yonex', 'anytime fitness', 'celebrity fitness', 'pickleball',
     'swimming', 'swim', 'yoga', 'pilates', 'football', 'futsal', 'tennis', '羽毛球', '健身', '运动', '跑步'
   ],
   'Gift': [
@@ -83,16 +88,16 @@ const CATEGORY_KEYWORDS: Record<string, string[]> = {
     'angpow', 'angpao', 'red packet', 'duit raya', '礼物', '送礼', '红包', '礼金', '手信', '生日礼物'
   ],
   'Salary': [
-    'salary', 'gaji', 'paycheck', 'payroll'
+    'salary', 'gaji', 'paycheck', 'payroll', '薪水', '工资', '出粮'
   ],
   'Investment Return': [
-    'dividend', 'interest', 'asnb dividend', 'profit', 'capital gain', 'crypto profit'
+    'dividend', 'interest', 'asnb dividend', 'profit', 'capital gain', 'crypto profit', '股息', '分红'
   ],
   'Freelance': [
-    'freelance', 'client', 'project', 'consulting', 'gig'
+    'freelance', 'client', 'project', 'consulting', 'gig', '兼职', '外包'
   ],
   'Gift & Bonus': [
-    'bonus', 'angpow', 'angpao', 'gift', 'reward', 'cashback'
+    'bonus', 'reward', 'cashback', '花红', '奖金'
   ],
 };
 
@@ -115,21 +120,43 @@ const MONTH_MAP: Record<string, number> = {
 
 const MONTH_NAMES_PATTERN = Object.keys(MONTH_MAP).sort((a, b) => b.length - a.length).join('|');
 
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Matches a keyword against lowercased input text using word boundaries for ASCII keywords
+ * so short keywords like "bus", "tea", "gas", "buy" never match inside unrelated words
+ * like "business", "teacher", "gastric", or "buyer".
+ */
+function matchesKeywordWithBoundary(textLower: string, keyword: string): boolean {
+  const kw = keyword.toLowerCase().trim();
+  if (!kw) return false;
+  if (/[\u4e00-\u9fa5]/.test(kw)) {
+    return textLower.includes(kw);
+  }
+  const regex = new RegExp(`(?:^|[^a-z0-9])${escapeRegex(kw)}(?:$|[^a-z0-9])`, 'i');
+  return regex.test(textLower);
+}
+
 function extractDateFromNaturalText(text: string, todayStr: string): { date: string; matchText: string } {
   const currentYear = parseInt(todayStr.slice(0, 4), 10);
 
-  // 1. Relative keywords
-  const relMatch = text.match(/\b(yesterday|semalam)\b/i);
+  const relMatch = text.match(/\b(yesterday|semalam)\b|(昨天|昨日)/i);
   if (relMatch) {
     return { date: getRelativeDateString(-1), matchText: relMatch[0] };
   }
 
-  const todayMatch = text.match(/\b(today|hari ini)\b/i);
+  const beforeYesterdayMatch = text.match(/(前天|kelmarin)/i);
+  if (beforeYesterdayMatch) {
+    return { date: getRelativeDateString(-2), matchText: beforeYesterdayMatch[0] };
+  }
+
+  const todayMatch = text.match(/\b(today|hari ini)\b|(今天|今日)/i);
   if (todayMatch) {
     return { date: todayStr, matchText: todayMatch[0] };
   }
 
-  // 2. Month Name + Day: e.g. 'october 12', 'oct 12th', 'october 12 2026'
   const monthDayRegex = new RegExp(
     `(?:\\bon\\s+)?\\b(${MONTH_NAMES_PATTERN})\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:\\s*,?\\s*(\\d{4}))?\\b`,
     'i'
@@ -147,7 +174,6 @@ function extractDateFromNaturalText(text: string, todayStr: string): { date: str
     }
   }
 
-  // 3. Day + Month Name: e.g. '12 october', '12th oct', '12th of oct 2026'
   const dayMonthRegex = new RegExp(
     `(?:\\bon\\s+)?\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(${MONTH_NAMES_PATTERN})(?:\\s*,?\\s*(\\d{4}))?\\b`,
     'i'
@@ -165,7 +191,6 @@ function extractDateFromNaturalText(text: string, todayStr: string): { date: str
     }
   }
 
-  // 4. ISO format YYYY-MM-DD
   const isoMatch = text.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
   if (isoMatch) {
     const y = parseInt(isoMatch[1], 10);
@@ -178,7 +203,6 @@ function extractDateFromNaturalText(text: string, todayStr: string): { date: str
     }
   }
 
-  // 5. Slash format DD/MM, MM/DD or with year (e.g. 9/31 -> Sept 30, 31/9 -> Sept 30)
   const slashMatch = text.match(/\b(\d{1,2})[\/](\d{1,2})(?:[\/](\d{4}))?\b/);
   if (slashMatch) {
     const first = parseInt(slashMatch[1], 10);
@@ -188,15 +212,12 @@ function extractDateFromNaturalText(text: string, todayStr: string): { date: str
     let m = 0;
     let d = 0;
     if (first <= 12 && second > 12) {
-      // MM/DD format: e.g. 9/31
       m = first;
       d = second;
     } else if (second <= 12 && first > 12) {
-      // DD/MM format: e.g. 31/9
       d = first;
       m = second;
     } else if (second <= 12 && first <= 12) {
-      // Default to DD/MM
       d = first;
       m = second;
     }
@@ -227,36 +248,16 @@ const UNPARSED_TEMPORAL_CONTEXT_PATTERNS = [
   /(?:\d+|[零一二三四五六七八九十百]+)\s*(?:天|周|星期|个?月|季度|年)\s*(?:前|后)/u,
 ];
 
-/**
- * The quick parser only understands specific dates and single-day relatives such as
- * "today" and "yesterday". Catch broader date ranges and relative dates that still
- * need interpretation so the assistant can resolve them instead of defaulting to today.
- */
 function hasUnparsedTemporalContext(text: string, matchedDateText: string): boolean {
   const unparsedText = matchedDateText ? text.replace(matchedDateText, ' ') : text;
   return UNPARSED_TEMPORAL_CONTEXT_PATTERNS.some((pattern) => pattern.test(unparsedText));
 }
 
-/**
- * Parses natural language input string into structured expense data.
- * Examples:
- * - "Mamak lunch RM 18" -> Amount: 18, Category: Food & Dining, Description: Mamak lunch
- * - "Mamak lunch RM12 october 12" -> Amount: 12, Date: 2026-10-12, Description: Mamak lunch
- * - "Shell petrol 60" -> Amount: 60, Category: Transport, Description: Shell petrol
- * - "Salary 6500" -> Amount: 6500, Category: Salary, Type: Income
- * - "Macbook 3600 12m" -> Amount: 3600, Category: Shopping, isInstallment: true, installmentMonths: 12
- */
 const UNPARSED_CALCULATION_PATTERNS = [
   /\b(?:percent|percentage|peratus|tax|taxes|sst|gst|service\s*charge|service\s*tax|cukai|svc|vat|discount|diskaun|rebate|voucher|kupon|税|折扣|服务费)\b/i,
   /\b(?:each|per\s*(?:item|piece|person|pax|one|head|plate|bowl)|split\s*(?:by|between)|divided\s*by|分摊|平摊|均摊|每份|每个|每个人|per\s*orang)\b/i,
 ];
 
-/**
- * Returns true when the input contains calculation, tax, discount, or quantity phrases
- * that were not fully evaluated into a resolved formula/amount by the local parser.
- * This signals to the intent router to delegate to Gemini Assistant rather than
- * pretending to know the final amount with a naive single-number regex match.
- */
 function hasUnparsedCalculationContext(
   text: string,
   hasResolvedFormula: boolean,
@@ -266,19 +267,19 @@ function hasUnparsedCalculationContext(
   if (hasResolvedFormula || hasResolvedTax || hasResolvedDiscount) return false;
   return UNPARSED_CALCULATION_PATTERNS.some((pattern) => pattern.test(text));
 }
+
 export function parseNaturalExpense(input: string): ParsedExpense | null {
   const text = input.trim();
   if (!text) return null;
 
   const todayStr = getLocalDateString();
 
-  // 1. Detect and protect date expression so its numbers are not confused with expense amount
+  // 1. Detect and protect date expression
   const { date: targetDate, matchText: dateMatchText } = extractDateFromNaturalText(text, todayStr);
   const hasUnresolvedTemporalContext = hasUnparsedTemporalContext(text, dateMatchText);
   let textForAmount = dateMatchText ? text.replace(dateMatchText, ' ') : text;
 
-  // 1b. Detect installment & explicit interest rate (e.g. "2.12% interest", "interest 2.12%", "2.12% p.a.")
-  // Protect interest rate tokens so they are not mistaken for the principal amount
+  // 1b. Detect installment & explicit interest rate
   let isInstallment = false;
   let installmentMonths = 12;
   const lower = text.toLowerCase();
@@ -308,7 +309,6 @@ export function parseNaturalExpense(input: string): ParsedExpense | null {
   }
 
   // 2. Amount & Currency Detection
-  // Matches: RM 18, RM18.50, $25, 25 USD, 25.50, 18rm, etc.
   const currencyMatch = text.match(/(?:RM|MYR|USD|\$|SGD|S\$|CNY|RMB|¥|EUR|€|GBP|£)/i);
   let detectedCurrency = 'MYR';
   if (currencyMatch) {
@@ -320,13 +320,8 @@ export function parseNaturalExpense(input: string): ParsedExpense | null {
     else if (rawCurr === '£' || rawCurr === 'GBP') detectedCurrency = 'GBP';
   }
 
-  // Natural tax/service phrase: e.g. "14 with 6% tax", "14 witrh 6% tax", "14 + 6% sst", "14 plus 6% tax", "14含6%税", "14 with 10% service charge"
   const naturalTaxRegex = /(?:(?:RM|MYR|USD|\$|SGD|S\$|CNY|RMB|¥|EUR|€|GBP|£)\s*)?(\d+(?:,\d{3})*(?:\.\d+)?)\s*(?:\+|plus|with|witrh|w\/|and|&|加|含|dengan)\s*(\d+(?:\.\d+)?)\s*%\s*(?:tax|taxes|sst|gst|service\s*tax|service\s*charge|svc|cukai|税)?(?!\s*(?:discount|off|diskaun|rebate|less|折))(?:\s*(?:RM|MYR|USD|SGD|CNY|RMB|EUR|GBP))?/i;
-
-  // Natural discount phrase: e.g. "100 with 10% discount", "200 20% off", "50 - 10% rebate"
   const naturalDiscountRegex = /(?:(?:RM|MYR|USD|\$|SGD|S\$|CNY|RMB|¥|EUR|€|GBP|£)\s*)?(\d+(?:,\d{3})*(?:\.\d+)?)\s*(?:-|less|minus|with|witrh|w\/)?\s*(\d+(?:\.\d+)?)\s*%\s*(?:discount|off|diskaun|rebate|折)(?:\s*(?:RM|MYR|USD|SGD|CNY|RMB|EUR|GBP))?/i;
-
-  // Find math expression (e.g. "15 + 8.50", "50 + 6%", "120 / 3", "100 - 15 + 6%")
   const mathExprRegex = /(?:(?:RM|MYR|USD|\$|SGD|S\$|CNY|RMB|¥|EUR|€|GBP|£)\s*)?(\d+(?:,\d{3})*(?:\.\d+)?(?:\s*[+\-*/×÷]\s*\d+(?:,\d{3})*(?:\.\d+)?%?)+)(?:\s*(?:RM|MYR|USD|SGD|CNY|RMB|EUR|GBP))?/i;
   const amountRegex = /(?:(?:RM|MYR|USD|\$|SGD|S\$|CNY|RMB|¥|EUR|€|GBP|£)\s*)?(\d+(?:,\d{3})*(?:\.\d{1,2})?)(?!\s*%)(?:\s*(?:RM|MYR|USD|SGD|CNY|RMB|EUR|GBP))?/i;
 
@@ -344,7 +339,6 @@ export function parseNaturalExpense(input: string): ParsedExpense | null {
   let detectedTaxLabel: string | undefined;
   let detectedDiscountAmount: number | undefined;
 
-  // Prefer multi-operator math expressions if longer than tax/discount match
   const chooseMath = Boolean(
     mathMatch &&
     mathMatch[1] &&
@@ -403,13 +397,12 @@ export function parseNaturalExpense(input: string): ParsedExpense | null {
 
   if (isNaN(parsedAmount) || parsedAmount <= 0) return null;
 
-  // 4. Category & Type Detection
-  let detectedCategory = 'Food & Dining'; // sensible default
+  // 4. Category & Type Detection (with word-boundary safety)
+  let detectedCategory = 'Food & Dining';
   let detectedType: 'Expense' | 'Income' = 'Expense';
   let highestScore = 0;
   let habitMatchMeta: { rawPattern: string; alias: string; confidence: number; isAlias: boolean } | undefined;
 
-  // 1. Proactive Habit Memory takes top precedence (learns aliases like abc -> zapfan)
   const habitMatch = matchHabitMemory(text);
   if (habitMatch) {
     detectedCategory = habitMatch.resolvedCategory;
@@ -422,7 +415,6 @@ export function parseNaturalExpense(input: string): ParsedExpense | null {
       isAlias: habitMatch.isAlias,
     };
   } else {
-    // 2. User-remembered merchant rules take next precedence
     const userRule = matchMerchantCategoryRule(text);
     if (userRule) {
       detectedCategory = userRule.category;
@@ -431,8 +423,7 @@ export function parseNaturalExpense(input: string): ParsedExpense | null {
     } else {
       for (const [catName, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
         for (const kw of keywords) {
-          if (lower.includes(kw)) {
-            // Longer keyword matches get higher priority (e.g. "grabfood" > "food")
+          if (matchesKeywordWithBoundary(lower, kw)) {
             const score = kw.length;
             if (score > highestScore) {
               highestScore = score;
@@ -445,9 +436,8 @@ export function parseNaturalExpense(input: string): ParsedExpense | null {
     }
   }
 
-  // If no category matched but text has keywords like salary or income
   if (highestScore === 0) {
-    if (lower.includes('income') || lower.includes('masuk') || lower.includes('claim')) {
+    if (matchesKeywordWithBoundary(lower, 'income') || matchesKeywordWithBoundary(lower, 'masuk') || matchesKeywordWithBoundary(lower, 'claim')) {
       detectedType = 'Income';
       detectedCategory = 'Claim Allowance';
     } else {
@@ -456,9 +446,7 @@ export function parseNaturalExpense(input: string): ParsedExpense | null {
   }
 
   // 5. Clean Description
-  // Remove the amount/expression, currency, and matched date text to leave the clean description
-  let cleanedDesc = text
-    .replace(matchedToken, ' ');
+  let cleanedDesc = text.replace(matchedToken, ' ');
   if (dateMatchText) {
     cleanedDesc = cleanedDesc.replace(dateMatchText, ' ');
   }
@@ -466,18 +454,16 @@ export function parseNaturalExpense(input: string): ParsedExpense | null {
     cleanedDesc = cleanedDesc.replace(interestMatchText, ' ');
   }
   cleanedDesc = cleanedDesc
-    .replace(/\b(yesterday|today|semalam)\b/gi, '')
+    .replace(/\b(yesterday|today|semalam)\b|(昨天|昨日|前天|今天|今日)/gi, '')
     .replace(/\b(installment|epp|\d+\s*(?:months|m|bln))\b/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
 
-  // If matched habit has a preferred alias (e.g. abc -> zapfan), use the alias
   if (habitMatchMeta && habitMatchMeta.isAlias) {
     cleanedDesc = habitMatchMeta.alias;
   } else if (!cleanedDesc || cleanedDesc.length < 2) {
     cleanedDesc = detectedCategory;
   } else {
-    // Capitalize first letter
     cleanedDesc = cleanedDesc.charAt(0).toUpperCase() + cleanedDesc.slice(1);
   }
 

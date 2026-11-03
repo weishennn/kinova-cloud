@@ -2,7 +2,8 @@
  * Intelligent duplicate transaction detection for Kinova Cashflow.
  *
  * Detects whether a pending or newly scanned receipt transaction is likely
- * an accidental duplicate of an existing ledger record.
+ * an accidental duplicate of an existing ledger record without false-positive
+ * nagging when two unrelated same-day transactions happen to share a round amount.
  */
 
 export interface CandidateTransaction {
@@ -24,6 +25,7 @@ export interface ExistingTransactionRecord {
   date: string; // YYYY-MM-DD
   currency?: string;
   description: string;
+  category?: string;
   notes?: string;
   receiptItems?: { name: string; amount?: number }[];
 }
@@ -45,7 +47,6 @@ function parseDaysBetween(dateStrA: string, dateStrB: string): number {
 function extractInvoiceNumbers(text: string): Set<string> {
   const result = new Set<string>();
   if (!text) return result;
-  // Match e.g. "Invoice no: SHL029662", "Inv #12345", "Receipt: ABC-9988", "Tax Invoice: TI-2026-01"
   const regex = /(?:inv(?:oice)?|receipt|rcpt|bill|tax\s*inv|resit|no)[\s.:#№]+([A-Z0-9_-]{4,20})\b/gi;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(text)) !== null) {
@@ -63,6 +64,44 @@ function normalizeDescTokens(text: string): Set<string> {
     .trim();
   const tokens = cleaned.split(/\s+/).filter((t) => t.length >= 2);
   return new Set(tokens);
+}
+
+function hasMerchantOrCategoryOverlap(
+  candidate: CandidateTransaction,
+  existing: ExistingTransactionRecord,
+  candidateTokens: Set<string>
+): boolean {
+  const candDesc = (candidate.description || '').trim().toLowerCase();
+  const existDesc = (existing.description || '').trim().toLowerCase();
+  const candCat = (candidate.category || '').trim().toLowerCase();
+  const existCat = (existing.category || '').trim().toLowerCase();
+
+  // If both have explicit, non-generic descriptions that are completely different AND categories differ,
+  // e.g. "Breakfast 10" (Food & Dining) vs "Parking 10" (Transport), they are NOT duplicates!
+  if (candDesc && existDesc) {
+    if (candDesc === existDesc || candDesc.includes(existDesc) || existDesc.includes(candDesc)) {
+      return true;
+    }
+    const existingTokens = normalizeDescTokens(existing.description);
+    for (const token of candidateTokens) {
+      if (existingTokens.has(token)) return true;
+    }
+  }
+
+  // If categories match (or one is missing category) AND at least one description is generic/empty,
+  // or the amount is non-round (e.g. 17.45), treat same-day same-amount as suspected duplicate.
+  const sameCategory = !candCat || !existCat || candCat === existCat;
+  const isNonRoundExactAmount = Math.round(candidate.amount * 100) % 100 !== 0;
+  if (isNonRoundExactAmount && sameCategory) return true;
+
+  const isGenericDesc = (d: string, c: string) =>
+    !d || d === c || /^(?:expense|food|lunch|dinner|breakfast|transport|shopping|other|未命名消费)$/i.test(d);
+
+  if (sameCategory && (isGenericDesc(candDesc, candCat) || isGenericDesc(existDesc, existCat))) {
+    return true;
+  }
+
+  return false;
 }
 
 /**
@@ -121,12 +160,17 @@ export function findSuspectedDuplicates(
       }
     }
 
-    // Rule 2: Same Day & Same Amount (Exact match)
-    if (candidateDate && existingDate && candidateDate === existingDate) {
+    // Rule 2: Same Day & Same Amount (Requires merchant, category, or non-round cents overlap)
+    if (
+      candidateDate &&
+      existingDate &&
+      candidateDate === existingDate &&
+      hasMerchantOrCategoryOverlap(candidate, existing, candidateTokens)
+    ) {
       matches.push({
         record: existing,
         reason: 'same_day_same_amount',
-        explanation: `当天（${existingDate}）已有金额完全相同（${candidateCurrency} ${candidateAmt.toFixed(2)}）的账目：「${existing.description || '未命名消费'}」`,
+        explanation: `当天（${existingDate}）已有金额完全相同（${candidateCurrency} ${candidateAmt.toFixed(2)}）的同类账目：「${existing.description || '未命名消费'}」`,
       });
       continue;
     }
@@ -136,7 +180,7 @@ export function findSuspectedDuplicates(
       const existingItemNames = (existing.receiptItems || [])
         .map((it) => it.name.trim().toLowerCase())
         .filter((n) => n.length >= 3);
-      
+
       const overlappingItem = candidateItemNames.find((name) =>
         existingItemNames.some((exName) => exName === name || (name.length >= 5 && exName.includes(name)))
       );
@@ -159,9 +203,11 @@ export function findSuspectedDuplicates(
         if (existingTokens.has(token)) sharedCount += 1;
       }
 
-      const isSub = (candidate.description && existing.description) &&
+      const isSub =
+        candidate.description &&
+        existing.description &&
         (candidate.description.toLowerCase().includes(existing.description.toLowerCase()) ||
-         existing.description.toLowerCase().includes(candidate.description.toLowerCase()));
+          existing.description.toLowerCase().includes(candidate.description.toLowerCase()));
 
       if (isSub || (sharedCount >= 2 && candidateTokens.size <= 4) || (sharedCount >= 1 && candidateTokens.size <= 2)) {
         matches.push({

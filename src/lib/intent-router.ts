@@ -1,16 +1,16 @@
 /**
  * Local Intent Router for Kinova.
  *
- * Runs completely locally with 0ms latency and 0 API cost for:
+ * Runs completely locally with 0ms latency, 0 API cost, and 0 storage side-effects for:
  * 1. Session control commands: "undo", "撤回", "记错了", "padam", "tak jadi"
  * 2. Repeats: "same again", "一样", "跟昨天一样", "sama macam semalam"
  * 3. Corrections: "not 15, 18", "不是15是18", "bukan 15, 18", "that was food not transport"
- * 4. User preferences: "payday is the 28th", "预算 3000", "call abc zapfan"
+ * 4. User preferences: "payday is the 28th", "预算 3000", "餐饮预算 600", "food budget 600", "call abc zapfan"
  * 5. Page navigation: "go to budget", "打开投资", "what kinova knows"
  * 6. Fast-path expenses: single amount + unambiguous merchant ("Shell 60", "午餐 15")
  *
- * Returns null whenever the query requires intelligence, advice, complex extraction,
- * or questions, which transparently fall through to the Gemini Assistant.
+ * NOTE: This function is 100% pure (called inside React useMemo on every keystroke).
+ * Never perform localStorage or network writes inside routeLocalIntent!
  */
 
 import { parseNaturalExpense } from './natural-expense-parser.ts';
@@ -39,7 +39,7 @@ export type LocalRouteResult =
   | {
       mode: 'set_preference';
       preference: {
-        key: 'paydayDay' | 'monthlyBudgetCap' | 'language' | 'alias';
+        key: 'paydayDay' | 'monthlyBudgetCap' | 'categoryBudgetCap' | 'language' | 'alias';
         value: unknown;
         label: string;
       };
@@ -61,7 +61,7 @@ const QUESTION_OR_ADVICE_WORDS = [
   '?', '？', 'should i', 'can i', 'how much', '怎么看', '能不能', '贵不贵', '值得',
   'worth it', 'afford', 'over budget', '超支', '税', 'sst', 'tax', 'relief',
   '扣税', '减税', 'compare', '比较', '哪家便宜', 'cheaper', 'mana murah',
-  'bila', 'boleh ke', 'kenapa', 'why', 'what is', 'analysis', '分析',
+  'bila', 'boleh ke', 'kenapa', 'why', 'what is', 'analysis', '分析', '够不够', '还剩多少',
 ];
 
 const EXTENDED_REASONING_HINTS = [
@@ -82,15 +82,11 @@ const IMAGE_REASONING_HINTS = [
   'duplicate', '扣税', '减税', '税务', '建议', '分析', '比较', '贵不贵', '超支', '值得', '重复',
 ];
 
-/**
- * Checks if the text asks a question or requests advice/analysis.
- */
 export function isQuestionOrAdviceRequest(text: string): boolean {
   const lower = text.toLowerCase().trim();
   return QUESTION_OR_ADVICE_WORDS.some((w) => lower.includes(w));
 }
 
-/** Use extended model reasoning only when the message calls for financial judgment or analysis. */
 export function requiresExtendedReasoning(text: string, hasImage = false): boolean {
   const lower = text.toLowerCase().trim();
   const hints = hasImage ? IMAGE_REASONING_HINTS : EXTENDED_REASONING_HINTS;
@@ -98,7 +94,7 @@ export function requiresExtendedReasoning(text: string, hasImage = false): boole
 }
 
 /**
- * Route user input locally. Returns LocalRouteResult or null (fallback to Gemini).
+ * Pure local intent router (zero side effects; safe to call inside useMemo on every keystroke).
  */
 export function routeLocalIntent(
   text: string,
@@ -109,8 +105,12 @@ export function routeLocalIntent(
   if (!trimmed) return null;
   const lower = trimmed.toLowerCase();
 
+  // Never intercept questions or advice queries in local preference/expense fast-paths
+  if (isQuestionOrAdviceRequest(trimmed)) {
+    return null;
+  }
+
   // 1. UNDO INTENT
-  // "undo", "撤回", "删掉上一笔", "记错了", "padam", "tak jadi", "cancel last"
   if (
     /^(?:undo|撤回|撤销|删掉上一笔|删掉刚刚那笔|删掉刚才那笔|记错了|cancel\s*(?:last|that)?|padam|tak\s*jadi|buang|hapus)$/i.test(
       lower
@@ -127,7 +127,6 @@ export function routeLocalIntent(
   }
 
   // 2. REPEAT INTENT
-  // "same again", "一样", "跟昨天一样", "再来一笔", "sama macam semalam", "repeat"
   if (
     /^(?:same(?:\s+again)?|一样|跟上一笔一样|跟昨天一样|再来一笔|repeat(?:\s+last)?|sama(?:\s+macam\s+semalam)?|lagi\s*satu)$/i.test(
       lower
@@ -144,8 +143,7 @@ export function routeLocalIntent(
     };
   }
 
-  // 3. CORRECTION INTENT (e.g. "not 15, 18", "不是15是18", "bukan 15, 18", "那是餐饮不是交通")
-  // Amount correction: "not 15, 18" or "不是15是18"
+  // 3. CORRECTION INTENT
   const amountCorrectionMatch =
     trimmed.match(/(?:not|bukan|不是)\s*(?:RM|MYR)?\s*(\d+(?:\.\d+)?)(?:[,\s，]+(?:tapi|to|是)?\s*|[,\s，]*是\s*|[,\s，]+)(?:RM|MYR)?\s*(\d+(?:\.\d+)?)/i) ||
     trimmed.match(/(?:改(?:成|为|去)|change to|tukar ke)\s*(?:RM|MYR)?\s*(\d+(?:\.\d+)?)/i);
@@ -163,7 +161,6 @@ export function routeLocalIntent(
     }
   }
 
-  // Category correction: "that was food not transport" or "那是餐饮不是交通"
   const catCorrectionMatch =
     trimmed.match(/(?:that was|那是|itu|tukar ke)\s*([\u4e00-\u9fa5\w\s&]+?)\s*(?:not|不是|bukan)\s*([\u4e00-\u9fa5\w\s&]+)/i) ||
     trimmed.match(/(?:改去|换去|change category to|tukar kategori ke)\s*([\u4e00-\u9fa5\w\s&]+)/i);
@@ -183,7 +180,6 @@ export function routeLocalIntent(
   }
 
   // 4. USER PREFERENCE INTENTS
-  // Payday preference: "payday is the 28th", "发薪日28号", "gaji 28 hb", "payday 28"
   const paydayMatch =
     trimmed.match(/(?:payday|pay\s*day|发薪日|出粮日|发工资|hari\s*gaji|gaji)(?:\s*(?:is|on|pada|在|是|：|:))?\s*(?:the\s*)?(\d{1,2})(?:th|st|nd|rd|号|日|hb)?/i) ||
     trimmed.match(/(\d{1,2})(?:th|st|nd|rd|号|日|hb)?\s*(?:是|is)?\s*(?:payday|发薪日|出粮日|gaji)/i);
@@ -203,11 +199,38 @@ export function routeLocalIntent(
     }
   }
 
-  // Monthly budget preference: "budget 3000", "预算 3000", "bajet 3000"
+  // 4b. Category-specific budget cap: e.g. "food budget 600", "餐饮预算 600", "shopping cap 200"
+  // Pure return only — never mutate localStorage inside routeLocalIntent!
+  const categoryBudgetMatch =
+    trimmed.match(/^(?:set\s+|把|将)?([a-zA-Z\u4e00-\u9fa5\s&]{2,20}?)\s*(?:budget|cap|预算|限额|bajet)(?:\s*(?:cap|is|set|to|设为|是|：|:|\s))\s*(?:rm|myr)?\s*(\d+(?:\.\d+)?)$/i);
+
+  if (categoryBudgetMatch) {
+    const rawPrefix = categoryBudgetMatch[1].trim();
+    const amount = parseFloat(categoryBudgetMatch[2]);
+    const isTotalModifier = /^(?:monthly|total|overall|my|每月|月度|总|全部|本月)$/i.test(rawPrefix);
+    const isNonCategoryModifier = /(?:trip|travel|旅行|旅游|installment|分期)/i.test(rawPrefix);
+
+    if (!isTotalModifier && !isNonCategoryModifier && Number.isFinite(amount) && amount >= 0) {
+      const normalizedCat = normalizeToCanonicalCategory(rawPrefix, 'Expense', rawPrefix);
+      if (normalizedCat && normalizedCat !== 'Other') {
+        return {
+          mode: 'set_preference',
+          preference: {
+            key: 'categoryBudgetCap',
+            value: { category: normalizedCat, amount },
+            label: `${normalizedCat} 预算上限 RM ${amount.toFixed(2)}`,
+          },
+          message: `已将「${normalizedCat}」分类月度预算上限设为 RM ${amount.toFixed(2)}。`,
+        };
+      }
+    }
+  }
+
+  // 4c. Total Monthly budget preference (strictly anchored so "旅行预算" or "餐饮预算" never overwrite total budget!)
   const budgetMatch =
-    trimmed.match(/(?:monthly\s*)?budget(?:\s*(?:cap|is|set|to|：|:|\s))\s*(?:rm|myr)?\s*(\d+(?:\.\d+)?)/i) ||
-    trimmed.match(/(?:每月)?预算(?:\s*(?:是|设为|：|:|\s))\s*(?:rm|myr)?\s*(\d+(?:\.\d+)?)/i) ||
-    trimmed.match(/bajet(?:\s*(?:adalah|sebanyak|：|:|\s))\s*(?:rm|myr)?\s*(\d+(?:\.\d+)?)/i);
+    trimmed.match(/^(?:set\s+)?(?:(?:my|total|overall|monthly)\s+)?budget(?:\s*(?:cap|is|set|to|：|:|\s))\s*(?:rm|myr)?\s*(\d+(?:\.\d+)?)$/i) ||
+    trimmed.match(/^(?:设置|设定|把|将)?(?:我的)?(?:每月|月度|总)?预算(?:上限)?(?:\s*(?:是|设为|为|：|:|\s))\s*(?:rm|myr)?\s*(\d+(?:\.\d+)?)$/i) ||
+    trimmed.match(/^(?:set\s+)?(?:jumlah\s+)?bajet(?:\s+bulanan)?(?:\s*(?:adalah|sebanyak|：|:|\s))\s*(?:rm|myr)?\s*(\d+(?:\.\d+)?)$/i);
 
   if (budgetMatch) {
     const amount = parseFloat(budgetMatch[1]);
@@ -224,7 +247,7 @@ export function routeLocalIntent(
     }
   }
 
-  // Merchant alias: "call abc zapfan", "call abc as zapfan", "把 abc 叫做 杂饭"
+  // Merchant alias: "call abc zapfan", "把 abc 叫做 杂饭"
   const aliasMatch =
     trimmed.match(/^(?:call|alias|nickname)\s+([a-zA-Z0-9\u4e00-\u9fa5]+)(?:\s+(?:as|called|panggil))?\s+([a-zA-Z0-9\u4e00-\u9fa5]+)$/i) ||
     trimmed.match(/^(?:把|将)\s*([a-zA-Z0-9\u4e00-\u9fa5]+)\s*(?:叫做|叫作|称作|设为别名)\s*([a-zA-Z0-9\u4e00-\u9fa5]+)$/i);
@@ -265,46 +288,40 @@ export function routeLocalIntent(
     return { mode: 'navigate', path: '/settings', label: '系统设置', message: '正在前往设置页面...' };
   }
 
-  // 6. FAST PATH FOR EXPENSES (Instant local parse, 0ms, NO GEMINI CALL)
-  // Only use it when the parser resolved any relative date language in the input.
-  // Otherwise let the assistant interpret the complete request instead of silently
-  // treating an unrecognized date phrase as today.
-  if (!isQuestionOrAdviceRequest(trimmed)) {
-    const localParsed = parseNaturalExpense(trimmed);
-    if (
-      localParsed &&
-      localParsed.amount > 0 &&
-      localParsed.category &&
-      localParsed.category !== 'Other' &&
-      localParsed.description &&
-      !localParsed.hasUnparsedTemporalContext &&
-      !localParsed.hasUnparsedCalculationContext
-    ) {
-      const command: AiCommand = {
-        intent: 'transaction',
-        confidence: 0.9,
-        data: {
-          amount: localParsed.amount,
-          currency: localParsed.currency || 'MYR',
-          type: localParsed.type || 'Expense',
-          category: localParsed.category,
-          description: localParsed.description,
-          date: localParsed.date || today,
-          subtotal: localParsed.subtotal,
-          taxAmount: localParsed.taxAmount,
-          taxRate: localParsed.taxRate,
-          taxLabel: localParsed.taxLabel,
-          discountAmount: localParsed.discountAmount,
-        },
-      };
-      return {
-        mode: 'quick_parse',
-        command,
-        label: 'Quick parse',
-      };
-    }
+  // 6. FAST PATH FOR EXPENSES
+  const localParsed = parseNaturalExpense(trimmed);
+  if (
+    localParsed &&
+    localParsed.amount > 0 &&
+    localParsed.category &&
+    localParsed.category !== 'Other' &&
+    localParsed.description &&
+    !localParsed.hasUnparsedTemporalContext &&
+    !localParsed.hasUnparsedCalculationContext
+  ) {
+    const command: AiCommand = {
+      intent: 'transaction',
+      confidence: 0.9,
+      data: {
+        amount: localParsed.amount,
+        currency: localParsed.currency || 'MYR',
+        type: localParsed.type || 'Expense',
+        category: localParsed.category,
+        description: localParsed.description,
+        date: localParsed.date || today,
+        subtotal: localParsed.subtotal,
+        taxAmount: localParsed.taxAmount,
+        taxRate: localParsed.taxRate,
+        taxLabel: localParsed.taxLabel,
+        discountAmount: localParsed.discountAmount,
+      },
+    };
+    return {
+      mode: 'quick_parse',
+      command,
+      label: 'Quick parse',
+    };
   }
 
-  // Fallback to Gemini Assistant for judgment, advice, or questions
   return null;
 }

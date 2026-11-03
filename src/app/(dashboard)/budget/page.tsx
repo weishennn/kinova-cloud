@@ -6,7 +6,7 @@ import {
   AlertCircle, Wallet, Edit2, Check, Inbox, Sparkles,
   Clock, TrendingDown, TrendingUp, ShieldAlert, ArrowUpRight, DollarSign, X,
   Calendar, ChevronLeft, ChevronRight, RotateCcw,
-  ShieldCheck, Utensils, Info, CheckCircle2, Sliders
+  ShieldCheck, Utensils, Info, CheckCircle2, Sliders, Lock, Unlock
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTransactions } from '@/hooks/useTransactions';
@@ -199,6 +199,27 @@ export default function BudgetPage() {
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [categoryCapInput, setCategoryCapInput] = useState('');
 
+  // Locked category caps
+  const [lockedCategories, setLockedCategories] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('cashflow_locked_category_caps');
+      if (raw) setLockedCategories(JSON.parse(raw));
+    } catch {}
+  }, []);
+
+  const toggleLockCategory = (categoryName: string) => {
+    setLockedCategories((prev) => {
+      const next = { ...prev, [categoryName]: !prev[categoryName] };
+      try {
+        localStorage.setItem('cashflow_locked_category_caps', JSON.stringify(next));
+      } catch {}
+      toast.info(next[categoryName] ? `Locked cap for ${categoryName}` : `Unlocked cap for ${categoryName}`);
+      return next;
+    });
+  };
+
   useEffect(() => {
     const loadBudgetSettings = () => {
       const saved = localStorage.getItem('cashflow_monthly_budget');
@@ -271,9 +292,9 @@ export default function BudgetPage() {
   const intelligentPlan = useMemo(() => {
     return generateIntelligentCategoryCaps(
       allTransactions.length > 0 ? allTransactions : transactions,
-      { configuredCaps: categoryCaps }
+      { configuredCaps: categoryCaps, lockedCaps: lockedCategories }
     );
-  }, [allTransactions, transactions, categoryCaps]);
+  }, [allTransactions, transactions, categoryCaps, lockedCategories]);
 
   // Payday Cycle & Savings Shield intelligence
   const paydayInfo = useMemo(() => {
@@ -342,7 +363,7 @@ export default function BudgetPage() {
   const isCapsSumExceeded = configuredCapsSum > maxLivingBudget;
 
   const handleAutoFitCaps = () => {
-    const fitted = fitCapsToLivingBudget(categoryCaps, maxLivingBudget);
+    const fitted = fitCapsToLivingBudget(categoryCaps, maxLivingBudget, lockedCategories);
     setCategoryCaps(fitted);
     saveCategoryCaps(fitted);
     toast.success(`Caps scaled down to RM ${maxLivingBudget.toLocaleString()} to strictly protect your savings target!`);
@@ -358,7 +379,7 @@ export default function BudgetPage() {
   const isDraftSumExceeded = draftSum > maxLivingBudget;
 
   const handleAutoFitDraft = () => {
-    const fitted = fitCapsToLivingBudget(customCapsDraft, maxLivingBudget);
+    const fitted = fitCapsToLivingBudget(customCapsDraft, maxLivingBudget, lockedCategories);
     setCustomCapsDraft(fitted);
     toast.info(`Adjusted caps to RM ${maxLivingBudget.toLocaleString()} (Income - Savings target)`);
   };
@@ -374,11 +395,38 @@ export default function BudgetPage() {
   }, [isAutoTuneOpen, intelligentPlan]);
 
   const handleApplySmartCaps = () => {
-    const safeCaps = fitCapsToLivingBudget(customCapsDraft, maxLivingBudget);
+    const safeCaps = fitCapsToLivingBudget(customCapsDraft, maxLivingBudget, lockedCategories);
     setCategoryCaps(safeCaps);
     saveCategoryCaps(safeCaps);
     toast.success('AI Smart Category Caps applied and saved to cloud sync!');
     setIsAutoTuneOpen(false);
+  };
+
+  const handleZeroUnusedCategories = () => {
+    const updated = { ...categoryCaps };
+    let zeroedCount = 0;
+    if (intelligentPlan?.suggestions) {
+      intelligentPlan.suggestions.forEach((s) => {
+        if (s.historicalAvg === 0 && (s.committedFloor || 0) === 0 && !lockedCategories[s.category]) {
+          if (updated[s.category] !== 0) {
+            updated[s.category] = 0;
+            zeroedCount++;
+          }
+        }
+      });
+    }
+    setCategoryCaps(updated);
+    saveCategoryCaps(updated);
+    toast.success(`Zeroed out ${zeroedCount} unused categories (RM 0). Discretionary pool maximized!`);
+  };
+
+  const handleSyncMonthlyBudgetToCapsSum = () => {
+    if (configuredCapsSum > 0) {
+      setMonthlyBudget(configuredCapsSum);
+      setBudgetValue(String(configuredCapsSum));
+      saveSettingWithCloudSync('cashflow_monthly_budget', String(configuredCapsSum));
+      toast.success(`Monthly budget synced to sum of category caps: RM ${configuredCapsSum.toLocaleString()}`);
+    }
   };
 
   return (
@@ -560,6 +608,54 @@ export default function BudgetPage() {
               <strong className={isOverBudget ? 'text-rose-800 dark:text-rose-400 font-mono tabular-nums' : 'text-emerald-800 dark:text-emerald-400 font-mono tabular-nums'}>
                 <AnimatedNumber value={Math.max(0, effectiveBudget - totalSpent)} animateOnMount />
               </strong>
+            </div>
+          </div>
+
+          {/* Multi-segment Monthly Budget Allocation Bar */}
+          <div className="mt-4 pt-3 border-t border-slate-200 dark:border-white/[0.06] space-y-2">
+            <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-zinc-400">
+              <span className="font-medium">Budget Protection Breakdown</span>
+              <span className="font-mono text-slate-900 dark:text-white font-semibold">
+                RM {effectiveBudget.toLocaleString()}
+              </span>
+            </div>
+            <div className="h-2.5 w-full rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden flex">
+              {/* Segment 1: Spent So Far */}
+              <div
+                className="h-full bg-indigo-500 transition-all duration-500"
+                style={{ width: `${Math.min(100, (totalSpent / (effectiveBudget || 1)) * 100)}%` }}
+                title={`Spent So Far: RM ${totalSpent.toFixed(2)}`}
+              />
+              {/* Segment 2: Unpaid Committed Bills Reserve (Hatched / Amber) */}
+              {(savingsPrediction?.unpaidCommittedReserve || 0) > 0 && (
+                <div
+                  className="h-full bg-amber-500/80 bg-[repeating-linear-gradient(45deg,transparent,transparent_4px,rgba(0,0,0,0.15)_4px,rgba(0,0,0,0.15)_8px)] transition-all duration-500"
+                  style={{ width: `${Math.min(100 - (totalSpent / (effectiveBudget || 1)) * 100, ((savingsPrediction?.unpaidCommittedReserve || 0) / (effectiveBudget || 1)) * 100)}%` }}
+                  title={`Upcoming Bills Reserve: RM ${(savingsPrediction?.unpaidCommittedReserve || 0).toFixed(2)}`}
+                />
+              )}
+              {/* Segment 3: Safe Discretionary */}
+              <div
+                className="h-full bg-emerald-500/40"
+                style={{ width: `${Math.max(0, 100 - ((totalSpent + (savingsPrediction?.unpaidCommittedReserve || 0)) / (effectiveBudget || 1)) * 100)}%` }}
+                title={`Safe Discretionary Left: RM ${Math.max(0, effectiveBudget - totalSpent - (savingsPrediction?.unpaidCommittedReserve || 0)).toFixed(2)}`}
+              />
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500 dark:text-zinc-400">
+              <span className="flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full bg-indigo-500" />
+                <span>Spent: <strong>RM {totalSpent.toFixed(0)}</strong></span>
+              </span>
+              {(savingsPrediction?.unpaidCommittedReserve || 0) > 0 && (
+                <span className="flex items-center gap-1 text-amber-700 dark:text-amber-400 font-medium">
+                  <span className="h-2 w-2 rounded-full bg-amber-500" />
+                  <span>Bills Reserved: <strong>RM {(savingsPrediction?.unpaidCommittedReserve || 0).toFixed(0)}</strong></span>
+                </span>
+              )}
+              <span className="flex items-center gap-1 text-emerald-700 dark:text-emerald-400 font-medium">
+                <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                <span>Safe to Spend: <strong>RM {Math.max(0, effectiveBudget - totalSpent - (savingsPrediction?.unpaidCommittedReserve || 0)).toFixed(0)}</strong></span>
+              </span>
             </div>
           </div>
         </motion.div>
@@ -1010,7 +1106,27 @@ export default function BudgetPage() {
               Strict constraint: Cap sum must be lower than or equal to Income (RM {intelligentPlan.baselineIncome.toLocaleString()}) - Savings (RM {intelligentPlan.targetSavingsAmount.toLocaleString()})
             </span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={handleZeroUnusedCategories}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 font-semibold text-xs border border-slate-200 dark:border-zinc-700 cursor-pointer transition-all active:scale-95"
+              title="Set categories with RM 0 historical spend and 0 commitments to RM 0"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span>Zero Unused (RM 0)</span>
+            </button>
+            {monthlyBudget !== configuredCapsSum && configuredCapsSum > 0 && (
+              <button
+                type="button"
+                onClick={handleSyncMonthlyBudgetToCapsSum}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-500/10 hover:bg-teal-500/20 text-teal-700 dark:text-teal-300 font-semibold text-xs border border-teal-500/30 cursor-pointer transition-all active:scale-95"
+                title="Sync total monthly budget with sum of category caps"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                <span>Sync Total Budget (RM {configuredCapsSum.toLocaleString()})</span>
+              </button>
+            )}
             {isCapsSumExceeded && (
               <button
                 type="button"
@@ -1103,6 +1219,12 @@ export default function BudgetPage() {
                     }`}>
                       {percentOfCap.toFixed(0)}%
                     </span>
+                    {lockedCategories[item.name] && (
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                        <Lock className="h-2.5 w-2.5" />
+                        <span>Locked</span>
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -1111,6 +1233,22 @@ export default function BudgetPage() {
                         <span className="font-mono">
                           <strong className="text-slate-950 dark:text-white font-bold">RM {item.value.toFixed(2)}</strong> / Cap: RM {cap.toFixed(0)}
                         </span>
+                        <button
+                          type="button"
+                          onClick={() => toggleLockCategory(item.name)}
+                          className={`p-1 rounded-lg cursor-pointer transition-colors ${
+                            lockedCategories[item.name]
+                              ? 'text-amber-500 bg-amber-500/15'
+                              : 'text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800'
+                          }`}
+                          title={lockedCategories[item.name] ? 'Category cap locked from auto-fit' : 'Lock category cap to protect from auto-fit changes'}
+                        >
+                          {lockedCategories[item.name] ? (
+                            <Lock className="h-3.5 w-3.5" />
+                          ) : (
+                            <Unlock className="h-3.5 w-3.5" />
+                          )}
+                        </button>
                         <button
                           onClick={() => {
                             setEditingCategory(item.name);
@@ -1291,6 +1429,22 @@ export default function BudgetPage() {
                       </div>
 
                       <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => toggleLockCategory(s.category)}
+                          className={`p-1 rounded-lg cursor-pointer transition-colors ${
+                            lockedCategories[s.category]
+                              ? 'text-amber-500 bg-amber-500/15'
+                              : 'text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800'
+                          }`}
+                          title={lockedCategories[s.category] ? 'Category cap is locked' : 'Lock category cap'}
+                        >
+                          {lockedCategories[s.category] ? (
+                            <Lock className="h-3.5 w-3.5" />
+                          ) : (
+                            <Unlock className="h-3.5 w-3.5" />
+                          )}
+                        </button>
                         <span className="font-mono text-xs text-slate-500 dark:text-zinc-400">RM</span>
                         <input
                           type="number"

@@ -1,7 +1,6 @@
 import {
   computeSpendingAnalytics,
   type SpendingTransaction,
-  type SpendingTimeframe,
   isSpendingAnalyticsQuery,
 } from './spending-analytics.ts';
 import {
@@ -10,6 +9,7 @@ import {
   scoreReceiptItemQuery,
 } from './receipt-items.ts';
 import { getLocalDateString } from './date-helper.ts';
+import { getAmountInBaseCurrency } from './currency.ts';
 
 export interface DeterministicLedgerFacts {
   queryType: 'analytics' | 'item_lookup' | 'merchant_lookup' | 'general';
@@ -41,7 +41,7 @@ export interface DeterministicLedgerFacts {
 
 /**
  * Computes deterministic numerical facts across 100% of the user's ledger transactions.
- * Zero truncation of transaction totals, ensuring AI Copilot answers with mathematical precision.
+ * Converts all foreign-currency records into base MYR before summing.
  */
 export function computeDeterministicLedgerFacts<T extends SpendingTransaction>(
   query: string,
@@ -51,7 +51,7 @@ export function computeDeterministicLedgerFacts<T extends SpendingTransaction>(
   const cleanQuery = query.trim();
   const today = referenceDateStr || getLocalDateString();
 
-  // 1. Is this a spending analytics query (e.g. "今年总共花了多少", "这个月在餐饮花了多少", "上月交通支出")?
+  // 1. Is this a spending analytics query?
   if (isSpendingAnalyticsQuery(cleanQuery)) {
     const analytics = computeSpendingAnalytics(cleanQuery, allTransactions, today);
     const matchingIds = analytics.matchingTransactions.map((t) => t.id);
@@ -75,18 +75,23 @@ export function computeDeterministicLedgerFacts<T extends SpendingTransaction>(
             date: analytics.largestExpense.date,
             description: analytics.largestExpense.description || analytics.largestExpense.category || '',
             category: analytics.largestExpense.category || 'Other',
-            amount: analytics.largestExpense.amount,
+            amount: Number(
+              getAmountInBaseCurrency(
+                analytics.largestExpense.amount,
+                analytics.largestExpense.currency,
+                analytics.largestExpense.baseAmount
+              ).toFixed(2)
+            ),
           }
         : null,
       relevantTransactionsSample: analytics.matchingTransactions.slice(0, 30),
     };
   }
 
-  // 2. Is this an item price or merchant search (e.g. "四夕豆花吃过什么", "哪里打汽油最便宜", "买过鸡蛋多少钱")?
+  // 2. Is this an item price or merchant search?
   const cleanKeyword = extractCleanItemKeyword(cleanQuery).toLowerCase();
   const targetLower = cleanKeyword || cleanQuery.toLowerCase();
 
-  // Find all transactions matching merchant or receipt items
   const matchedTxs: T[] = [];
   const storeMap = new Map<string, { store: string; minUnitPrice: number; unit: string; date: string }>();
 
@@ -95,17 +100,15 @@ export function computeDeterministicLedgerFacts<T extends SpendingTransaction>(
 
     const desc = (tx.description || '').toLowerCase();
     const cat = (tx.category || '').toLowerCase();
-    const notes = (tx.receiptUrl ? '' : '') + (typeof (tx as any).notes === 'string' ? (tx as any).notes : '');
+    const notes = typeof (tx as any).notes === 'string' ? (tx as any).notes : '';
     const receiptItems = parseReceiptItemsFromNotes(notes);
 
     let isMatch = false;
 
-    // Check direct description or category matching
     if (desc.includes(targetLower) || cat.includes(targetLower)) {
       isMatch = true;
     }
 
-    // Check receipt items
     for (const item of receiptItems) {
       const score = scoreReceiptItemQuery(item, targetLower);
       if (score > 0 || item.name.toLowerCase().includes(targetLower)) {
@@ -129,13 +132,15 @@ export function computeDeterministicLedgerFacts<T extends SpendingTransaction>(
   }
 
   if (matchedTxs.length > 0) {
-    // Sort matching transactions by date descending
     matchedTxs.sort((a, b) => b.date.localeCompare(a.date));
 
-    const totalSpent = Number(matchedTxs.reduce((sum, t) => sum + (t.amount || 0), 0).toFixed(2));
+    const totalSpent = Number(
+      matchedTxs
+        .reduce((sum, t) => sum + getAmountInBaseCurrency(t.amount || 0, t.currency, t.baseAmount), 0)
+        .toFixed(2)
+    );
     const matchingIds = matchedTxs.map((t) => t.id);
 
-    // Build price ladder if multiple stores found
     const priceLadder = Array.from(storeMap.values())
       .sort((a, b) => a.minUnitPrice - b.minUnitPrice)
       .map((entry, idx) => ({
@@ -159,7 +164,6 @@ export function computeDeterministicLedgerFacts<T extends SpendingTransaction>(
     };
   }
 
-  // 3. Not found in user's personal ledger
   return {
     queryType: 'item_lookup',
     timeframeLabel: '个人账本检索',
@@ -168,6 +172,6 @@ export function computeDeterministicLedgerFacts<T extends SpendingTransaction>(
     transactionCount: 0,
     matchingTransactionIds: [],
     isFoundInPersonalLedger: false,
-    relevantTransactionsSample: allTransactions.filter((t) => t.type === 'expense').slice(0, 15),
+    relevantTransactionsSample: allTransactions.filter((t) => String(t.type || '').toLowerCase() === 'expense').slice(0, 15),
   };
 }
