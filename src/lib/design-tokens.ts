@@ -72,6 +72,25 @@ export const ASSET_TYPE_COLORS: Record<string, string> = {
   'Other': '#6b7280',
 };
 
+/**
+ * Standardized Layout & Surface Tokens to eliminate "box-sticking-to-box" clutter.
+ * Use `groupedSurface` + `groupedListDivide` for lists (categories, transactions, holdings)
+ * instead of rendering separate bordered boxes for every single item.
+ */
+export const LAYOUT_TOKENS = {
+  pageContainer: 'max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-7',
+  sectionGap: 'space-y-6',
+  gridGap: 'gap-4 sm:gap-5',
+  cardSurface:
+    'rounded-3xl bg-white/95 dark:bg-zinc-900/90 border border-zinc-200/60 dark:border-zinc-800/70 p-5 sm:p-6 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)]',
+  groupedSurface:
+    'rounded-3xl bg-white/95 dark:bg-zinc-900/90 border border-zinc-200/60 dark:border-zinc-800/70 overflow-hidden shadow-[0_2px_12px_-4px_rgba(0,0,0,0.04)]',
+  groupedListDivide: 'divide-y divide-zinc-100 dark:divide-zinc-800/60',
+  groupedRowItem: 'px-5 py-4 transition-colors hover:bg-zinc-50/70 dark:hover:bg-zinc-800/40',
+  subtlePill:
+    'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium bg-zinc-100/80 dark:bg-zinc-800/80 text-zinc-700 dark:text-zinc-300',
+} as const;
+
 export function getCategoryColor(category: string): string {
   return CATEGORY_COLORS[category] || '#6b7280';
 }

@@ -66,7 +66,7 @@ import { saveMerchantCategoryRule, normalizePattern } from '@/lib/merchant-rules
 import { matchHabitMemory, learnOrStrengthenHabit } from '@/lib/habit-memory-engine';
 import { runKinovaTurn } from '@/lib/kinova-assistant';
 import { getUserMoneyProfile } from '@/lib/user-money-profile';
-import { getCategoryRealtimeBudgetStatus } from '@/lib/category-budget-helper';
+import { getCategoryRealtimeBudgetStatus, saveCategoryCaps } from '@/lib/category-budget-helper';
 
 const CATEGORIES = {
   Expense: [
@@ -2116,6 +2116,38 @@ export function RecordPaymentModal() {
                     <span>
                       Cap buffer: <strong className="font-mono text-slate-900 dark:text-white">RM {Math.max(0, categoryBudgetStatus.remainingAfter).toFixed(2)}</strong> left
                     </span>
+                  </div>
+                )}
+
+                {/* Bill Reserve Notice */}
+                {categoryBudgetStatus.committedReserve > 0 && (
+                  <div className="mt-2 text-[10px] text-amber-900 dark:text-amber-200 bg-amber-500/10 border border-amber-500/20 rounded-xl px-2.5 py-1.5 flex items-center justify-between">
+                    <span>📌 RM {categoryBudgetStatus.committedReserve.toFixed(2)} reserved for upcoming bills in {category}</span>
+                    <span>Free balance: <strong className="font-mono">RM {Math.max(0, categoryBudgetStatus.unreservedRemainingAfter).toFixed(2)}</strong></span>
+                  </div>
+                )}
+
+                {/* 1-Tap Auto-Rebalance Pill when cap is exceeded */}
+                {categoryBudgetStatus.rebalanceSuggestion?.canAutoRebalance && (
+                  <div className="mt-2 pt-2 border-t border-black/10 dark:border-white/10 flex flex-wrap items-center justify-between gap-1.5 text-[11px] text-amber-900 dark:text-amber-200 bg-amber-500/10 rounded-xl p-2 border border-amber-500/25">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <Sparkles className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                      <span>
+                        💡 Exceeds cap — Kinova can auto-shift RM {categoryBudgetStatus.rebalanceSuggestion.deficitCovered.toFixed(0)} from {categoryBudgetStatus.rebalanceSuggestion.donors[0]?.category}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (categoryBudgetStatus.rebalanceSuggestion) {
+                          saveCategoryCaps(categoryBudgetStatus.rebalanceSuggestion.updatedCaps);
+                          toast.success(`✨ Auto-adjusted caps: ${category} cap raised to RM ${categoryBudgetStatus.rebalanceSuggestion.newTargetCap.toFixed(0)}!`);
+                        }
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-bold cursor-pointer text-[10px] shadow-sm transition-all"
+                    >
+                      Auto-Adjust Cap
+                    </button>
                   </div>
                 )}
               </motion.div>

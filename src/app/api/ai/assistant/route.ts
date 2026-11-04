@@ -51,6 +51,30 @@ export interface AssistantRequestBody {
     categoryBreakdown?: Array<{ category: string; amount: number; percentage: number }>;
     largestExpense?: { id?: string; date: string; description: string; category?: string; amount: number } | null;
     potentialDuplicate?: { date: string; amount: number; description: string } | null;
+    cashflowBriefing?: {
+      baselineIncome: number;
+      actualIncomeThisMonth: number;
+      targetSavingsAmount: number;
+      targetInvestmentAmount: number;
+      targetLivingBudget: number;
+      spentSoFar: number;
+      unpaidCommittedBillsReserve: number;
+      remainingSafeLivingPool: number;
+      safeDailyLivingAllowance: number;
+      daysRemainingInMonth: number;
+      daysUntilPayday: number;
+      pacingStatus: string;
+      categorySnapshots?: Array<{
+        category: string;
+        cap: number;
+        spent: number;
+        unpaidBillReserve: number;
+        unreservedRemaining: number;
+        status: string;
+      }>;
+      overCapCategories?: string[];
+      smartRebalanceSummary?: string;
+    };
   };
   recentActions?: Array<{
     actionType: string;
@@ -132,6 +156,7 @@ Today is {{TODAY}}. Default currency MYR. Reply in the language of this turn (Ch
 You receive:
 - USER PROFILE (payday, budget, reserve, goals, habits, rejected chips). These are facts the user can edit. Do not invent missing profile fields.
 - DETERMINISTIC LEDGER FACTS computed in code across the whole ledger. Quote these numbers exactly. Never recompute totals from the sample.
+- PERSONAL CFO BRIEFING: When present, you have complete visibility of the user's monthly income, target savings/investments, unpaid recurring & installment bill reserves, and safe daily living allowance. Ground every affordability or budget question in these numbers. Never treat unpaid bill reserves as free spendable cash.
 - LAST 6 TURNS and LAST 8 ACTIONS so "undo", "that one", "same again", and "what about last month?" work.
 - A small sample of matching transactions for names and dates only.
 
@@ -266,6 +291,22 @@ export async function POST(req: NextRequest) {
       ? `\n【DETERMINISTIC FACTS ACROSS FULL LEDGER】: ${JSON.stringify(body.deterministicFacts, null, 2)}\n`
       : '';
 
+    const briefing = body.deterministicFacts?.cashflowBriefing;
+    const briefingBlock = briefing
+      ? `\n【PERSONAL CFO BRIEFING】:
+- Baseline Income: RM ${briefing.baselineIncome} (Actual MTD: RM ${briefing.actualIncomeThisMonth})
+- Target Savings: RM ${briefing.targetSavingsAmount} | Target Investments: RM ${briefing.targetInvestmentAmount}
+- Target Living Budget: RM ${briefing.targetLivingBudget}
+- Spent So Far (MTD): RM ${briefing.spentSoFar}
+- Unpaid Committed Bill Reserves: RM ${briefing.unpaidCommittedBillsReserve}
+- Remaining Free Living Pool: RM ${briefing.remainingSafeLivingPool}
+- Safe Daily Living Allowance: RM ${briefing.safeDailyLivingAllowance}/day (${briefing.daysRemainingInMonth} days left in month)
+- Days Until Payday: ${briefing.daysUntilPayday}
+- Budget Pacing Status: ${briefing.pacingStatus}
+- Over-Cap / Tight Categories: ${briefing.overCapCategories?.join(', ') || 'None (all healthy)'}
+${briefing.smartRebalanceSummary ? `- Smart Rebalance Plan: ${briefing.smartRebalanceSummary}` : ''}\n`
+      : '';
+
     const pendingContextBlock = pendingContext
       ? `\n【PENDING CLARIFICATION STATE】: ${JSON.stringify(pendingContext, null, 2)}\n`
       : '';
@@ -289,6 +330,7 @@ export async function POST(req: NextRequest) {
     const userPrompt = [
       text ? `User message: "${text}"` : 'Analyze this attached receipt or payment screenshot.',
       profileBlock,
+      briefingBlock,
       pendingContextBlock,
       parserCandidateBlock,
       factsBlock,

@@ -9,6 +9,8 @@ import {
 import dynamic from 'next/dynamic';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePortfolio, useTrades, useAddTrade, useUpdateRow, useDeleteRow } from '@/hooks/useSheets';
+import { useTransactions } from '@/hooks/useTransactions';
+import { getUnifiedIncomeAllocation } from '@/lib/category-budget-helper';
 import { clearAllSwrCache, getActiveUserCacheScope, setSwrCachedData } from '@/lib/sheets-api';
 import { sheetsData } from '@/lib/sheets-data';
 import { discardPendingMoomooDeletes } from '@/lib/cache-manager';
@@ -88,9 +90,14 @@ export default function InvestmentsPage() {
   // Real data hooks
   const { data: rawPortfolio = [], isLoading: isPortfolioLoading } = usePortfolio();
   const { data: rawTradesData, isLoading: isTradesLoading } = useTrades();
+  const { transactions = [] } = useTransactions({ period: 'all' });
   const addTradeMutation = useAddTrade();
   const updateTradeMutation = useUpdateRow();
   const deleteTradeMutation = useDeleteRow();
+
+  const allocation = useMemo(() => {
+    return getUnifiedIncomeAllocation(transactions);
+  }, [transactions]);
 
   // Normalize Trades
   const trades = useMemo<NormalizedTrade[]>(() => {
@@ -1179,6 +1186,63 @@ export default function InvestmentsPage() {
           </div>
         )}
       />
+
+      {/* Monthly Investment & Savings Execution Goal Bar */}
+      <div className="p-4 sm:p-5 rounded-3xl border border-indigo-500/20 bg-gradient-to-br from-indigo-950/20 via-white/80 dark:via-zinc-900/60 to-purple-950/20 backdrop-blur-xl shadow-sm space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-indigo-500" />
+            <span className="text-xs font-bold text-slate-900 dark:text-white">
+              Monthly Wealth Building Plan ({allocation.savingsTargetPct + allocation.investmentTargetPct}% of RM {allocation.baselineIncome.toLocaleString()} Income)
+            </span>
+          </div>
+          <span className="text-xs font-mono font-bold text-indigo-700 dark:text-indigo-300">
+            RM {(allocation.actualInvestedThisMonth + allocation.actualSavedThisMonth).toFixed(0)} / RM {(allocation.targetInvestmentAmount + allocation.targetSavingsAmount).toLocaleString()} achieved
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+          {/* Market Investment Target */}
+          <div className="p-3 rounded-2xl bg-white/70 dark:bg-zinc-800/40 border border-slate-200/60 dark:border-zinc-700/50 space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-medium text-slate-700 dark:text-zinc-300 flex items-center gap-1.5">
+                <span>📈 Market Investments ({allocation.investmentTargetPct}% goal)</span>
+              </span>
+              <span className="font-mono font-bold text-slate-900 dark:text-white">
+                RM {allocation.actualInvestedThisMonth.toFixed(0)} / RM {allocation.targetInvestmentAmount.toLocaleString()}
+              </span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-zinc-700">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-purple-600 transition-all duration-500"
+                style={{
+                  width: `${Math.min(100, allocation.targetInvestmentAmount > 0 ? (allocation.actualInvestedThisMonth / allocation.targetInvestmentAmount) * 100 : 0)}%`,
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Cash / Safe Savings Target */}
+          <div className="p-3 rounded-2xl bg-white/70 dark:bg-zinc-800/40 border border-slate-200/60 dark:border-zinc-700/50 space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-medium text-slate-700 dark:text-zinc-300 flex items-center gap-1.5">
+                <span>🛡️ Cash & Fixed Deposits ({allocation.savingsTargetPct}% goal)</span>
+              </span>
+              <span className="font-mono font-bold text-slate-900 dark:text-white">
+                RM {allocation.actualSavedThisMonth.toFixed(0)} / RM {allocation.targetSavingsAmount.toLocaleString()}
+              </span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-zinc-700">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-500"
+                style={{
+                  width: `${Math.min(100, allocation.targetSavingsAmount > 0 ? (allocation.actualSavedThisMonth / allocation.targetSavingsAmount) * 100 : 0)}%`,
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Metric Cards Banner */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">

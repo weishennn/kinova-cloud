@@ -16,6 +16,8 @@ export const CLOUD_SYNC_KEYS = {
   LHDN_TAX_PROFILE: 'cashflow_lhdn_tax_profile',
   MONTHLY_BUDGET: 'cashflow_monthly_budget',
   BASELINE_INCOME: 'cashflow_baseline_income',
+  SAVINGS_TARGET_PCT: 'cashflow_savings_target_pct',
+  INVESTMENT_TARGET_PCT: 'cashflow_investment_target_pct',
   EMERGENCY_RESERVE: 'cashflow_emergency_reserve',
   CURRENCY: 'cashflow_currency',
 } as const;

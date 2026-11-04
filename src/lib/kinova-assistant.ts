@@ -23,7 +23,15 @@ import { parseNaturalExpense } from './natural-expense-parser.ts';
 import { getUserMoneyProfile, type UserMoneyProfile } from './user-money-profile.ts';
 import { getLocalDateString } from './date-helper.ts';
 import { getAmountInBaseCurrency } from './currency.ts';
-import { getSavedCategoryCaps } from './category-budget-helper.ts';
+import {
+  getSavedCategoryCaps,
+  resolveCategoryCapValue,
+  getCategoryCommitmentBreakdown,
+  predictMonthlySavingsAndInvestments,
+  getPaydayCycleIntelligence,
+  rebalanceCategoryCapsForSpending,
+} from './category-budget-helper.ts';
+import { CANONICAL_EXPENSE_CATEGORIES } from './canonical-categories.ts';
 import type { AiCommand } from '../types/ai-command.ts';
 import {
   computeDeterministicLedgerFacts as computeCopilotFacts,
@@ -100,6 +108,33 @@ export function updateAssistantConversation(
   };
 }
 
+export interface CategoryCashflowSnapshot {
+  category: string;
+  cap: number;
+  spent: number;
+  unpaidBillReserve: number;
+  unreservedRemaining: number;
+  status: 'on_track' | 'tight' | 'over_cap';
+}
+
+export interface PersonalCashflowBriefing {
+  baselineIncome: number;
+  actualIncomeThisMonth: number;
+  targetSavingsAmount: number;
+  targetInvestmentAmount: number;
+  targetLivingBudget: number;
+  spentSoFar: number;
+  unpaidCommittedBillsReserve: number;
+  remainingSafeLivingPool: number;
+  safeDailyLivingAllowance: number;
+  daysRemainingInMonth: number;
+  daysUntilPayday: number;
+  pacingStatus: string;
+  categorySnapshots: CategoryCashflowSnapshot[];
+  overCapCategories: string[];
+  smartRebalanceSummary?: string;
+}
+
 export interface DeterministicLedgerFacts {
   currentMonthTotalSpent: number;
   currentMonthBudgetRemaining: number | null;
@@ -122,6 +157,7 @@ export interface DeterministicLedgerFacts {
     amount: number;
     type?: string;
   }>;
+  cashflowBriefing?: PersonalCashflowBriefing;
 }
 
 export interface AssistantApiResponse {
@@ -183,6 +219,7 @@ export function computeDeterministicLedgerFacts(
 ): DeterministicLedgerFacts {
   const currentYearMonth = today.slice(0, 7);
   let currentMonthTotalSpent = 0;
+  let actualIncomeThisMonth = 0;
   const categorySpending: Record<string, number> = {};
   const categoryValues: Record<string, number[]> = {};
 
@@ -190,12 +227,18 @@ export function computeDeterministicLedgerFacts(
 
   for (const t of transactions) {
     if (!t || typeof t !== 'object') continue;
-    const isExpense = String(t.type || '').toLowerCase() === 'expense';
+    const typeLower = String(t.type || '').toLowerCase();
+    const isExpense = typeLower === 'expense';
+    const isIncome = typeLower === 'income';
     const rawAmount = Number(t.amount) || 0;
     const baseAmount = getAmountInBaseCurrency(rawAmount, t.currency, t.baseAmount);
     const dateStr = String(t.date || '');
     const category = String(t.category || 'Other');
     const description = String(t.description || '');
+
+    if (isIncome && baseAmount > 0 && dateStr.startsWith(currentYearMonth)) {
+      actualIncomeThisMonth += baseAmount;
+    }
 
     if (isExpense && baseAmount > 0) {
       if (dateStr.startsWith(currentYearMonth)) {
@@ -234,6 +277,81 @@ export function computeDeterministicLedgerFacts(
 
   const categoryCaps = getSavedCategoryCaps();
   const sumOfCategoryCaps = Object.values(categoryCaps).reduce((s, v) => s + (Number(v) || 0), 0);
+
+  // Build holistic PersonalCashflowBriefing so the AI Assistant understands income, bill reserves, and category caps
+  const refDate = new Date(`${today}T12:00:00Z`);
+  const safeRefDate = isNaN(refDate.getTime()) ? undefined : refDate;
+  const savingsPred = predictMonthlySavingsAndInvestments(transactions, {
+    baselineIncome: profile.baselineIncome || (actualIncomeThisMonth > 0 ? actualIncomeThisMonth : undefined),
+    savingsTargetPct: profile.savingsTargetPct,
+    investmentTargetPct: profile.investmentTargetPct,
+    selectedMonth: currentYearMonth,
+    referenceDate: safeRefDate,
+  });
+  const paydayInfo = getPaydayCycleIntelligence(transactions, {
+    paydayDay: profile.paydayDay ?? undefined,
+    baselineIncome: savingsPred.baselineIncome,
+    savingsTargetPct: savingsPred.savingsTargetPct,
+    investmentTargetPct: savingsPred.investmentTargetPct,
+    referenceDate: safeRefDate,
+  });
+  const { unpaidReserveByCategory } = getCategoryCommitmentBreakdown(transactions, currentYearMonth);
+
+  const categorySnapshots: CategoryCashflowSnapshot[] = [];
+  const overCapCategories: string[] = [];
+  for (const cat of CANONICAL_EXPENSE_CATEGORIES) {
+    const cap = resolveCategoryCapValue(cat, categoryCaps, 0);
+    const spent = Number((categorySpending[cat] || 0).toFixed(2));
+    const unpaidBillReserve = Number((unpaidReserveByCategory.get(cat) || 0).toFixed(2));
+    const unreservedRemaining = Number((cap - spent - unpaidBillReserve).toFixed(2));
+    const status: CategoryCashflowSnapshot['status'] =
+      unreservedRemaining < 0 ? 'over_cap' : cap > 0 && (spent + unpaidBillReserve) / cap >= 0.85 ? 'tight' : 'on_track';
+    if (status === 'over_cap') {
+      overCapCategories.push(cat);
+    }
+    categorySnapshots.push({
+      category: cat,
+      cap,
+      spent,
+      unpaidBillReserve,
+      unreservedRemaining,
+      status,
+    });
+  }
+
+  let smartRebalanceSummary: string | undefined;
+  if (overCapCategories.length > 0) {
+    const rebal = rebalanceCategoryCapsForSpending({
+      currentMonthTransactions: transactions,
+      currentCaps: categoryCaps,
+      maxLivingBudget: savingsPred.targetLivingBudget,
+      targetCategory: overCapCategories[0],
+      targetMonth: currentYearMonth,
+      referenceDate: safeRefDate,
+    });
+    smartRebalanceSummary = rebal.summaryText;
+  }
+
+  const cashflowBriefing: PersonalCashflowBriefing = {
+    baselineIncome: savingsPred.baselineIncome,
+    actualIncomeThisMonth: Number(actualIncomeThisMonth.toFixed(2)),
+    targetSavingsAmount: savingsPred.targetSavingsAmount,
+    targetInvestmentAmount: savingsPred.targetInvestmentAmount,
+    targetLivingBudget: savingsPred.targetLivingBudget,
+    spentSoFar: savingsPred.spentSoFar,
+    unpaidCommittedBillsReserve: savingsPred.unpaidCommittedReserve || 0,
+    remainingSafeLivingPool: Number(
+      Math.max(0, savingsPred.targetLivingBudget - savingsPred.spentSoFar - (savingsPred.unpaidCommittedReserve || 0)).toFixed(2)
+    ),
+    safeDailyLivingAllowance: savingsPred.safeDailyLivingAllowance,
+    daysRemainingInMonth: savingsPred.daysRemaining,
+    daysUntilPayday: paydayInfo.daysUntilPayday,
+    pacingStatus: savingsPred.pacingStatus,
+    categorySnapshots,
+    overCapCategories,
+    smartRebalanceSummary,
+  };
+
   const effectiveMonthlyBudget =
     profile.monthlyBudgetCap && profile.monthlyBudgetCap > 0
       ? profile.monthlyBudgetCap
@@ -319,6 +437,7 @@ export function computeDeterministicLedgerFacts(
     largestExpense,
     potentialDuplicate,
     relevantTransactionsSample,
+    cashflowBriefing,
   };
 }
 

@@ -25,10 +25,17 @@ import {
   getPaydayCycleIntelligence,
   predictMonthlySavingsAndInvestments,
   fitCapsToLivingBudget,
+  getCategoryRealtimeBudgetStatus,
+  applySmartCategoryRebalance,
+  rebalanceCategoryCapsForSpending,
+  getUnifiedIncomeAllocation,
+  saveUnifiedIncomeAllocation,
   type IntelligentBudgetPlan,
   type IntelligentCapSuggestion,
   type MonthlySavingsPrediction,
+  type CategoryRebalanceSuggestion,
 } from '@/lib/category-budget-helper';
+import { LAYOUT_TOKENS } from '@/lib/design-tokens';
 import { saveSettingWithCloudSync, SETTINGS_UPDATED_EVENT } from '@/lib/cloud-settings-sync';
 import { useMonthList } from '@/hooks/useSheets';
 
@@ -368,6 +375,21 @@ export default function BudgetPage() {
     saveCategoryCaps(fitted);
     toast.success(`Caps scaled down to RM ${maxLivingBudget.toLocaleString()} to strictly protect your savings target!`);
   };
+
+  // Cross-category smart rebalance suggestion if any category exceeds cap or touches reserved bills
+  const topRebalanceSuggestion = useMemo<CategoryRebalanceSuggestion | null>(() => {
+    for (const item of breakdown) {
+      const status = getCategoryRealtimeBudgetStatus(item.name, transactions, categoryCaps, 0, {
+        targetMonth: selectedMonth,
+        lockedCaps: lockedCategories,
+        maxLivingBudget,
+      });
+      if ((status.isOverCapBefore || status.unreservedRemainingBefore < 0) && status.rebalanceSuggestion?.canAutoRebalance) {
+        return status.rebalanceSuggestion;
+      }
+    }
+    return null;
+  }, [breakdown, transactions, categoryCaps, selectedMonth, lockedCategories, maxLivingBudget]);
 
   const [isAutoTuneOpen, setIsAutoTuneOpen] = useState(false);
   const [customCapsDraft, setCustomCapsDraft] = useState<Record<string, number>>({});
@@ -1168,6 +1190,30 @@ export default function BudgetPage() {
           </div>
         )}
 
+        {/* Top 1-Tap Smart Rebalancing Banner */}
+        {topRebalanceSuggestion && (
+          <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-950 dark:text-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
+            <div className="flex items-start gap-2.5">
+              <Sparkles className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <span className="leading-relaxed font-medium">
+                {topRebalanceSuggestion.summaryText}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                saveCategoryCaps(topRebalanceSuggestion.updatedCaps);
+                setCategoryCaps(topRebalanceSuggestion.updatedCaps);
+                toast.success(`✨ Rebalanced caps! Total spend remains within RM ${maxLivingBudget.toLocaleString()}`);
+              }}
+              className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-bold text-xs shadow-md shadow-amber-500/20 cursor-pointer transition-all shrink-0 flex items-center gap-1.5"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>✨ Auto-Balance Caps</span>
+            </button>
+          </div>
+        )}
+
         {breakdown.length === 0 ? (
           <div className="text-center py-10 rounded-2xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/20">
             <p className="text-xs text-slate-500 dark:text-zinc-400">No categorized expenses recorded for {formatMonthLabel(selectedMonth)}</p>
@@ -1175,6 +1221,11 @@ export default function BudgetPage() {
         ) : (
           breakdown.map((item) => {
             const cap = categoryCaps[item.name] || DEFAULT_CATEGORY_CAPS[item.name] || 500;
+            const realtimeStatus = getCategoryRealtimeBudgetStatus(item.name, transactions, categoryCaps, 0, {
+              targetMonth: selectedMonth,
+              lockedCaps: lockedCategories,
+              maxLivingBudget,
+            });
             const percentOfCap = cap > 0 ? (item.value / cap) * 100 : 0;
             const isCatOver = item.value > cap;
             const remainingCat = Math.max(0, cap - item.value);
@@ -1286,10 +1337,11 @@ export default function BudgetPage() {
                   </div>
                 </div>
 
-                {/* Progress Bar */}
-                <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-zinc-800">
+                {/* 3-Segment Progress Bar */}
+                <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-zinc-800 flex">
+                  {/* Segment 1: Spent so far */}
                   <div
-                    className={`h-full rounded-full transition-all duration-500 ${
+                    className={`h-full transition-all duration-500 ${
                       isCatOver
                         ? 'bg-rose-500'
                         : percentOfCap > 70
@@ -1297,8 +1349,32 @@ export default function BudgetPage() {
                         : 'bg-indigo-500'
                     }`}
                     style={{ width: `${Math.min(percentOfCap, 100)}%` }}
+                    title={`Spent: RM ${item.value.toFixed(2)}`}
                   />
+                  {/* Segment 2: Reserved upcoming bills */}
+                  {realtimeStatus.committedReserve > 0 && cap > 0 && (
+                    <div
+                      className="h-full bg-amber-400/80 dark:bg-amber-500/80 transition-all duration-500 border-l border-white/20"
+                      style={{
+                        width: `${Math.min((realtimeStatus.committedReserve / cap) * 100, Math.max(0, 100 - percentOfCap))}%`,
+                        backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(0,0,0,0.15) 3px, rgba(0,0,0,0.15) 6px)',
+                      }}
+                      title={`Reserved for unpaid bills: RM ${realtimeStatus.committedReserve.toFixed(2)}`}
+                    />
+                  )}
                 </div>
+
+                {/* Per-Category Bill Reserve Breakdown */}
+                {realtimeStatus.committedReserve > 0 && (
+                  <div className="text-[10px] text-amber-900 dark:text-amber-200 bg-amber-500/10 border border-amber-500/20 rounded-xl px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-1">
+                    <span className="flex items-center gap-1 font-medium">
+                      📌 Bill Reserve: RM {realtimeStatus.committedReserve.toFixed(2)} reserved for upcoming bills
+                    </span>
+                    <span>
+                      Free Unreserved: <strong className="font-mono">RM {Math.max(0, realtimeStatus.unreservedRemainingBefore).toFixed(2)}</strong>
+                    </span>
+                  </div>
+                )}
 
                 {/* Food & Dining Extra Burn Rate Row */}
                 {item.name === 'Food & Dining' && dailyInfo.isCurrentMonth && (

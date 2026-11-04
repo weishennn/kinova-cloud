@@ -21,6 +21,8 @@ export const CLOUD_SYNC_KEYS = {
   LHDN_TAX_PROFILE: 'cashflow_lhdn_tax_profile',
   MONTHLY_BUDGET: 'cashflow_monthly_budget',
   BASELINE_INCOME: 'cashflow_baseline_income',
+  SAVINGS_TARGET_PCT: 'cashflow_savings_target_pct',
+  INVESTMENT_TARGET_PCT: 'cashflow_investment_target_pct',
   EMERGENCY_RESERVE: 'cashflow_emergency_reserve',
   CURRENCY: 'cashflow_currency',
 } as const;
@@ -72,6 +74,8 @@ export interface UserMoneyProfile {
   suggestedPayday: number | null;
   monthlyBudgetCap: number | null;
   baselineIncome: number | null;
+  savingsTargetPct: number;
+  investmentTargetPct: number;
   emergencyReserve: number | null;
   goals: UserGoal[];
   rejectedChips: RejectedChip[];
@@ -166,6 +170,8 @@ export function getUserMoneyProfile(
       suggestedPayday: null,
       monthlyBudgetCap: null,
       baselineIncome: null,
+      savingsTargetPct: 20,
+      investmentTargetPct: 20,
       emergencyReserve: null,
       goals: [],
       rejectedChips: [],
@@ -200,6 +206,20 @@ export function getUserMoneyProfile(
   if (storedIncome) {
     const parsed = parseFloat(storedIncome);
     if (Number.isFinite(parsed) && parsed > 0) baselineIncome = parsed;
+  }
+
+  let savingsTargetPct = 20;
+  const storedSavingsPct = localStorage.getItem(CLOUD_SYNC_KEYS.SAVINGS_TARGET_PCT);
+  if (storedSavingsPct) {
+    const parsed = parseFloat(storedSavingsPct);
+    if (Number.isFinite(parsed) && parsed >= 0) savingsTargetPct = parsed;
+  }
+
+  let investmentTargetPct = 20;
+  const storedInvestPct = localStorage.getItem(CLOUD_SYNC_KEYS.INVESTMENT_TARGET_PCT);
+  if (storedInvestPct) {
+    const parsed = parseFloat(storedInvestPct);
+    if (Number.isFinite(parsed) && parsed >= 0) investmentTargetPct = parsed;
   }
 
   let emergencyReserve: number | null = null;
@@ -270,6 +290,8 @@ export function getUserMoneyProfile(
     suggestedPayday,
     monthlyBudgetCap,
     baselineIncome,
+    savingsTargetPct,
+    investmentTargetPct,
     emergencyReserve,
     goals,
     rejectedChips,
@@ -309,6 +331,14 @@ export function updateUserMoneyProfile(updates: Partial<UserMoneyProfile>): void
     } else {
       saveProfileSetting(CLOUD_SYNC_KEYS.BASELINE_INCOME, String(updates.baselineIncome));
     }
+  }
+
+  if (updates.savingsTargetPct !== undefined) {
+    saveProfileSetting(CLOUD_SYNC_KEYS.SAVINGS_TARGET_PCT, String(updates.savingsTargetPct));
+  }
+
+  if (updates.investmentTargetPct !== undefined) {
+    saveProfileSetting(CLOUD_SYNC_KEYS.INVESTMENT_TARGET_PCT, String(updates.investmentTargetPct));
   }
 
   if (updates.emergencyReserve !== undefined) {
