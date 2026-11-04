@@ -1,4 +1,4 @@
-import { convertCurrency, getCachedRatesToMyr } from '@/lib/currency';
+import { convertCurrency, getCachedRatesToMyr } from './currency.ts';
 
 export interface SplitwiseTripMember {
   id: string;
@@ -18,6 +18,7 @@ export interface SplitwiseExpense {
   paid_by_member_id: string;
   is_settlement: boolean;
   splits: Record<string, number>;
+  updated_at?: string;
 }
 
 export interface SplitwiseTripSnapshot {
@@ -49,8 +50,16 @@ export interface SavedSplitwiseConnection {
   includeInBudget?: boolean;
 }
 
+export interface OfflineSplitwiseExpensePatch {
+  inviteCode: string;
+  expense: SplitwiseExpense;
+  updatedAt: number;
+  deleted?: boolean;
+}
+
 const CUSTOM_APP_URL_KEY = 'cashflow:splitwise-app-url';
 const SNAPSHOT_CACHE_PREFIX = 'cashflow:splitwise-snapshot:';
+const OFFLINE_OUTBOX_PREFIX = 'cashflow:splitwise-offline-outbox:';
 const LOCAL_SPLITWISE_SNAPSHOT_PREFIX = 'splitwise:snapshot:';
 const LOCAL_SPLITWISE_DB_KEY = 'splitwise:local-db:v1';
 
@@ -266,6 +275,7 @@ function parseSnapshotPayload(payload: unknown, fallbackInviteCode: string): Spl
         splits: Object.fromEntries(
           Object.entries(rawSplits).map(([id, amount]) => [id, Number(amount)]),
         ),
+        updated_at: expense.updated_at ? String(expense.updated_at) : undefined,
       },
     ];
   });
@@ -315,6 +325,210 @@ function readLocalBrowserSplitwiseSnapshot(inviteCode: string): SplitwiseTripSna
   return null;
 }
 
+export function getOfflineSplitwiseOutbox(inviteCode: string): OfflineSplitwiseExpensePatch[] {
+  if (typeof window === 'undefined') return [];
+  const code = inviteCode.trim().toUpperCase();
+  try {
+    const raw = window.localStorage.getItem(`${OFFLINE_OUTBOX_PREFIX}${code}`);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveOfflineSplitwiseOutbox(
+  inviteCode: string,
+  patches: OfflineSplitwiseExpensePatch[],
+): void {
+  if (typeof window === 'undefined') return;
+  const code = inviteCode.trim().toUpperCase();
+  try {
+    if (patches.length === 0) {
+      window.localStorage.removeItem(`${OFFLINE_OUTBOX_PREFIX}${code}`);
+    } else {
+      window.localStorage.setItem(`${OFFLINE_OUTBOX_PREFIX}${code}`, JSON.stringify(patches));
+    }
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+/**
+ * Queues an offline multi-currency expense edit or addition for a Trixpense trip
+ * and immediately reconciles it into the local cached snapshot.
+ */
+export function queueOfflineSplitwiseExpense(
+  inviteCode: string,
+  expense: SplitwiseExpense,
+  options?: { deleted?: boolean },
+): SplitwiseTripSnapshot | null {
+  const code = inviteCode.trim().toUpperCase();
+  const currentOutbox = getOfflineSplitwiseOutbox(code).filter(
+    (p) => p.expense.id !== expense.id,
+  );
+  const patch: OfflineSplitwiseExpensePatch = {
+    inviteCode: code,
+    expense: {
+      ...expense,
+      updated_at: expense.updated_at || new Date().toISOString(),
+    },
+    updatedAt: Date.now(),
+    deleted: Boolean(options?.deleted),
+  };
+  currentOutbox.push(patch);
+  saveOfflineSplitwiseOutbox(code, currentOutbox);
+
+  const cached = getCachedSplitwiseSnapshot(code);
+  if (!cached) return null;
+  const reconciled = reconcileSplitwiseSnapshotOffline(cached, cached, currentOutbox);
+  saveCachedSplitwiseSnapshot(reconciled.mergedSnapshot);
+  return reconciled.mergedSnapshot;
+}
+
+function computeExpenseSignature(exp: SplitwiseExpense): string {
+  const splitsSig = Object.entries(exp.splits || {})
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}:${Number(v).toFixed(4)}`)
+    .join('|');
+  return [
+    exp.title,
+    Number(exp.amount).toFixed(4),
+    exp.currency,
+    Number(exp.base_amount).toFixed(4),
+    exp.expense_date,
+    exp.category,
+    exp.paid_by_member_id,
+    exp.is_settlement ? '1' : '0',
+    splitsSig,
+  ].join('::');
+}
+
+/**
+ * Pillar 2.2: Conflict-Free Offline Trixpense Snapshot Reconciliation
+ * Deterministically merges a remote Trixpense snapshot with any locally cached snapshot
+ * and pending offline outbox patches so offline split-bill edits are never lost on reconnect.
+ */
+export function reconcileSplitwiseSnapshotOffline(
+  remoteSnapshot: SplitwiseTripSnapshot,
+  localCachedSnapshot?: SplitwiseTripSnapshot | null,
+  offlineOutbox?: OfflineSplitwiseExpensePatch[],
+): {
+  mergedSnapshot: SplitwiseTripSnapshot;
+  addedIds: string[];
+  updatedIds: string[];
+  preservedOfflineIds: string[];
+  conflictsResolved: number;
+} {
+  const code = remoteSnapshot.trip.invite_code.trim().toUpperCase();
+  const patches = offlineOutbox ?? getOfflineSplitwiseOutbox(code);
+
+  const memberMap = new Map<string, SplitwiseTripMember>();
+  for (const m of localCachedSnapshot?.members || []) {
+    memberMap.set(m.id, m);
+  }
+  for (const m of remoteSnapshot.members || []) {
+    memberMap.set(m.id, m);
+  }
+
+  const remoteById = new Map<string, SplitwiseExpense>();
+  for (const exp of remoteSnapshot.expenses || []) {
+    remoteById.set(exp.id, exp);
+  }
+
+  const localById = new Map<string, SplitwiseExpense>();
+  for (const exp of localCachedSnapshot?.expenses || []) {
+    localById.set(exp.id, exp);
+  }
+
+  const mergedExpensesMap = new Map<string, SplitwiseExpense>();
+  const addedIds: string[] = [];
+  const updatedIds: string[] = [];
+  const preservedOfflineIds: string[] = [];
+  let conflictsResolved = 0;
+
+  // 1. Seed with remote expenses
+  for (const [id, rExp] of remoteById.entries()) {
+    const lExp = localById.get(id);
+    if (!lExp) {
+      addedIds.push(id);
+      mergedExpensesMap.set(id, rExp);
+    } else {
+      const rSig = computeExpenseSignature(rExp);
+      const lSig = computeExpenseSignature(lExp);
+      if (rSig !== lSig) {
+        updatedIds.push(id);
+      }
+      mergedExpensesMap.set(id, rExp);
+    }
+  }
+
+  // 2. Apply pending offline outbox patches (conflict-free LWW by timestamp/content)
+  const remainingOutbox: OfflineSplitwiseExpensePatch[] = [];
+  for (const patch of patches) {
+    const expId = patch.expense.id;
+    const remoteExp = remoteById.get(expId);
+
+    if (patch.deleted) {
+      if (remoteExp && String(remoteExp.category).toLowerCase() !== '__deleted__') {
+        conflictsResolved += 1;
+        preservedOfflineIds.push(expId);
+        remainingOutbox.push(patch);
+      }
+      mergedExpensesMap.delete(expId);
+      continue;
+    }
+
+    if (!remoteExp) {
+      // Offline-created expense not yet on server -> preserve it!
+      mergedExpensesMap.set(expId, patch.expense);
+      preservedOfflineIds.push(expId);
+      remainingOutbox.push(patch);
+      continue;
+    }
+
+    const remoteSig = computeExpenseSignature(remoteExp);
+    const patchSig = computeExpenseSignature(patch.expense);
+    if (remoteSig === patchSig) {
+      // Server already has this exact patch -> dequeue from offline outbox!
+      continue;
+    }
+
+    // Both remote and offline patch exist with different signatures -> compare timestamps
+    const remoteTs = remoteExp.updated_at ? Date.parse(remoteExp.updated_at) : 0;
+    if (!Number.isFinite(remoteTs) || patch.updatedAt >= remoteTs) {
+      mergedExpensesMap.set(expId, patch.expense);
+      preservedOfflineIds.push(expId);
+      conflictsResolved += 1;
+      remainingOutbox.push(patch);
+    } else {
+      // Remote has a strictly newer timestamp -> accept remote and clear stale patch
+      conflictsResolved += 1;
+    }
+  }
+
+  if (offlineOutbox === undefined) {
+    saveOfflineSplitwiseOutbox(code, remainingOutbox);
+  }
+
+  const mergedExpenses = Array.from(mergedExpensesMap.values()).sort((a, b) =>
+    String(b.expense_date || '').localeCompare(String(a.expense_date || '')),
+  );
+
+  return {
+    mergedSnapshot: {
+      trip: remoteSnapshot.trip,
+      members: Array.from(memberMap.values()),
+      expenses: mergedExpenses,
+    },
+    addedIds,
+    updatedIds,
+    preservedOfflineIds,
+    conflictsResolved,
+  };
+}
+
 export function getCachedSplitwiseSnapshot(inviteCode: string): SplitwiseTripSnapshot | null {
   if (typeof window === 'undefined') return null;
   const code = inviteCode.trim().toUpperCase();
@@ -348,6 +562,7 @@ export async function fetchSplitwiseTripSnapshot(inviteCode: string): Promise<Sp
   }
 
   const localSnapshot = readLocalBrowserSplitwiseSnapshot(normalizedCode);
+  const cachedBeforeFetch = getCachedSplitwiseSnapshot(normalizedCode) || localSnapshot;
 
   const appUrl = getSplitwiseAppBaseUrl();
   const directSupabaseUrl = (
@@ -379,9 +594,10 @@ export async function fetchSplitwiseTripSnapshot(inviteCode: string): Promise<Sp
       });
       const payload: unknown = await response.json().catch(() => null);
       if (response.ok && payload) {
-        const snapshot = parseSnapshotPayload(payload, normalizedCode);
-        saveCachedSplitwiseSnapshot(snapshot);
-        return snapshot;
+        const remoteSnapshot = parseSnapshotPayload(payload, normalizedCode);
+        const { mergedSnapshot } = reconcileSplitwiseSnapshotOffline(remoteSnapshot, cachedBeforeFetch);
+        saveCachedSplitwiseSnapshot(mergedSnapshot);
+        return mergedSnapshot;
       }
       if (response.status === 404 && asRecord(payload)?.error) {
         throw new Error(String(asRecord(payload)?.error));
@@ -418,20 +634,23 @@ export async function fetchSplitwiseTripSnapshot(inviteCode: string): Promise<Sp
     });
     const payload: unknown = await response.json().catch(() => null);
     if (!response.ok) {
-      if (localSnapshot) {
-        saveCachedSplitwiseSnapshot(localSnapshot);
-        return localSnapshot;
+      if (cachedBeforeFetch) {
+        const { mergedSnapshot } = reconcileSplitwiseSnapshotOffline(cachedBeforeFetch, cachedBeforeFetch);
+        saveCachedSplitwiseSnapshot(mergedSnapshot);
+        return mergedSnapshot;
       }
       const message = asRecord(payload)?.error || asRecord(payload)?.message;
       throw new Error(typeof message === 'string' && message ? message : `Trixpense returned an error (${response.status}).`);
     }
-    const snapshot = parseSnapshotPayload(payload, normalizedCode);
-    saveCachedSplitwiseSnapshot(snapshot);
-    return snapshot;
+    const remoteSnapshot = parseSnapshotPayload(payload, normalizedCode);
+    const { mergedSnapshot } = reconcileSplitwiseSnapshotOffline(remoteSnapshot, cachedBeforeFetch);
+    saveCachedSplitwiseSnapshot(mergedSnapshot);
+    return mergedSnapshot;
   } catch (error) {
-    if (localSnapshot) {
-      saveCachedSplitwiseSnapshot(localSnapshot);
-      return localSnapshot;
+    if (cachedBeforeFetch) {
+      const { mergedSnapshot } = reconcileSplitwiseSnapshotOffline(cachedBeforeFetch, cachedBeforeFetch);
+      saveCachedSplitwiseSnapshot(mergedSnapshot);
+      return mergedSnapshot;
     }
     if (error instanceof Error) throw error;
     throw new Error('Could not reach Trixpense. Check your network connection.');
@@ -531,12 +750,6 @@ export function summarizeSplitwiseMember(
 /**
  * Computes a member's Trixpense summary in ANY target currency (e.g. 'MYR' or `trip.currency`)
  * WITHOUT round-tripping expenses that were already paid in `targetCurrency`.
- *
- * Example:
- * - Day 1: Paid 100 MYR (rate 1.60 -> 160 CNY)
- * - Day 2: Paid 10 MYR (rate 1.66 -> 16.60 CNY)
- * When `targetCurrency === 'MYR'`, those two expenses evaluate to exact `110.00 MYR`
- * instead of converting 176.60 CNY back to MYR at a different rate!
  */
 export function resolveSplitwiseSummaryInCurrency(
   snapshot: SplitwiseTripSnapshot,
@@ -571,16 +784,13 @@ export function resolveSplitwiseSummaryInCurrency(
     let expShareInTargetMinor = 0;
 
     if (origCurr === target) {
-      // Exact native paid currency! Zero FX conversion drift.
       expGroupInTargetMinor = amountToMinorUnits(expense.amount ?? expense.base_amount ?? 0, targetScale);
       const origSplits = getOriginalCurrencySplitsMinor(expense, baseCurr);
       expShareInTargetMinor = origSplits[memberId] || 0;
     } else if (baseCurr === target) {
-      // Stored base_amount is already in targetCurrency
       expGroupInTargetMinor = amountToMinorUnits(expense.base_amount, targetScale);
       expShareInTargetMinor = amountToMinorUnits(expense.splits[memberId] || 0, targetScale);
     } else {
-      // Convert from original currency into targetCurrency
       const origSplits = getOriginalCurrencySplitsMinor(expense, baseCurr);
       const origShare = (origSplits[memberId] || 0) / origScale;
       const origTotal = Number(expense.amount ?? 0);
@@ -902,6 +1112,107 @@ function appendSnapshotMemberTransactions(
   }
 }
 
+/**
+ * Pillar 2.2: Conflict-Free Reconciliation of Trixpense Splits into the Primary Ledger
+ * Compares deterministic `trixpense_${inviteCode}_${expenseId}` rows against existing ledger rows,
+ * returning exact rows to insert, rows whose amount/FX/category changed, and orphaned IDs.
+ */
+export function reconcileTrixpenseSplitsToLedger(params: {
+  snapshot: SplitwiseTripSnapshot;
+  memberId: string;
+  existingLedgerRows?: Array<Record<string, unknown>>;
+  tripName?: string;
+  tripId?: string;
+  tripCurrency?: string;
+  tripRateToMyr?: number;
+  defaultDate?: string;
+}): {
+  toInsert: SplitwiseSyncedTransactionRow[];
+  toUpdate: SplitwiseSyncedTransactionRow[];
+  unchangedIds: string[];
+  orphanedTrixpenseIds: string[];
+} {
+  const {
+    snapshot,
+    memberId,
+    existingLedgerRows = [],
+    tripName = snapshot.trip.name || 'Trip',
+    tripId = snapshot.trip.id || tripName,
+    tripCurrency = snapshot.trip.base_currency || 'MYR',
+    tripRateToMyr,
+    defaultDate = '',
+  } = params;
+
+  const targetRows: SplitwiseSyncedTransactionRow[] = [];
+  appendSnapshotMemberTransactions(
+    snapshot,
+    memberId,
+    tripName,
+    tripId,
+    tripCurrency,
+    tripRateToMyr,
+    defaultDate,
+    new Set<string>(),
+    targetRows,
+  );
+
+  const invitePrefix = `trixpense_${snapshot.trip.invite_code.toUpperCase()}_`;
+  const existingMap = new Map<string, Record<string, unknown>>();
+  for (const row of existingLedgerRows) {
+    const id = String(row.id || row.Id || '').trim();
+    if (id.startsWith(invitePrefix)) {
+      existingMap.set(id, row);
+    }
+  }
+
+  const toInsert: SplitwiseSyncedTransactionRow[] = [];
+  const toUpdate: SplitwiseSyncedTransactionRow[] = [];
+  const unchangedIds: string[] = [];
+  const activeTargetIds = new Set<string>();
+
+  for (const target of targetRows) {
+    activeTargetIds.add(target.id);
+    const existing = existingMap.get(target.id);
+    if (!existing) {
+      toInsert.push(target);
+      continue;
+    }
+
+    const existingAmt = Number(existing.amount ?? existing.Amount ?? 0);
+    const existingBaseAmt = Number(existing.baseAmount ?? existing.BaseAmount ?? existingAmt);
+    const existingCat = String(existing.category ?? existing.Category ?? '');
+    const existingDate = String(existing.date ?? existing.Date ?? '').slice(0, 10);
+    const existingCurr = String(existing.currency ?? existing.Currency ?? 'MYR').toUpperCase();
+
+    const hasChanged =
+      Math.abs(existingAmt - target.amount) >= 0.01 ||
+      Math.abs(existingBaseAmt - target.baseAmount) >= 0.01 ||
+      existingCat !== target.category ||
+      existingDate !== target.date ||
+      existingCurr !== target.currency;
+
+    if (hasChanged) {
+      toUpdate.push(target);
+    } else {
+      unchangedIds.push(target.id);
+    }
+  }
+
+  const orphanedTrixpenseIds: string[] = [];
+  for (const existingId of existingMap.keys()) {
+    if (!activeTargetIds.has(existingId)) {
+      orphanedTrixpenseIds.push(existingId);
+    }
+  }
+
+  return {
+    toInsert,
+    toUpdate,
+    unchangedIds,
+    orphanedTrixpenseIds,
+  };
+}
+
 export function getSplitwiseOpenUrl(inviteCode: string): string | null {
   const appUrl = getSplitwiseAppBaseUrl();
   if (!appUrl) return null;
@@ -911,7 +1222,7 @@ export function getSplitwiseOpenUrl(inviteCode: string): string | null {
 const KEEPALIVE_PING_KEY = 'cashflow:trixpense-keepalive-at';
 
 /**
- * Sends a silent background keep-alive heartbeat from Kinova to Trixpense / Supabase (`pbxbrdntwgoedjeumwrq`)
+ * Sends a silent background keep-alive heartbeat from Kinova to Trixpense / Supabase
  * at most once every 12 hours so everyday use of Kinova prevents Supabase from pausing Trixpense between trips.
  */
 export async function pingTrixpenseKeepAlive(): Promise<void> {

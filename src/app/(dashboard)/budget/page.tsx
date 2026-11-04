@@ -9,6 +9,8 @@ import {
   ShieldCheck, Utensils, Info, CheckCircle2, Sliders, Lock, Unlock
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useQueryClient } from '@tanstack/react-query';
+import { addUnifiedRow, applyOptimisticAddToQueryCache } from '@/hooks/useSheets';
 import { useTransactions } from '@/hooks/useTransactions';
 import { AnimatedNumber } from '@/components/shared/animated-number';
 import { CockpitPageHeading } from '@/components/money-cockpit/cockpit-page-heading';
@@ -18,6 +20,9 @@ import { RecurringCommitments } from '@/components/dashboard/recurring-commitmen
 import { InstallmentDashboard } from '@/components/dashboard/installment-dashboard';
 import {
   getSavedCategoryCaps,
+  getTripEnvelopeSummaries,
+  type TripBudgetEnvelope,
+  type TripEnvelopeStatus,
   saveCategoryCaps,
   calculateDailySafeSpend,
   DEFAULT_CATEGORY_CAPS,
@@ -40,6 +45,7 @@ import { saveSettingWithCloudSync, SETTINGS_UPDATED_EVENT } from '@/lib/cloud-se
 import { useMonthList } from '@/hooks/useSheets';
 
 export default function BudgetPage() {
+  const queryClient = useQueryClient();
   const { selectedMonth, setSelectedMonth } = useAppStore();
   const { data: sheetMonths = [] } = useMonthList();
   const { transactions = [] } = useTransactions(selectedMonth ? { period: selectedMonth } : undefined);
@@ -302,6 +308,11 @@ export default function BudgetPage() {
       { configuredCaps: categoryCaps, lockedCaps: lockedCategories }
     );
   }, [allTransactions, transactions, categoryCaps, lockedCategories]);
+
+  // Trip Budget Envelopes (Pillar 2.1)
+  const tripSummaries = useMemo(() => {
+    return getTripEnvelopeSummaries(allTransactions.length > 0 ? allTransactions : transactions);
+  }, [allTransactions, transactions]);
 
   // Payday Cycle & Savings Shield intelligence
   const paydayInfo = useMemo(() => {
@@ -999,6 +1010,115 @@ export default function BudgetPage() {
           <Info className="h-4 w-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
           <span>{paydayInfo.detail}</span>
         </div>
+
+        {paydayInfo.envelopePlan?.shouldPrompt && (
+          <div className="p-4 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-xs text-emerald-950 dark:text-emerald-200 space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-bold flex items-center gap-1.5 text-sm text-emerald-900 dark:text-emerald-200">
+                <Sparkles className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <span>{paydayInfo.envelopePlan.headline}</span>
+              </span>
+              <button
+                type="button"
+                onClick={async () => {
+                  const transfers = paydayInfo.envelopePlan?.proposedTransfers || [];
+                  const todayStr = currentMonthStr + '-28';
+                  for (const tr of transfers) {
+                    const tempId = tr.id || `tx_env_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+                    const rowData = {
+                      Id: tempId,
+                      id: tempId,
+                      Date: tr.date || todayStr,
+                      date: tr.date || todayStr,
+                      Type: 'investment',
+                      type: 'investment',
+                      Category: tr.category,
+                      category: tr.category,
+                      SubCategory: tr.subCategory,
+                      subCategory: tr.subCategory,
+                      Description: tr.description,
+                      description: tr.description,
+                      Amount: tr.amount,
+                      amount: tr.amount,
+                      Currency: 'MYR',
+                      currency: 'MYR',
+                      TripTag: '',
+                      tripTag: '',
+                      ReceiptUrl: '',
+                      receiptUrl: '',
+                      Notes: tr.notes,
+                      notes: tr.notes,
+                      _month: currentMonthStr,
+                      _rowIndex: 2,
+                    };
+                    applyOptimisticAddToQueryCache(queryClient, currentMonthStr, rowData);
+                    void addUnifiedRow(currentMonthStr, rowData);
+                  }
+                  queryClient.invalidateQueries({ queryKey: ['sheet'] });
+                  queryClient.invalidateQueries({ queryKey: ['overview'] });
+                  queryClient.invalidateQueries({ queryKey: ['budget'] });
+                  toast.success('✨ 1-Tap Payday Envelope transfers recorded successfully!');
+                }}
+                className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition-all cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <Check className="h-3.5 w-3.5" />
+                <span>1-Tap Allocate Envelopes</span>
+              </button>
+            </div>
+            <p className="text-[11px] text-emerald-800 dark:text-emerald-300 leading-relaxed">
+              {paydayInfo.envelopePlan.summaryText}
+            </p>
+          </div>
+        )}
+
+        {/* Pillar 2.1: Trip Budget Envelopes */}
+        {tripSummaries.length > 0 && (
+          <div className="pt-3 border-t border-slate-200 dark:border-zinc-800/80 space-y-2">
+            <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-zinc-200">
+              <span className="flex items-center gap-1.5">
+                <span>✈️ Active Trip Budget Envelopes</span>
+              </span>
+              <span className="text-[11px] text-slate-500 dark:text-zinc-400 font-normal">
+                Quarantined from domestic daily allowance
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {tripSummaries.map((ts) => (
+                <div
+                  key={ts.tripTag}
+                  className="p-3 rounded-2xl bg-white/80 dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800/80 space-y-1.5"
+                >
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-900 dark:text-white">{ts.tripTag}</span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                      ts.isOverBudget
+                        ? 'bg-rose-500/15 text-rose-700 dark:text-rose-400'
+                        : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                    }`}>
+                      {ts.isOverBudget ? 'Over Budget' : `${ts.spentPercent}% Used`}
+                    </span>
+                  </div>
+                  <div className="flex items-baseline justify-between text-xs font-mono">
+                    <span className="text-slate-500 dark:text-zinc-400">
+                      Spent: {ts.currency} {ts.spentNative.toLocaleString()}
+                    </span>
+                    <span className="font-bold text-slate-900 dark:text-white">
+                      Cap: {ts.currency} {ts.budgetAmount.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full bg-slate-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        ts.isOverBudget ? 'bg-rose-500' : 'bg-indigo-500'
+                      }`}
+                      style={{ width: `${Math.min(100, ts.spentPercent)}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </motion.div>
 
       {/* Food & Dining Daily Pace Spotlight Card */}

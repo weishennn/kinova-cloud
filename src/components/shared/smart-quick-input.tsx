@@ -23,6 +23,7 @@ import {
 } from '@/lib/kinova-assistant';
 import { routeLocalIntent, type LocalRouteResult } from '@/lib/intent-router';
 import { getSavedCategoryCaps, saveCategoryCaps } from '@/lib/category-budget-helper';
+import { broadcastCrossTabEvent } from '@/lib/cache-manager';
 import {
   getUserMoneyProfile,
   updateUserMoneyProfile,
@@ -908,6 +909,66 @@ export function SmartQuickInput() {
       setAssistantResult(null);
     } else if (action.type === 'undo') {
       void handleUndoAction();
+      setInput('');
+      setAssistantResult(null);
+    } else if (action.type === 'rebalance_caps' && action.payload) {
+      const payload = action.payload as any;
+      if (payload.rebalancedCaps && typeof payload.rebalancedCaps === 'object') {
+        saveCategoryCaps(payload.rebalancedCaps);
+        try {
+          broadcastCrossTabEvent('CATEGORY_CAPS_UPDATED', { caps: payload.rebalancedCaps });
+        } catch {}
+        queryClient.invalidateQueries({ queryKey: ['category_caps'] });
+        queryClient.invalidateQueries({ queryKey: ['overview'] });
+        queryClient.invalidateQueries({ queryKey: ['budget'] });
+        toast.success(action.label ? `✨ ${action.label} applied!` : '✨ Budget category caps rebalanced!');
+        setInput('');
+        setAssistantResult(null);
+      }
+    } else if (action.type === 'allocate_payday_envelope' && action.payload) {
+      const payload = action.payload as any;
+      const transfers = Array.isArray(payload.transfers) ? payload.transfers : [];
+      const todayStr = getLocalDateString();
+      const monthStr = todayStr.substring(0, 7);
+
+      for (const t of transfers) {
+        const tempId = t.id || `tx_envelope_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const amount = Number(t.amount) || 0;
+        const category = String(t.category || 'Emergency Savings');
+        const desc = String(t.description || 'Payday Envelope Allocation');
+        const rowData = {
+          Id: tempId,
+          id: tempId,
+          Date: t.date || todayStr,
+          date: t.date || todayStr,
+          Type: 'investment',
+          type: 'investment',
+          Category: category,
+          category,
+          SubCategory: t.subCategory || 'Payday Auto-Envelope',
+          subCategory: t.subCategory || 'Payday Auto-Envelope',
+          Description: desc,
+          description: desc,
+          Amount: amount,
+          amount,
+          Currency: t.currency || 'MYR',
+          currency: t.currency || 'MYR',
+          TripTag: '',
+          tripTag: '',
+          ReceiptUrl: '',
+          receiptUrl: '',
+          Notes: t.notes || '[Payday Auto-Envelope]',
+          notes: t.notes || '[Payday Auto-Envelope]',
+          _month: monthStr,
+          _rowIndex: 2,
+        };
+        applyOptimisticAddToQueryCache(queryClient, monthStr, rowData);
+        void addUnifiedRow(monthStr, rowData);
+      }
+      queryClient.invalidateQueries({ queryKey: ['sheet'] });
+      queryClient.invalidateQueries({ queryKey: ['overview'] });
+      queryClient.invalidateQueries({ queryKey: ['budget'] });
+      toast.success(action.label ? `✨ ${action.label} executed!` : '✨ Payday envelope allocations saved!');
       setInput('');
       setAssistantResult(null);
     }
@@ -1861,14 +1922,36 @@ export function SmartQuickInput() {
             </div>
           )}
           {assistantResult.proposedAction && (
-            <div className="pt-1 flex items-center justify-end">
-              <button
-                type="button"
-                onClick={() => void handleExecuteProposedAction(assistantResult.proposedAction!)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow transition-all cursor-pointer"
-              >
-                <span>{assistantResult.proposedAction.label}</span>
-              </button>
+            <div className="pt-1 space-y-2">
+              {assistantResult.proposedAction.type === 'rebalance_caps' && (
+                <div className="text-xs bg-indigo-50/80 dark:bg-indigo-950/40 p-2.5 rounded-xl border border-indigo-200/60 dark:border-indigo-800/60 text-indigo-900 dark:text-indigo-200">
+                  <div className="font-semibold flex items-center gap-1.5 mb-1">
+                    <span>⚖️ Proposed Budget Rebalance</span>
+                  </div>
+                  <div className="text-[11px] text-indigo-700 dark:text-indigo-300">
+                    {(assistantResult.proposedAction.payload as any)?.donorSummary || (assistantResult.proposedAction.payload as any)?.explanation || 'Trims unspent slack to balance overspent categories.'}
+                  </div>
+                </div>
+              )}
+              {assistantResult.proposedAction.type === 'allocate_payday_envelope' && (
+                <div className="text-xs bg-emerald-50/80 dark:bg-emerald-950/40 p-2.5 rounded-xl border border-emerald-200/60 dark:border-emerald-800/60 text-emerald-900 dark:text-emerald-200">
+                  <div className="font-semibold flex items-center gap-1.5 mb-1">
+                    <span>💰 Payday Envelope Allocation</span>
+                  </div>
+                  <div className="text-[11px] text-emerald-700 dark:text-emerald-300">
+                    {(assistantResult.proposedAction.payload as any)?.summary || '1-Tap allocation into Emergency Savings and Investments.'}
+                  </div>
+                </div>
+              )}
+              <div className="flex items-center justify-end">
+                <button
+                  type="button"
+                  onClick={() => void handleExecuteProposedAction(assistantResult.proposedAction!)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow transition-all cursor-pointer"
+                >
+                  <span>{assistantResult.proposedAction.label}</span>
+                </button>
+              </div>
             </div>
           )}
         </div>

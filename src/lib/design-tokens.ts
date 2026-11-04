@@ -1,6 +1,6 @@
 /**
  * Centralized Design Tokens for CashFlow
- * Consistent colors, typography metrics, and category accents across the entire application.
+ * Consistent colors, typography metrics, spacing, and surface tokens across the entire application.
  */
 
 export const CATEGORY_COLORS: Record<string, string> = {

@@ -58,6 +58,7 @@ export interface AssistantRequestBody {
       targetInvestmentAmount: number;
       targetLivingBudget: number;
       spentSoFar: number;
+      tripQuarantinedSpent?: number;
       unpaidCommittedBillsReserve: number;
       remainingSafeLivingPool: number;
       safeDailyLivingAllowance: number;
@@ -74,6 +75,33 @@ export interface AssistantRequestBody {
       }>;
       overCapCategories?: string[];
       smartRebalanceSummary?: string;
+      rebalancePlan?: {
+        hasOverCap: boolean;
+        overCapCategories: Array<{ category: string; spent: number; cap: number; overAmount: number }>;
+        proposedDonorPool: Array<{ category: string; currentCap: number; proposedTrim: number; newCap: number }>;
+        totalDonorSlack: number;
+        rebalancedCaps: Record<string, number>;
+      };
+      paydayEnvelopePlan?: {
+        cyclePhase: string;
+        shouldPrompt: boolean;
+        plannedSavingsAmount: number;
+        plannedInvestmentAmount: number;
+        remainingToSave: number;
+        remainingToInvest: number;
+        summaryText: string;
+        proposedTransfers: Array<{
+          id: string;
+          type: string;
+          amount: number;
+          currency: string;
+          category: string;
+          subCategory: string;
+          description: string;
+          date: string;
+          notes: string;
+        }>;
+      };
     };
   };
   recentActions?: Array<{
@@ -195,7 +223,7 @@ Rules:
   "answer": string,
   "proposedAction": {
     "label": string,
-    "type": "save_transaction" | "save_trade" | "save_installment" | "save_trip" | "set_preference" | "navigate" | "undo",
+    "type": "save_transaction" | "save_trade" | "save_installment" | "save_trip" | "set_preference" | "navigate" | "undo" | "rebalance_caps" | "allocate_payday_envelope",
     "payload": { ... }
   } | null,
   "command": {
@@ -298,13 +326,16 @@ export async function POST(req: NextRequest) {
 - Target Savings: RM ${briefing.targetSavingsAmount} | Target Investments: RM ${briefing.targetInvestmentAmount}
 - Target Living Budget: RM ${briefing.targetLivingBudget}
 - Spent So Far (MTD): RM ${briefing.spentSoFar}
+- Trip-Quarantined Foreign Expenses: RM ${briefing.tripQuarantinedSpent ?? 0} (isolated from domestic living allowance)
 - Unpaid Committed Bill Reserves: RM ${briefing.unpaidCommittedBillsReserve}
 - Remaining Free Living Pool: RM ${briefing.remainingSafeLivingPool}
 - Safe Daily Living Allowance: RM ${briefing.safeDailyLivingAllowance}/day (${briefing.daysRemainingInMonth} days left in month)
 - Days Until Payday: ${briefing.daysUntilPayday}
 - Budget Pacing Status: ${briefing.pacingStatus}
 - Over-Cap / Tight Categories: ${briefing.overCapCategories?.join(', ') || 'None (all healthy)'}
-${briefing.smartRebalanceSummary ? `- Smart Rebalance Plan: ${briefing.smartRebalanceSummary}` : ''}\n`
+${briefing.smartRebalanceSummary ? `- Smart Rebalance Plan: ${briefing.smartRebalanceSummary}` : ''}
+${briefing.rebalancePlan?.hasOverCap ? `- Proposed Rebalance Caps: ${JSON.stringify(briefing.rebalancePlan.rebalancedCaps)}` : ''}
+${briefing.paydayEnvelopePlan?.shouldPrompt ? `- Payday Settlement Envelope Prompt: ${briefing.paydayEnvelopePlan.summaryText}` : ''}\n`
       : '';
 
     const pendingContextBlock = pendingContext

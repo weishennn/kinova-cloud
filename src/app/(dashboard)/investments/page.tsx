@@ -11,6 +11,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { usePortfolio, useTrades, useAddTrade, useUpdateRow, useDeleteRow } from '@/hooks/useSheets';
 import { useTransactions } from '@/hooks/useTransactions';
 import { getUnifiedIncomeAllocation } from '@/lib/category-budget-helper';
+import { computePortfolioCostBasisAndDrift, type TradeExecutionRecord } from '@/lib/financial-intelligence';
 import { clearAllSwrCache, getActiveUserCacheScope, setSwrCachedData } from '@/lib/sheets-api';
 import { sheetsData } from '@/lib/sheets-data';
 import { discardPendingMoomooDeletes } from '@/lib/cache-manager';
@@ -78,6 +79,7 @@ export default function InvestmentsPage() {
   const [selectedTrade, setSelectedTrade] = useState<any | null>(null);
   const [selectedHolding, setSelectedHolding] = useState<any | null>(null);
   const [fxRates, setFxRates] = useState<Record<string, number>>(getCachedRatesToMyr);
+  const [costBasisMethod, setCostBasisMethod] = useState<'fifo' | 'weighted'>('fifo');
 
   useLockBodyScroll(isAddTradeOpen || Boolean(selectedTrade) || Boolean(selectedHolding));
 
@@ -157,6 +159,39 @@ export default function InvestmentsPage() {
       };
     }).filter((t: NormalizedTrade) => Boolean(t.ticker && t.date));
   }, [rawTradesData, fxRates]);
+
+  // Pillar 3.2: FIFO & Weighted Cost Basis + Asset Allocation Drift Engine
+  const portfolioReport = useMemo(() => {
+    const tradeRecords: TradeExecutionRecord[] = trades.map((t) => ({
+      id: t.id,
+      date: t.date,
+      ticker: t.ticker,
+      name: t.name,
+      assetType: t.name?.toLowerCase().includes('crypto')
+        ? 'Crypto'
+        : t.ticker.endsWith('.KL')
+        ? 'MY Stock'
+        : 'US Stock',
+      side: (t.action?.toLowerCase() === 'sell'
+        ? 'sell'
+        : t.action?.toLowerCase() === 'dividend'
+        ? 'dividend'
+        : t.action?.toLowerCase() === 'reinvest'
+        ? 'reinvest'
+        : 'buy'),
+      quantity: t.quantity,
+      unitPrice: t.price,
+      fee: t.fees,
+      currency: t.currency,
+      fxRateToMyr: t.rateToMyr,
+    }));
+
+    return computePortfolioCostBasisAndDrift({
+      trades: tradeRecords,
+      emergencyCashMyr: allocation?.actualSavedThisMonth || 0,
+      driftThresholdPct: 5,
+    });
+  }, [trades, allocation]);
 
   // 1. Calculate historical positions, average buy prices, capital used, and realized P&L by ticker from trades
   const { positionsByTicker, tradeRealizedMap } = useMemo(() => {
@@ -1244,7 +1279,49 @@ export default function InvestmentsPage() {
         </div>
       </div>
 
+      {/* Pillar 3.2: Asset Allocation Drift Banner */}
+      {portfolioReport.driftAlertMessage && (
+        <div className="p-4 rounded-3xl bg-amber-500/10 border border-amber-500/30 text-amber-950 dark:text-amber-200 text-xs flex items-start gap-3 shadow-sm">
+          <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <span className="font-bold block">Asset Allocation Drift Alert (≥ 5%)</span>
+            <p className="text-[11px] leading-relaxed text-amber-900 dark:text-amber-300">
+              {portfolioReport.driftAlertMessage}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Metric Cards Banner */}
+      <div className="flex items-center justify-between col-span-full">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-slate-500 dark:text-zinc-400">Cost Basis Method:</span>
+          <div className="inline-flex rounded-xl bg-slate-100 dark:bg-zinc-800/80 p-0.5 border border-slate-200 dark:border-zinc-700/60 text-xs">
+            <button
+              type="button"
+              onClick={() => setCostBasisMethod('fifo')}
+              className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                costBasisMethod === 'fifo'
+                  ? 'bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                  : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              FIFO
+            </button>
+            <button
+              type="button"
+              onClick={() => setCostBasisMethod('weighted')}
+              className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                costBasisMethod === 'weighted'
+                  ? 'bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                  : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              Weighted Avg
+            </button>
+          </div>
+        </div>
+      </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
         {/* Total Market Value */}
         <motion.div
@@ -1307,19 +1384,19 @@ export default function InvestmentsPage() {
           <div className="flex items-center justify-between">
             <span className="text-[11px] sm:text-xs uppercase tracking-wider text-slate-600 dark:text-zinc-400 font-semibold">Realized P&L</span>
             <div className={`h-7 w-7 sm:h-8 sm:w-8 rounded-xl flex items-center justify-center border ${
-              totalRealizedPnl >= 0 ? 'bg-emerald-500/10 text-emerald-800 dark:text-emerald-400 border-emerald-500/20 shadow-sm' : 'bg-rose-500/10 text-rose-800 dark:text-rose-400 border-rose-500/20 shadow-sm'
+              (costBasisMethod === 'fifo' ? portfolioReport.totalRealizedPnLFifoMyr : portfolioReport.totalRealizedPnLWeightedMyr) >= 0 ? 'bg-emerald-500/10 text-emerald-800 dark:text-emerald-400 border-emerald-500/20 shadow-sm' : 'bg-rose-500/10 text-rose-800 dark:text-rose-400 border-rose-500/20 shadow-sm'
             }`}>
-              {totalRealizedPnl >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+              {(costBasisMethod === 'fifo' ? portfolioReport.totalRealizedPnLFifoMyr : portfolioReport.totalRealizedPnLWeightedMyr) >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
             </div>
           </div>
           <div className="mt-2.5 sm:mt-3">
             <div className={`text-xl sm:text-2xl lg:text-3xl font-black tracking-tight font-mono ${
-              totalRealizedPnl >= 0 ? 'text-emerald-800 dark:text-emerald-400' : 'text-rose-800 dark:text-rose-400'
+              (costBasisMethod === 'fifo' ? portfolioReport.totalRealizedPnLFifoMyr : portfolioReport.totalRealizedPnLWeightedMyr) >= 0 ? 'text-emerald-800 dark:text-emerald-400' : 'text-rose-800 dark:text-rose-400'
             }`}>
-              <AnimatedNumber value={totalRealizedPnl} showPlus animateOnMount />
+              <AnimatedNumber value={portfolioReport.positions.length > 0 ? (costBasisMethod === 'fifo' ? portfolioReport.totalRealizedPnLFifoMyr : portfolioReport.totalRealizedPnLWeightedMyr) : totalRealizedPnl} showPlus animateOnMount />
             </div>
             <p className="text-[11px] text-slate-600 dark:text-zinc-400 mt-1 font-medium truncate">
-              Locked P&L from sold shares
+              Locked P&L ({costBasisMethod.toUpperCase()})
             </p>
           </div>
         </motion.div>

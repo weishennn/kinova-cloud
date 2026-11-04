@@ -1,12 +1,13 @@
-
 /**
- * Cache Manager & Offline Pending Queue for CashFlow
+ * Cache Manager, Offline Pending Queue & Cross-Tab Mutex Sync for CashFlow
  * 
  * Policy:
  * 1. Rolling 60-day / 3-month window cached on device for normal use.
  * 2. Older history loaded from Google Sheets on demand.
  * 3. Settings and pending offline mutations are STRICTLY PROTECTED from expiry.
  * 4. Zero silent drops: all failed writes are queued and retried when connected.
+ * 5. Cross-Tab Synchronization (Pillar 4.1): BroadcastChannel + storage mutex prevents
+ *    stale multi-tab overwrites and synchronizes optimistic updates across open tabs.
  */
 
 export interface PendingMutation {
@@ -52,6 +53,198 @@ export const CACHE_KEYS = {
 export const LOCAL_ONLY_ENDPOINT_SENTINEL = '__cashflow_local_only__';
 
 export const SYNC_STATUS_EVENT = 'cashflow_sync_status_changed';
+export const CROSS_TAB_STATE_EVENT = 'kinova_cross_tab_state_updated';
+export const CROSS_TAB_CHANNEL_NAME = 'kinova_cross_tab_sync_v3';
+
+export interface CrossTabSyncMessage {
+  type:
+    | 'MUTATION_QUEUED'
+    | 'SETTINGS_UPDATED'
+    | 'CATEGORY_CAPS_UPDATED'
+    | 'SWR_CACHE_INVALIDATED'
+    | 'SYNC_COMPLETED';
+  senderTabId: string;
+  timestamp: number;
+  payload?: Record<string, unknown>;
+}
+
+let cachedTabInstanceId: string | null = null;
+let activeBroadcastChannel: BroadcastChannel | null = null;
+
+export function getTabInstanceId(): string {
+  if (cachedTabInstanceId) return cachedTabInstanceId;
+  cachedTabInstanceId = `tab_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  return cachedTabInstanceId;
+}
+
+/**
+ * Pillar 4.1: Broadcasts an optimistic mutation, setting update, or category cap change
+ * across all open Kinova tabs on the same browser so sibling tabs refresh immediately.
+ */
+export function broadcastCrossTabEvent(
+  typeOrObj: CrossTabSyncMessage['type'] | ({ type: CrossTabSyncMessage['type'] } & Record<string, unknown>),
+  payload?: Record<string, unknown>,
+): void {
+  if (typeof window === 'undefined') return;
+  let type: CrossTabSyncMessage['type'];
+  let effectivePayload: Record<string, unknown> | undefined = payload;
+  if (typeof typeOrObj === 'object' && typeOrObj !== null && 'type' in typeOrObj) {
+    type = (typeOrObj as any).type;
+    const { type: _, ...rest } = typeOrObj as any;
+    effectivePayload = { ...rest, ...(payload || {}) };
+  } else {
+    type = typeOrObj as CrossTabSyncMessage['type'];
+  }
+  const message: CrossTabSyncMessage = {
+    type,
+    senderTabId: getTabInstanceId(),
+    timestamp: Date.now(),
+    payload: effectivePayload,
+  };
+
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      if (!activeBroadcastChannel) {
+        activeBroadcastChannel = new BroadcastChannel(CROSS_TAB_CHANNEL_NAME);
+        if (typeof (activeBroadcastChannel as any)?.unref === 'function') {
+          (activeBroadcastChannel as any).unref();
+        }
+      }
+      activeBroadcastChannel.postMessage(message);
+    } else {
+      // Fallback for browsers without BroadcastChannel
+      localStorage.setItem('__kinova_cross_tab_ping__', JSON.stringify(message));
+    }
+  } catch {
+    // Ignore cross-tab broadcast errors
+  }
+}
+
+/**
+ * Pillar 4.1: Subscribes to cross-tab BroadcastChannel events and storage changes.
+ * Returns an unsubscribe cleanup function.
+ */
+export function initCrossTabSync(
+  onRemoteChange?: (msg: CrossTabSyncMessage) => void,
+): () => void {
+  if (typeof window === 'undefined') return () => {};
+
+  const myTabId = getTabInstanceId();
+  const handleIncoming = (msg: CrossTabSyncMessage | null | undefined) => {
+    if (!msg || typeof msg !== 'object' || msg.senderTabId === myTabId) return;
+    dispatchSyncStatus();
+    if (typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new CustomEvent(CROSS_TAB_STATE_EVENT, { detail: msg }));
+    }
+    if (onRemoteChange) {
+      onRemoteChange(msg);
+    }
+  };
+
+  let channel: BroadcastChannel | null = null;
+  const onChannelMessage = (ev: MessageEvent) => {
+    handleIncoming(ev.data as CrossTabSyncMessage);
+  };
+
+  if (typeof BroadcastChannel !== 'undefined') {
+    try {
+      channel = new BroadcastChannel(CROSS_TAB_CHANNEL_NAME);
+      if (typeof (channel as any)?.unref === 'function') {
+        (channel as any).unref();
+      }
+      channel.addEventListener('message', onChannelMessage);
+    } catch {
+      channel = null;
+    }
+  }
+
+  const onStorageEvent = (ev: StorageEvent) => {
+    if (!ev.key) return;
+    if (ev.key === '__kinova_cross_tab_ping__' && ev.newValue) {
+      try {
+        handleIncoming(JSON.parse(ev.newValue) as CrossTabSyncMessage);
+      } catch {}
+      return;
+    }
+    if (
+      ev.key === CACHE_KEYS.PENDING_QUEUE ||
+      ev.key === CACHE_KEYS.PENDING_SETTINGS_QUEUE ||
+      ev.key === 'cashflow_category_caps' ||
+      ev.key === 'cashflow_locked_category_caps' ||
+      ev.key === 'cashflow_trip_envelopes_v1' ||
+      ev.key === 'cashflow_income_allocation_targets'
+    ) {
+      handleIncoming({
+        type: ev.key.includes('caps') ? 'CATEGORY_CAPS_UPDATED' : 'SETTINGS_UPDATED',
+        senderTabId: 'storage_event',
+        timestamp: Date.now(),
+        payload: { key: ev.key },
+      });
+    }
+  };
+
+  window.addEventListener('storage', onStorageEvent);
+
+  return () => {
+    if (channel) {
+      try {
+        channel.removeEventListener('message', onChannelMessage);
+        channel.close();
+      } catch {}
+    }
+    window.removeEventListener('storage', onStorageEvent);
+  };
+}
+
+/**
+ * Pillar 4.1: Acquires a lightweight cross-tab mutex in localStorage with automatic TTL expiry
+ * so multiple open tabs never flush the offline mutation queue to Google Sheets concurrently.
+ */
+export function acquireCrossTabMutex(lockName: string, ttlMs: number = 15_000): boolean {
+  if (typeof window === 'undefined') return true;
+  const key = `cashflow_mutex_${lockName}`;
+  const now = Date.now();
+  const myTabId = getTabInstanceId();
+
+  try {
+    const existingRaw = localStorage.getItem(key);
+    if (existingRaw) {
+      const parsed = JSON.parse(existingRaw);
+      if (
+        parsed &&
+        typeof parsed.expiresAt === 'number' &&
+        parsed.expiresAt > now &&
+        parsed.holderTabId !== myTabId
+      ) {
+        return false; // Another active tab holds the lock
+      }
+    }
+    const payload = JSON.stringify({
+      holderTabId: myTabId,
+      acquiredAt: now,
+      expiresAt: now + ttlMs,
+    });
+    localStorage.setItem(key, payload);
+    const verify = localStorage.getItem(key);
+    return verify === payload;
+  } catch {
+    return true;
+  }
+}
+
+export function releaseCrossTabMutex(lockName: string): void {
+  if (typeof window === 'undefined') return;
+  const key = `cashflow_mutex_${lockName}`;
+  const myTabId = getTabInstanceId();
+  try {
+    const existingRaw = localStorage.getItem(key);
+    if (!existingRaw) return;
+    const parsed = JSON.parse(existingRaw);
+    if (!parsed || parsed.holderTabId === myTabId) {
+      localStorage.removeItem(key);
+    }
+  } catch {}
+}
 
 // Keys that must NEVER be expired or pruned from localStorage
 export const PROTECTED_STORAGE_KEYS = new Set<string>([
@@ -62,6 +255,9 @@ export const PROTECTED_STORAGE_KEYS = new Set<string>([
   'cashflow_installment_plans',
   'cashflow_recurring_commitments',
   'cashflow_category_caps',
+  'cashflow_locked_category_caps',
+  'cashflow_trip_envelopes_v1',
+  'cashflow_income_allocation_targets',
   'cashflow_monthly_budget',
   'cashflow_baseline_income',
   'cashflow_emergency_reserve',
@@ -256,7 +452,7 @@ export function pruneExpiredCache(): { prunedKeys: string[] } {
       }
     });
 
-    // 4. Enforce SWR cache entry count (24) and total byte size cap (2 MB) via LRU (newest savedAt kept)
+    // 4. Enforce SWR cache entry count (36) and total byte size cap (4 MB) via LRU (newest savedAt kept)
     activeSwrEntries.sort((a, b) => b.savedAt - a.savedAt);
     let cumulativeBytes = 0;
     activeSwrEntries.forEach((entry, index) => {
@@ -393,8 +589,6 @@ function assertQueueReadable(key: string, label: string): void {
 
 function noteUnreadableQueue(message: string): void {
   try {
-    // This status is read by getSyncStatus immediately after queue parsing.
-    // Do not dispatch from here: getSyncStatus itself reads the queues.
     localStorage.setItem('cashflow_last_sync_error', message);
     localStorage.setItem('cashflow_last_sync_error_at', String(Date.now()));
   } catch {}
@@ -407,6 +601,7 @@ export function savePendingMutations(list: PendingMutation[]): void {
     const coalesced = coalescePendingMutations(list);
     localStorage.setItem(CACHE_KEYS.PENDING_QUEUE, JSON.stringify(coalesced));
     dispatchSyncStatus();
+    broadcastCrossTabEvent('MUTATION_QUEUED', { pendingCount: coalesced.length });
   } catch (err) {
     console.error('[CacheManager] Failed to persist pending mutations:', err);
     if (err instanceof Error && err.message.includes('queue is unreadable')) throw err;
@@ -414,11 +609,6 @@ export function savePendingMutations(list: PendingMutation[]): void {
   }
 }
 
-/*
- * Queue reads may return an empty list for display when corrupted, but queue
- * writes must first validate the existing bytes so they can never erase the
- * only copy of unconfirmed edits.
- */
 export function assertPendingQueuesReadable(): void {
   assertQueueReadable(CACHE_KEYS.PENDING_QUEUE, 'Offline transaction');
   assertQueueReadable(CACHE_KEYS.PENDING_SETTINGS_QUEUE, 'Offline settings');
@@ -455,6 +645,7 @@ export function enqueuePendingSettingMutation(key: string, value: string): Pendi
     current.push(item);
     localStorage.setItem(CACHE_KEYS.PENDING_SETTINGS_QUEUE, JSON.stringify(current));
     dispatchSyncStatus();
+    broadcastCrossTabEvent('SETTINGS_UPDATED', { key });
   } catch (err) {
     console.warn('[CacheManager] Failed to queue setting mutation:', err);
     if (err instanceof Error && err.message.includes('queue is unreadable')) throw err;
@@ -485,10 +676,6 @@ export function markPendingSettingMutationFailed(key: string, errorMsg: string):
   }
 }
 
-/**
- * Removes pending setting mutations ONLY if their mutationId/changedAt has not been superseded
- * by a newer edit while the sync was in flight (P1 #10).
- */
 export function removePendingSettingMutations(
   keys: string[],
   acknowledgedSnapshots?: Map<string, { mutationId?: string; changedAt?: number }>
@@ -502,10 +689,10 @@ export function removePendingSettingMutations(
       if (acknowledgedSnapshots && acknowledgedSnapshots.has(m.key)) {
         const snap = acknowledgedSnapshots.get(m.key)!;
         if (snap.mutationId && m.mutationId && snap.mutationId !== m.mutationId) {
-          return true; // Newer edit arrived during sync; keep in queue!
+          return true;
         }
         if (typeof snap.changedAt === 'number' && m.changedAt > snap.changedAt) {
-          return true; // Newer edit arrived during sync; keep in queue!
+          return true;
         }
       }
       return false;
@@ -542,7 +729,6 @@ export function getPendingQueueSummary(): {
   };
 }
 
-/** Resolves the owner identity for an active queue before changing account scope. */
 export function getPendingQueueOwnerScope(
   activeScope: string | null,
   storedEmail: string | null,
@@ -576,13 +762,13 @@ export function clearDisposableReadCaches(): void {
       }
     }
     keysToRemove.forEach((k) => localStorage.removeItem(k));
+    broadcastCrossTabEvent('SWR_CACHE_INVALIDATED');
   } catch {}
 }
 
 const LOCAL_ONLY_STORE_KEY = 'cashflow_local_store';
 const LOCAL_ONLY_STORE_BACKUP_KEY = 'cashflow_local_store_scoped:local_only';
 
-/** Preserve the local-only database before an account switch clears active storage. */
 export function backupLocalStoreForLocalMode(): { success: boolean; preserved: boolean; error?: string } {
   if (typeof window === 'undefined') {
     return { success: false, preserved: false, error: 'Window environment is unavailable' };
@@ -614,7 +800,6 @@ export function backupLocalStoreForLocalMode(): { success: boolean; preserved: b
   }
 }
 
-/** Restore the local-only database only after its full value is safely in active storage. */
 export function restoreLocalStoreForLocalMode(): { success: boolean; restored: boolean; error?: string } {
   if (typeof window === 'undefined') {
     return { success: false, restored: false, error: 'Window environment is unavailable' };
@@ -702,7 +887,6 @@ export function backupPendingQueuesForAccount(
     if (mergedPlans) localStorage.setItem(planKey, mergedPlans);
     if (mergedSettings) localStorage.setItem(settingsKey, mergedSettings);
 
-    // Read-back verification to guarantee zero silent quota or serialization failures
     if (mergedTx && localStorage.getItem(txKey) !== mergedTx) {
       throw new Error('Transaction queue verification failed on read-back');
     }
@@ -718,7 +902,6 @@ export function backupPendingQueuesForAccount(
     try {
       attemptWrite();
     } catch {
-      // If first attempt failed (e.g. storage full), prune disposable read caches and retry
       clearDisposableReadCaches();
       attemptWrite();
     }
@@ -757,7 +940,6 @@ export function restorePendingQueuesForAccount(accountEmail: string): { restored
     const nextPlans = mergeQueueEntries(currentPlans, scopedPlans);
     const nextSettings = mergeQueueEntries(getPendingSettingMutations(), scopedSettings);
 
-    // Write all active queues and verify them before deleting any account-scoped backup.
     if (txRaw) localStorage.setItem(CACHE_KEYS.PENDING_QUEUE, JSON.stringify(nextTx));
     if (planRaw) localStorage.setItem(CACHE_KEYS.PENDING_PLAN_QUEUE, JSON.stringify(nextPlans));
     if (settingsRaw) localStorage.setItem(CACHE_KEYS.PENDING_SETTINGS_QUEUE, JSON.stringify(nextSettings));
@@ -836,10 +1018,6 @@ export function removePendingMutation(id: string): void {
   savePendingMutations(filtered);
 }
 
-/**
- * A user-confirmed Moomoo full re-sync supersedes queued deletes only for the
- * Moomoo orders the server actually restored. Other queued edits stay intact.
- */
 export function discardPendingMoomooDeletes(restoredTradeIds: string[]): number {
   if (typeof window === 'undefined' || restoredTradeIds.length === 0) return 0;
   assertQueueReadable(CACHE_KEYS.PENDING_QUEUE, 'Offline transaction');
@@ -857,14 +1035,6 @@ export function discardPendingMoomooDeletes(restoredTradeIds: string[]): number 
   return discarded;
 }
 
-// --- Pending Scalar Settings Outbox ---
-
-
-/**
- * P0 #3: Reconcile or clear local pending queues and cached plan/settings state
- * after a backup snapshot is restored on the server, preventing stale phone state
- * from overwriting the freshly restored Sheet.
- */
 export function reconcileLocalStateAfterRestore(options: { retainPendingEdits: boolean }): {
   clearedTransactions: number;
   clearedPlans: number;
@@ -875,8 +1045,6 @@ export function reconcileLocalStateAfterRestore(options: { retainPendingEdits: b
     return { clearedTransactions: 0, clearedPlans: 0, clearedSettings: 0, retainedCount: 0 };
   }
 
-  // Never clear queued edits if a queue cannot be parsed. The caller can
-  // recover/export it first; the restored Sheet remains intact meanwhile.
   assertPendingQueuesReadable();
 
   const pendingTx = getPendingMutations();
@@ -888,9 +1056,6 @@ export function reconcileLocalStateAfterRestore(options: { retainPendingEdits: b
     pendingPlansCount = Array.isArray(parsedPlans) ? parsedPlans.length : 0;
   } catch {}
 
-  // Clear cached server responses and local plan/setting mirrors so the next
-  // sync reads the restored Sheet. Preserve the local-only database: it can
-  // contain offline records that were never mirrored to the Sheet.
   const keysToClear: string[] = [];
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
@@ -912,7 +1077,6 @@ export function reconcileLocalStateAfterRestore(options: { retainPendingEdits: b
   localStorage.removeItem('cashflow_baseline_income');
   localStorage.removeItem('cashflow_emergency_reserve');
 
-  // Mark this device as already migration-checked so it does NOT treat the cleared/restored state as an initial phone-to-sheet migration
   localStorage.setItem('cashflow_sync_v3_device_checked_cashflow_recurring_commitments', '1');
   localStorage.setItem('cashflow_sync_v3_device_checked_cashflow_installment_plans', '1');
 
@@ -945,14 +1109,12 @@ export function setLastSyncedAt(timestamp: number = Date.now(), requestStartedAt
   try {
     localStorage.setItem(CACHE_KEYS.LAST_SYNCED_AT, String(timestamp));
     const errorAt = Number(localStorage.getItem('cashflow_last_sync_error_at') || 0);
-    // Parallel reads from one refresh must not let a late success hide a
-    // sibling request's later failure. Only a request started after that
-    // failure is allowed to clear the warning.
     if (!errorAt || errorAt < requestStartedAt) {
       localStorage.removeItem('cashflow_last_sync_error');
       localStorage.removeItem('cashflow_last_sync_error_at');
     }
     dispatchSyncStatus();
+    broadcastCrossTabEvent('SYNC_COMPLETED', { lastSyncedAt: timestamp });
   } catch {}
 }
 
@@ -986,8 +1148,6 @@ export function getSyncStatus(): {
   lastSyncError: string | null;
 } {
   const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
-  // sheets-api has a built-in endpoint unless the user explicitly switches to
-  // local-only mode. A configured endpoint still needs a recent good response.
   let hasUrl = true;
   if (typeof window !== 'undefined') {
     try {
@@ -1063,3 +1223,4 @@ function dispatchSyncStatus(): void {
   if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return;
   window.dispatchEvent(new CustomEvent(SYNC_STATUS_EVENT, { detail: getSyncStatus() }));
 }
+

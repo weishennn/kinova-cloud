@@ -1,5 +1,5 @@
 import { getAmountInBaseCurrency } from './currency.ts';
-import { getLocalDateString } from './date-helper.ts';
+import { getLocalDateString, parseLocalDate } from './date-helper.ts';
 import { CANONICAL_EXPENSE_CATEGORIES } from './canonical-categories.ts';
 import { getUserMoneyProfile } from './user-money-profile.ts';
 
@@ -24,6 +24,8 @@ export const DEFAULT_CATEGORY_CAPS: Record<string, number> = {
 };
 
 const STORAGE_KEY = 'cashflow_category_caps';
+export const LOCKED_CAPS_STORAGE_KEY = 'cashflow_locked_category_caps';
+export const TRIP_ENVELOPES_STORAGE_KEY = 'cashflow_trip_budget_envelopes_v1';
 
 /**
  * Resolves a numeric cap for a category while strictly preserving explicit 0 caps.
@@ -47,11 +49,54 @@ export function resolveCategoryCapValue(
 }
 
 /**
+ * Loads user-locked category caps (`lockedCaps`) from localStorage.
+ * Locked categories are never modified by auto-fit, auto-tune, or cross-category rebalancing.
+ */
+export function getLockedCategoryCaps(): Record<string, boolean> {
+  if (typeof window === 'undefined' && typeof localStorage === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(LOCKED_CAPS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const clean: Record<string, boolean> = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        if (v === true) clean[k] = true;
+      }
+      return clean;
+    }
+  } catch {}
+  return {};
+}
+
+/**
+ * Persists user-locked category caps (`lockedCaps`) and broadcasts across tabs.
+ */
+export function saveLockedCategoryCaps(lockedCaps: Record<string, boolean>): void {
+  if (typeof window === 'undefined' && typeof localStorage === 'undefined') return;
+  const clean: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(lockedCaps || {})) {
+    if (v === true) clean[k] = true;
+  }
+  const serialized = JSON.stringify(clean);
+  try {
+    localStorage.setItem(LOCKED_CAPS_STORAGE_KEY, serialized);
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(
+        new CustomEvent('cashflow_cloud_settings_synced', {
+          detail: { key: LOCKED_CAPS_STORAGE_KEY, value: serialized },
+        })
+      );
+    }
+  } catch {}
+}
+
+/**
  * Loads category budget caps from localStorage.
  * Strictly preserves any explicit 0 caps set by the user while ensuring all canonical categories exist.
  */
 export function getSavedCategoryCaps(): Record<string, number> {
-  if (typeof window === 'undefined') return { ...DEFAULT_CATEGORY_CAPS };
+  if (typeof window === 'undefined' && typeof localStorage === 'undefined') return { ...DEFAULT_CATEGORY_CAPS };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
@@ -74,10 +119,10 @@ export function getSavedCategoryCaps(): Record<string, number> {
 }
 
 /**
- * Saves category budget caps to localStorage with background cloud SOT sync.
+ * Saves category budget caps to localStorage with background cloud SOT sync and cross-tab broadcast.
  */
 export function saveCategoryCaps(caps: Record<string, number>): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined' && typeof localStorage === 'undefined') return;
   const sanitized: Record<string, number> = {};
   for (const [k, v] of Object.entries(caps || {})) {
     const num = Number(v);
@@ -88,11 +133,22 @@ export function saveCategoryCaps(caps: Record<string, number>): void {
   const serialized = JSON.stringify(sanitized);
   try {
     localStorage.setItem(STORAGE_KEY, serialized);
-    window.dispatchEvent(
-      new CustomEvent('cashflow_cloud_settings_synced', {
-        detail: { key: STORAGE_KEY, value: serialized },
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(
+        new CustomEvent('cashflow_cloud_settings_synced', {
+          detail: { key: STORAGE_KEY, value: serialized },
+        })
+      );
+    }
+  } catch {}
+  try {
+    import('./cache-manager.ts')
+      .then((cm) => {
+        if (cm && typeof cm.broadcastCrossTabEvent === 'function') {
+          cm.broadcastCrossTabEvent('CATEGORY_CAPS_UPDATED', { key: STORAGE_KEY, value: serialized });
+        }
       })
-    );
+      .catch(() => {});
   } catch {}
   try {
     import('./cloud-settings-sync.ts')
@@ -185,8 +241,16 @@ export function getMonthDaysInfo(monthStr?: string, referenceDate?: Date) {
 /**
  * Calculates daily safe-to-spend allowance given total monthly budget, current total spent, and optional monthStr.
  */
-export function calculateDailySafeSpend(totalBudget: number, totalSpent: number, monthStr?: string) {
-  const { totalDays, todayDate, daysRemaining, isCurrentMonth, isPastMonth } = getMonthDaysInfo(monthStr);
+export function calculateDailySafeSpend(
+  totalBudget: number,
+  totalSpent: number,
+  monthStr?: string,
+  referenceDate?: Date
+) {
+  const { totalDays, todayDate, daysRemaining, isCurrentMonth, isPastMonth } = getMonthDaysInfo(
+    monthStr,
+    referenceDate
+  );
   const remainingBudget = Math.max(0, totalBudget - totalSpent);
   const divisor = daysRemaining > 0 ? daysRemaining : totalDays;
   const dailyAllowance = remainingBudget / (divisor || 1);
@@ -210,6 +274,219 @@ export function calculateDailySafeSpend(totalBudget: number, totalSpent: number,
   };
 }
 
+// ---------------------------------------------------------------------------
+// Pillar 2: Multi-Currency Trip-Scoped Budget Envelopes & Quarantine Helpers
+// ---------------------------------------------------------------------------
+
+export interface TripBudgetEnvelope {
+  tripTag: string; // e.g. "Tokyo 2026"
+  currency: string; // e.g. "JPY"
+  budgetAmount: number; // e.g. 300000 (in native currency)
+  fxRateToMyr?: number; // optional custom FX rate (1 unit = X MYR)
+  startDate?: string; // YYYY-MM-DD
+  endDate?: string; // YYYY-MM-DD
+  quarantineFromLivingBurn?: boolean; // default true
+}
+
+export interface TripEnvelopeStatus {
+  tripTag: string;
+  currency: string;
+  budgetAmount: number;
+  budgetAmountMyr: number;
+  spentNative: number;
+  spentMyr: number;
+  remainingNative: number;
+  remainingMyr: number;
+  spentPercent: number;
+  isOverBudget: boolean;
+  transactionCount: number;
+  categoryBreakdown: Array<{ category: string; amountNative: number; amountMyr: number }>;
+}
+
+export function getSavedTripEnvelopes(): Record<string, TripBudgetEnvelope> {
+  if (typeof window === 'undefined' && typeof localStorage === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(TRIP_ENVELOPES_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, TripBudgetEnvelope>;
+    }
+  } catch {}
+  return {};
+}
+
+export function saveTripEnvelope(envelope: TripBudgetEnvelope): void {
+  if (typeof window === 'undefined' && typeof localStorage === 'undefined') return;
+  const tag = String(envelope.tripTag || '').trim();
+  if (!tag) return;
+  const current = getSavedTripEnvelopes();
+  current[tag] = {
+    ...envelope,
+    tripTag: tag,
+    currency: String(envelope.currency || 'MYR').trim().toUpperCase(),
+    budgetAmount: Math.max(0, Number(envelope.budgetAmount) || 0),
+    quarantineFromLivingBurn: envelope.quarantineFromLivingBurn !== false,
+  };
+  const serialized = JSON.stringify(current);
+  try {
+    localStorage.setItem(TRIP_ENVELOPES_STORAGE_KEY, serialized);
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(
+        new CustomEvent('cashflow_cloud_settings_synced', {
+          detail: { key: TRIP_ENVELOPES_STORAGE_KEY, value: serialized },
+        })
+      );
+    }
+  } catch {}
+}
+
+export interface GenericTransaction {
+  id?: string;
+  type?: string;
+  amount?: number;
+  currency?: string;
+  baseAmount?: number;
+  category?: string;
+  subCategory?: string;
+  description?: string;
+  notes?: string;
+  date?: string;
+  tripTag?: string;
+  TripTag?: string;
+}
+
+/**
+ * Determines whether a transaction is a trip-tagged or Trixpense travel expense
+ * that should be quarantined from the domestic daily living burn rate.
+ */
+export function isTripQuarantinedExpense(tx?: GenericTransaction | null): boolean {
+  if (!tx) return false;
+  const tag = String(tx.tripTag || tx.TripTag || '').trim();
+  if (tag.length > 0) {
+    const envelopes = getSavedTripEnvelopes();
+    if (envelopes[tag] && envelopes[tag].quarantineFromLivingBurn === false) {
+      return false;
+    }
+    return true;
+  }
+  const idStr = String(tx.id || '');
+  const subStr = String(tx.subCategory || '');
+  if (idStr.startsWith('trixpense_') || subStr === 'Trixpense Shared Bill') {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Computes real-time spending status for a dedicated Trip Budget Envelope (e.g. "Tokyo 2026", JPY 300,000).
+ */
+export function getTripEnvelopeStatus(
+  tripTag: string,
+  allTransactions: GenericTransaction[] = [],
+  envelopeOverride?: TripBudgetEnvelope
+): TripEnvelopeStatus {
+  const cleanTag = String(tripTag || '').trim();
+  const saved = getSavedTripEnvelopes()[cleanTag];
+  const env: TripBudgetEnvelope = envelopeOverride || saved || {
+    tripTag: cleanTag,
+    currency: 'MYR',
+    budgetAmount: 0,
+    quarantineFromLivingBurn: true,
+  };
+
+  const envCurr = String(env.currency || 'MYR').toUpperCase();
+  const customRate = env.fxRateToMyr && env.fxRateToMyr > 0 ? env.fxRateToMyr : undefined;
+  const budgetAmount = Math.max(0, Number(env.budgetAmount) || 0);
+  const budgetAmountMyr =
+    envCurr === 'MYR'
+      ? budgetAmount
+      : customRate
+      ? Number((budgetAmount * customRate).toFixed(2))
+      : Number(getAmountInBaseCurrency(budgetAmount, envCurr).toFixed(2));
+
+  let spentNative = 0;
+  let spentMyr = 0;
+  let txCount = 0;
+  const catMap = new Map<string, { native: number; myr: number }>();
+
+  const validTxs = Array.isArray(allTransactions) ? allTransactions : [];
+  for (const t of validTxs) {
+    if (String(t?.type || '').toLowerCase() !== 'expense' || t?.id === 'tx_sample') continue;
+    const tTag = String(t.tripTag || t.TripTag || '').trim();
+    if (tTag.toLowerCase() !== cleanTag.toLowerCase()) continue;
+
+    const rawAmt = Number(t.amount) || 0;
+    if (rawAmt <= 0) continue;
+    const txCurr = String(t.currency || 'MYR').toUpperCase();
+    const myrAmt = getAmountInBaseCurrency(rawAmt, txCurr, t.baseAmount);
+
+    let nativeEquiv = rawAmt;
+    if (txCurr !== envCurr) {
+      if (envCurr === 'MYR') {
+        nativeEquiv = myrAmt;
+      } else if (customRate && customRate > 0) {
+        nativeEquiv = myrAmt / customRate;
+      } else {
+        const oneEnvUnitInMyr = getAmountInBaseCurrency(1, envCurr) || 1;
+        nativeEquiv = myrAmt / oneEnvUnitInMyr;
+      }
+    }
+
+    spentNative += nativeEquiv;
+    spentMyr += myrAmt;
+    txCount += 1;
+
+    const cat = t.category || 'Other';
+    const existing = catMap.get(cat) || { native: 0, myr: 0 };
+    existing.native += nativeEquiv;
+    existing.myr += myrAmt;
+    catMap.set(cat, existing);
+  }
+
+  spentNative = Number(spentNative.toFixed(2));
+  spentMyr = Number(spentMyr.toFixed(2));
+  const remainingNative = Number(Math.max(0, budgetAmount - spentNative).toFixed(2));
+  const remainingMyr = Number(Math.max(0, budgetAmountMyr - spentMyr).toFixed(2));
+  const spentPercent = budgetAmount > 0 ? Number(((spentNative / budgetAmount) * 100).toFixed(1)) : 0;
+
+  return {
+    tripTag: cleanTag,
+    currency: envCurr,
+    budgetAmount,
+    budgetAmountMyr,
+    spentNative,
+    spentMyr,
+    remainingNative,
+    remainingMyr,
+    spentPercent,
+    isOverBudget: budgetAmount > 0 && spentNative > budgetAmount,
+    transactionCount: txCount,
+    categoryBreakdown: Array.from(catMap.entries())
+      .map(([category, v]) => ({
+        category,
+        amountNative: Number(v.native.toFixed(2)),
+        amountMyr: Number(v.myr.toFixed(2)),
+      }))
+      .sort((a, b) => b.amountMyr - a.amountMyr),
+  };
+}
+
+/**
+ * Returns spending status summaries for all configured Trip Budget Envelopes.
+ */
+export function getTripEnvelopeSummaries(
+  allTransactions: GenericTransaction[] = [],
+  envelopesOverride?: Record<string, TripBudgetEnvelope>
+): TripEnvelopeStatus[] {
+  const envelopes = envelopesOverride || getSavedTripEnvelopes();
+  return Object.values(envelopes).map((env) => getTripEnvelopeStatus(env.tripTag, allTransactions, env));
+}
+
+// ---------------------------------------------------------------------------
+// Core Budget & Rebalancing Interfaces
+// ---------------------------------------------------------------------------
+
 export type CategoryExpenseNature = 'fixed' | 'quasi-fixed' | 'trend' | 'discretionary';
 
 export interface IntelligentCapSuggestion {
@@ -222,14 +499,11 @@ export interface IntelligentCapSuggestion {
   reasoning: string;
   dailyAllowance?: number;
   sharePercent?: number;
-  /** Total monthly recurring commitments + active installments configured for this category */
   committedFloor?: number;
-  /** Amount of recurring/installment bills in this category NOT YET paid this month */
   unpaidBillReserve?: number;
-  /** Amount already spent in this category during the current month */
   currentMonthSpent?: number;
-  /** Net RM adjustment made by cross-category rebalancing (+ received / - donated) */
   rebalancedDelta?: number;
+  isLocked?: boolean;
 }
 
 export interface IntelligentBudgetPlan {
@@ -242,6 +516,36 @@ export interface IntelligentBudgetPlan {
   suggestions: IntelligentCapSuggestion[];
   savingsHealthStatus: 'healthy' | 'tight' | 'exceeded';
   summaryInsight: string;
+}
+
+export interface PaydayEnvelopeTransferItem {
+  id: string;
+  type: 'Investment';
+  category: 'Emergency Savings' | 'Stocks & Crypto';
+  subCategory: string;
+  description: string;
+  amount: number;
+  currency: 'MYR';
+  date: string;
+  notes: string;
+}
+
+export interface PaydayEnvelopeAllocationPlan {
+  shouldPrompt: boolean;
+  salaryRecordedThisMonth: number;
+  baselineIncome: number;
+  cyclePhase: 'living_phase' | 'payday_settlement';
+  savingsTargetPct: number;
+  investmentTargetPct: number;
+  plannedSavingsAmount: number;
+  plannedInvestmentAmount: number;
+  alreadySavedThisMonth: number;
+  alreadyInvestedThisMonth: number;
+  remainingToSave: number;
+  remainingToInvest: number;
+  proposedTransfers: PaydayEnvelopeTransferItem[];
+  headline: string;
+  summaryText: string;
 }
 
 export interface PaydayCycleIntelligence {
@@ -263,6 +567,7 @@ export interface PaydayCycleIntelligence {
   savingsProgressPct: number;
   headline: string;
   detail: string;
+  envelopePlan?: PaydayEnvelopeAllocationPlan;
 }
 
 export interface CategoryRebalanceDonor {
@@ -289,11 +594,8 @@ export interface CategoryRealtimeBudgetStatus {
   category: string;
   cap: number;
   spentSoFar: number;
-  /** Unpaid recurring commitments + active installments reserved in this category for the month */
   committedReserve: number;
-  /** Free unreserved balance before proposedAmount: max(0, cap - spentSoFar - committedReserve) */
   unreservedRemainingBefore: number;
-  /** Free unreserved balance after proposedAmount: cap - spentSoFar - committedReserve - proposedAmount */
   unreservedRemainingAfter: number;
   remainingBefore: number;
   remainingAfter: number;
@@ -311,7 +613,6 @@ export interface CategoryRealtimeBudgetStatus {
   badgeColor: 'emerald' | 'amber' | 'rose';
   pacingNote?: string;
   billReserveNote?: string;
-  /** When spending exceeds this category's cap (or unreserved cap), provides a 1-tap cross-category rebalance plan */
   rebalanceSuggestion?: CategoryRebalanceSuggestion;
 }
 
@@ -332,6 +633,7 @@ export interface MonthlySavingsPrediction {
   spentSoFar: number;
   lumpSumSpent: number;
   dailyVariableSpent: number;
+  tripQuarantinedSpent?: number;
   unpaidCommittedReserve?: number;
   currentDailySpend: number;
 
@@ -349,18 +651,6 @@ export interface MonthlySavingsPrediction {
   pacingStatus: 'ahead_of_target' | 'on_track' | 'risk_of_under_saving' | 'in_deficit';
   pacingDifferenceDaily: number;
   insightMessage: string;
-}
-
-interface GenericTransaction {
-  id?: string;
-  type?: string;
-  amount?: number;
-  currency?: string;
-  baseAmount?: number;
-  category?: string;
-  description?: string;
-  notes?: string;
-  date?: string;
 }
 
 interface StoredRecurringLike {
@@ -385,19 +675,11 @@ interface StoredInstallmentLike {
 }
 
 export interface CategoryCommitmentBreakdown {
-  /** Total monthly recurring commitments + active installments belonging to each category */
   totalCommittedByCategory: Map<string, number>;
-  /** Portion of committed bills in each category NOT YET paid/recorded in the target month */
   unpaidReserveByCategory: Map<string, number>;
-  /** Itemized list of unpaid bills per category for transparent UI display */
   unpaidItemsByCategory: Map<string, Array<{ name: string; amount: number; kind: 'recurring' | 'installment' }>>;
 }
 
-/**
- * Computes both total monthly bill commitments AND unpaid bill reserves per category
- * by matching `cashflow_recurring_commitments` and `cashflow_installment_plans` against
- * the target month's recorded transactions.
- */
 export function getCategoryCommitmentBreakdown(
   monthTransactions: GenericTransaction[] = [],
   targetMonthPrefix: string = getLocalDateString().slice(0, 7)
@@ -420,9 +702,8 @@ export function getCategoryCommitmentBreakdown(
       (!t?.date || t.date.startsWith(targetMonthPrefix))
   );
 
-  // 1. Recurring Commitments
   try {
-    const rawRec = typeof localStorage !== 'undefined' ? localStorage.getItem('cashflow_recurring_commitments') : null;
+    const rawRec = localStorage.getItem('cashflow_recurring_commitments');
     if (rawRec) {
       const list = JSON.parse(rawRec) as StoredRecurringLike[];
       if (Array.isArray(list)) {
@@ -464,9 +745,8 @@ export function getCategoryCommitmentBreakdown(
     }
   } catch {}
 
-  // 2. Active Installment Plans
   try {
-    const rawInst = typeof localStorage !== 'undefined' ? localStorage.getItem('cashflow_installment_plans') : null;
+    const rawInst = localStorage.getItem('cashflow_installment_plans');
     if (rawInst) {
       const list = JSON.parse(rawInst) as StoredInstallmentLike[];
       if (Array.isArray(list)) {
@@ -506,13 +786,6 @@ export function getCategoryCommitmentBreakdown(
   return { totalCommittedByCategory, unpaidReserveByCategory, unpaidItemsByCategory };
 }
 
-/**
- * Helper to resolve which month prefix to filter by when a caller passes transactions:
- * - If explicitMonth (`YYYY-MM`) is provided, use it.
- * - If any transaction matches the current/reference month (`YYYY-MM`), filter to that month
- *   (prevents 60-day multi-month rolling caches from summing 2-3 months against 1 month's cap).
- * - If all passed transactions belong to a single historical month (e.g. unit test fixtures), use that month.
- */
 function resolveEffectiveMonthFilter(
   transactions: GenericTransaction[],
   defaultMonthPrefix: string,
@@ -536,11 +809,6 @@ function resolveEffectiveMonthFilter(
   return null;
 }
 
-/**
- * Priority order for borrowing/trimming unused slack across categories when another category
- * needs extra budget (or when fitting caps to total living budget).
- * Trims non-essential discretionary buckets first, protecting Food sustenance, Housing & Bills, and Insurance until last.
- */
 const REBALANCE_DONOR_ORDER = [
   'Other',
   'Gift',
@@ -559,23 +827,17 @@ const REBALANCE_DONOR_ORDER = [
 /**
  * Intelligently rebalances category caps when spending (or a proposed expense + bill reserves) in one or more
  * categories exceeds their cap.
- *
- * Rules:
- * 1. Every category's cap is protected down to at least its `spentThisMonth + unpaidBillReserve` (so an already-spent
- *    or bill-reserved category is NEVER cut below what is already used/reserved!).
- * 2. Any category where `spentThisMonth + unpaidBillReserve + proposedAmount > currentCap` is expanded to cover the need.
- * 3. User-locked categories (`lockedCaps`) are strictly protected from being trimmed as donors.
- * 4. To keep total caps within `maxLivingBudget`, the excess is borrowed from other unlocked categories with unspent slack.
+ * Strictly respects `lockedCaps`: user-locked categories are NEVER trimmed as donor buckets!
  */
 export function rebalanceCategoryCapsForSpending(params: {
   currentMonthTransactions: GenericTransaction[];
   currentCaps?: Record<string, number>;
+  lockedCaps?: Record<string, boolean>;
   maxLivingBudget?: number;
   targetCategory?: string;
   proposedAmount?: number;
   targetMonth?: string;
   referenceDate?: Date;
-  lockedCaps?: Record<string, boolean>;
 }): CategoryRebalanceSuggestion {
   const now = params.referenceDate || new Date();
   const defaultMonthPrefix = params.targetMonth || getLocalDateString(now).slice(0, 7);
@@ -584,6 +846,7 @@ export function rebalanceCategoryCapsForSpending(params: {
   const effectiveMonth = monthFilter || defaultMonthPrefix;
   const daysInfo = getMonthDaysInfo(effectiveMonth, now);
 
+  const locked = params.lockedCaps || getLockedCategoryCaps();
   const baseCaps = params.currentCaps || getSavedCategoryCaps();
   const updatedCaps: Record<string, number> = {};
   CANONICAL_EXPENSE_CATEGORIES.forEach((cat) => {
@@ -603,11 +866,12 @@ export function rebalanceCategoryCapsForSpending(params: {
         : params.maxLivingBudget
       : Math.max(800, currentTotalCaps);
 
-  // 1. Compute spent so far and unpaid bill reserves per category for this month
+  // 1. Compute domestic spent so far (excluding quarantined trip expenses) and unpaid bill reserves per category
   const spentByCat = new Map<string, number>();
   for (const t of validTxs) {
     if (String(t?.type || '').toLowerCase() !== 'expense' || t?.id === 'tx_sample' || !t?.date) continue;
     if (monthFilter && t.date.length >= 7 && !t.date.startsWith(monthFilter)) continue;
+    if (isTripQuarantinedExpense(t)) continue;
     const cat = t.category || 'Other';
     const amt = getAmountInBaseCurrency(t.amount || 0, t.currency, t.baseAmount);
     if (amt > 0) {
@@ -620,13 +884,15 @@ export function rebalanceCategoryCapsForSpending(params: {
     effectiveMonth
   );
 
-  // 2. Ensure every category cap covers at least its (spent + unpaidBillReserve + proposedAmount)
+  // 2. Expand target category (and any non-locked over-cap category) to cover (spent + unpaidBillReserve + proposedAmount)
   const targetCat = params.targetCategory || '';
   const proposed = Math.max(0, Number(params.proposedAmount) || 0);
   const previousTargetCap = targetCat ? updatedCaps[targetCat] ?? 0 : 0;
 
   let totalExpanded = 0;
   for (const cat of Object.keys(updatedCaps)) {
+    // If a category is locked and is NOT the explicit targetCat requested by the user, keep its locked cap untouched
+    if (locked[cat] && cat !== targetCat) continue;
     const spent = spentByCat.get(cat) || 0;
     const unpaidReserve = unpaidReserveByCategory.get(cat) || 0;
     const extraProposed = cat === targetCat ? proposed : 0;
@@ -639,8 +905,6 @@ export function rebalanceCategoryCapsForSpending(params: {
   }
 
   const newTargetCap = targetCat ? updatedCaps[targetCat] ?? previousTargetCap : 0;
-  const isLocked = (cat: string) => Boolean(params.lockedCaps && params.lockedCaps[cat]);
-
   const donors: CategoryRebalanceDonor[] = [];
   let remainingToCut = Math.max(
     0,
@@ -648,10 +912,10 @@ export function rebalanceCategoryCapsForSpending(params: {
   );
 
   if (remainingToCut > 0) {
-    // Pass A: Cut from unspent, unreserved slack while keeping healthy minimum buffers
+    // Pass A: Cut from unspent, unreserved slack in UNLOCKED categories
     for (const donorCat of REBALANCE_DONOR_ORDER) {
       if (remainingToCut <= 0) break;
-      if (donorCat === targetCat || isLocked(donorCat)) continue;
+      if (donorCat === targetCat || locked[donorCat]) continue;
       const currentCap = updatedCaps[donorCat] || 0;
       if (currentCap <= 0) continue;
 
@@ -683,11 +947,11 @@ export function rebalanceCategoryCapsForSpending(params: {
       }
     }
 
-    // Pass B: If still needed, allow trimming unspent buffer down to actual (spent + unpaidReserve)
+    // Pass B: If still needed, allow trimming unspent buffer from UNLOCKED Food & Dining, Housing & Bills, or Insurance down to actual (spent + unpaidReserve)
     if (remainingToCut > 0) {
       for (const donorCat of REBALANCE_DONOR_ORDER) {
         if (remainingToCut <= 0) break;
-        if (donorCat === targetCat || isLocked(donorCat)) continue;
+        if (donorCat === targetCat || locked[donorCat]) continue;
         const currentCap = updatedCaps[donorCat] || 0;
         const spent = spentByCat.get(donorCat) || 0;
         const unpaidReserve = unpaidReserveByCategory.get(donorCat) || 0;
@@ -731,7 +995,7 @@ export function rebalanceCategoryCapsForSpending(params: {
       ? `💡 Smart Rebalance: Raise ${targetCat || 'category'} cap to RM ${newTargetCap.toFixed(0)} by shifting RM ${totalCutFromDonors.toFixed(0)} from unused slack in ${donorSummary} — keeping your total budget strictly within RM ${maxBudget.toLocaleString()}.`
       : `⚠️ Partial Rebalance: Can shift RM ${totalCutFromDonors.toFixed(0)} from ${donorSummary}, but RM ${unfundedDeficit.toFixed(0)} still exceeds your total RM ${maxBudget.toLocaleString()} living budget.`;
   } else if (totalExpanded > 0) {
-    summaryText = `⚠️ All other categories are already spent or reserved for bills; raising ${targetCat || 'this category'} by RM ${totalExpanded.toFixed(0)} will dip into your monthly savings buffer.`;
+    summaryText = `⚠️ All other unlocked categories are already spent or reserved for bills; raising ${targetCat || 'this category'} by RM ${totalExpanded.toFixed(0)} will dip into your monthly savings buffer.`;
   } else {
     summaryText = `✨ Category caps are balanced within your RM ${maxBudget.toLocaleString()} living budget.`;
   }
@@ -750,18 +1014,16 @@ export function rebalanceCategoryCapsForSpending(params: {
 }
 
 /**
- * One-call helper for the UI to execute and persist a smart cross-category rebalance.
+ * One-call helper for the UI or AI Assistant to execute and persist a smart cross-category rebalance.
  */
-export function applySmartCategoryRebalance(params: Parameters<typeof rebalanceCategoryCapsForSpending>[0]): CategoryRebalanceSuggestion {
+export function applySmartCategoryRebalance(
+  params: Parameters<typeof rebalanceCategoryCapsForSpending>[0]
+): CategoryRebalanceSuggestion {
   const res = rebalanceCategoryCapsForSpending(params);
   saveCategoryCaps(res.updatedCaps);
   return res;
 }
 
-/**
- * Helper to refresh reasoning, dailyAllowance, and sharePercent after any cap scaling/trimming/rebalancing
- * so the displayed explanation ALWAYS matches the final suggestedCap number.
- */
 function synchronizeSuggestionMetadata(
   suggestions: IntelligentCapSuggestion[],
   targetLivingBudget: number,
@@ -775,10 +1037,9 @@ function synchronizeSuggestionMetadata(
     const spent = s.currentMonthSpent || 0;
     const delta = s.rebalancedDelta || 0;
 
+    const lockPrefix = s.isLocked ? '🔒 Locked by user · ' : '';
     const reserveSuffix =
-      reserve > 0
-        ? ` Includes RM ${reserve.toFixed(0)} reserved for upcoming monthly bills.`
-        : '';
+      reserve > 0 ? ` Includes RM ${reserve.toFixed(0)} reserved for upcoming monthly bills.` : '';
     const rebalanceSuffix =
       delta > 0
         ? ` (+RM ${delta.toFixed(0)} auto-rebalanced from unused categories to cover this month's spend/bills).`
@@ -789,44 +1050,44 @@ function synchronizeSuggestionMetadata(
     if (s.category === 'Food & Dining') {
       const foodDaily = Number((s.suggestedCap / 30).toFixed(1));
       s.dailyAllowance = foodDaily;
-      s.reasoning = `Allocated RM ${s.suggestedCap} (RM ${foodDaily}/day) for active daily meal pacing while strictly reserving your ${totalSavingsPct}% savings goal.${reserveSuffix}${rebalanceSuffix}`;
+      s.reasoning = `${lockPrefix}Allocated RM ${s.suggestedCap} (RM ${foodDaily}/day) for active daily meal pacing while strictly reserving your ${totalSavingsPct}% savings goal.${reserveSuffix}${rebalanceSuffix}`;
     } else if (s.category === 'Insurance') {
       s.reasoning =
         s.suggestedCap > 0
-          ? `Identified as a monthly recurring commitment. Suggested cap matches your steady RM ${s.suggestedCap}/mo premium without waste.${reserveSuffix}${rebalanceSuffix}`
-          : `No regular insurance premium configured (set to RM 0; adjust if needed).`;
+          ? `${lockPrefix}Identified as a monthly recurring commitment. Suggested cap matches your steady RM ${s.suggestedCap}/mo premium without waste.${reserveSuffix}${rebalanceSuffix}`
+          : `${lockPrefix}No regular insurance premium configured (set to RM 0; adjust if needed).`;
     } else if (s.category === 'Housing & Bills') {
-      s.reasoning = `Baseline rent & utilities (avg RM ${s.historicalAvg || s.suggestedCap}) + bill buffer to handle seasonal utility spikes.${reserveSuffix}${rebalanceSuffix}`;
+      s.reasoning = `${lockPrefix}Baseline rent & utilities (avg RM ${s.historicalAvg || s.suggestedCap}) + bill buffer to handle seasonal utility spikes.${reserveSuffix}${rebalanceSuffix}`;
     } else if (s.category === 'Transport') {
       s.dailyAllowance = Number((s.suggestedCap / 30).toFixed(1));
-      s.reasoning = `Based on your regular commute, toll, and fuel trends (avg RM ${s.historicalAvg || s.suggestedCap}/mo).${reserveSuffix}${rebalanceSuffix}`;
+      s.reasoning = `${lockPrefix}Based on your regular commute, toll, and fuel trends (avg RM ${s.historicalAvg || s.suggestedCap}/mo).${reserveSuffix}${rebalanceSuffix}`;
     } else if (s.category === 'Parents') {
       s.reasoning =
         s.suggestedCap > 0
-          ? `Regular family support commitment locked at RM ${s.suggestedCap}/mo.${reserveSuffix}${rebalanceSuffix}`
-          : `No regular family support detected (set to RM 0; adjust if needed).`;
+          ? `${lockPrefix}Regular family support commitment locked at RM ${s.suggestedCap}/mo.${reserveSuffix}${rebalanceSuffix}`
+          : `${lockPrefix}No regular family support detected (set to RM 0; adjust if needed).`;
     } else if (s.category === 'Health') {
-      s.reasoning = `Essential medical, clinic, and pharmacy safety net (RM ${s.suggestedCap}/mo).${reserveSuffix}${rebalanceSuffix}`;
+      s.reasoning = `${lockPrefix}Essential medical, clinic, and pharmacy safety net (RM ${s.suggestedCap}/mo).${reserveSuffix}${rebalanceSuffix}`;
     } else if (s.category === 'Education') {
-      s.reasoning = `Occasional self-learning & course reserve (RM ${s.suggestedCap}/mo). Handled as a flexible lump sum so it does not distort daily living burn rate.${reserveSuffix}${rebalanceSuffix}`;
+      s.reasoning = `${lockPrefix}Occasional self-learning & course reserve (RM ${s.suggestedCap}/mo). Handled as a flexible lump sum so it does not distort daily living burn rate.${reserveSuffix}${rebalanceSuffix}`;
     } else if (s.category === 'Sport') {
-      s.reasoning = `Monthly sports & gym cap (RM ${s.suggestedCap}). Spend one time, use whole month.${reserveSuffix}${rebalanceSuffix}`;
+      s.reasoning = `${lockPrefix}Monthly sports & gym cap (RM ${s.suggestedCap}). Spend one time, use whole month.${reserveSuffix}${rebalanceSuffix}`;
     } else if (s.category === 'Shopping') {
-      s.reasoning = `Monthly retail & lifestyle cap (RM ${s.suggestedCap}). Spend one time, use whole month.${reserveSuffix}${rebalanceSuffix}`;
+      s.reasoning = `${lockPrefix}Monthly retail & lifestyle cap (RM ${s.suggestedCap}). Spend one time, use whole month.${reserveSuffix}${rebalanceSuffix}`;
     } else {
       s.reasoning =
         spent > 0 || reserve > 0
-          ? `Monthly capped budget (RM ${s.suggestedCap}, with RM ${spent.toFixed(0)} spent${reserve > 0 ? ` + RM ${reserve.toFixed(0)} bill reserve` : ''}). Spend one time, use whole month.${rebalanceSuffix}`
-          : `Monthly capped budget (RM ${s.suggestedCap}). Spend one time, use whole month.${rebalanceSuffix}`;
+          ? `${lockPrefix}Monthly capped budget (RM ${s.suggestedCap}, with RM ${spent.toFixed(0)} spent${reserve > 0 ? ` + RM ${reserve.toFixed(0)} bill reserve` : ''}). Spend one time, use whole month.${rebalanceSuffix}`
+          : `${lockPrefix}Monthly capped budget (RM ${s.suggestedCap}). Spend one time, use whole month.${rebalanceSuffix}`;
     }
   }
 }
 
 /**
  * Computes intelligent category spending caps derived dynamically from:
- * 1. Normal monthly baselines for every regular category (Housing, Insurance, Transport, Food, Health, Shopping, etc.)
- * 2. Per-category Bill Reserves (`cashflow_recurring_commitments` + `cashflow_installment_plans`)
- * 3. Cross-Category Auto-Rebalancing: protects spent & bill reserves, shifts unspent slack, and preserves user locked caps.
+ * 1. Normal monthly baselines for every regular category — even before you spend in them this month!
+ * 2. Per-category Bill Reserves (`cashflow_recurring_commitments` + `cashflow_installment_plans`).
+ * 3. Live Cross-Category Auto-Rebalancing while strictly preserving `lockedCaps`!
  */
 export function generateIntelligentCategoryCaps(
   allTransactions: GenericTransaction[] = [],
@@ -835,13 +1096,15 @@ export function generateIntelligentCategoryCaps(
     savingsTargetPct?: number;
     investmentTargetPct?: number;
     configuredCaps?: Record<string, number>;
-    monthlyBudgetCap?: number;
     lockedCaps?: Record<string, boolean>;
+    monthlyBudgetCap?: number;
     referenceDate?: Date;
   }
 ): IntelligentBudgetPlan {
+  const now = options?.referenceDate || new Date();
   const profile = typeof window !== 'undefined' ? getUserMoneyProfile() : null;
   const currentCaps = options?.configuredCaps || getSavedCategoryCaps();
+  const locked = options?.lockedCaps || getLockedCategoryCaps();
 
   // 1. Resolve Monthly Income & Target Savings
   const savedIncome =
@@ -867,8 +1130,7 @@ export function generateIntelligentCategoryCaps(
       ? Math.min(incomeDerivedLivingBudget, explicitMonthlyCap)
       : incomeDerivedLivingBudget;
 
-  // 2. Aggregate Historical Spending AND Current Month Spending by Category
-  const now = options?.referenceDate || new Date();
+  // 2. Aggregate Historical Spending AND Current Month Domestic Spending by Category
   const currentMonthPrefix = getLocalDateString(now).slice(0, 7);
   const categoryMonthlyMap = new Map<string, Map<string, number>>();
   const currentMonthSpentMap = new Map<string, number>();
@@ -884,6 +1146,9 @@ export function generateIntelligentCategoryCaps(
     if (!t.date || t.date.length < 7 || String(t.type || '').toLowerCase() !== 'expense' || t.id === 'tx_sample') {
       return;
     }
+    // Quarantine foreign trip expenses so vacation spending doesn't skew domestic monthly category caps
+    if (isTripQuarantinedExpense(t)) return;
+
     const cat = t.category || 'Other';
     const monthKey = t.date.slice(0, 7);
     const amount = getAmountInBaseCurrency(t.amount || 0, t.currency, t.baseAmount);
@@ -901,7 +1166,6 @@ export function generateIntelligentCategoryCaps(
     }
   });
 
-  // Determine completed past months vs current month
   const completedLedgerMonths = Array.from(allObservedMonths)
     .filter((m) => m < currentMonthPrefix)
     .sort()
@@ -912,7 +1176,6 @@ export function generateIntelligentCategoryCaps(
       : Array.from(allObservedMonths).sort().slice(-6);
   const totalLedgerMonthsCount = Math.max(1, referenceMonths.length);
 
-  // Get per-category recurring & installment bill breakdown for the active month
   const { totalCommittedByCategory, unpaidReserveByCategory } = getCategoryCommitmentBreakdown(
     validTxs,
     currentMonthPrefix
@@ -997,9 +1260,16 @@ export function generateIntelligentCategoryCaps(
     });
   });
 
-  // 4. Generate Normal Monthly Caps
+  // 4. Generate Normal Monthly Caps (respecting lockedCaps if set by user!)
   const suggestions: IntelligentCapSuggestion[] = [];
   let committedCapsSum = 0;
+
+  const applyLockIfSet = (cat: string, computedCap: number): number => {
+    if (locked[cat]) {
+      return resolveCategoryCapValue(cat, currentCaps, computedCap);
+    }
+    return computedCap;
+  };
 
   // Tier A: Fixed Monthly Commitments (Insurance)
   const insuranceStats = statsMap.get('Insurance')!;
@@ -1011,7 +1281,7 @@ export function generateIntelligentCategoryCaps(
         : insuranceStats.avgAcrossAllMonths;
     insuranceCap = Math.round(baseIns / 10) * 10 || 250;
   }
-  insuranceCap = Math.max(insuranceCap, insuranceStats.requiredThisMonthFloor);
+  insuranceCap = applyLockIfSet('Insurance', Math.max(insuranceCap, insuranceStats.requiredThisMonthFloor));
   committedCapsSum += insuranceCap;
   suggestions.push({
     category: 'Insurance',
@@ -1024,6 +1294,7 @@ export function generateIntelligentCategoryCaps(
     committedFloor: insuranceStats.committedFloor,
     unpaidBillReserve: insuranceStats.unpaidBillReserve,
     currentMonthSpent: insuranceStats.currentMonthSpent,
+    isLocked: Boolean(locked['Insurance']),
   });
 
   // Tier B: Quasi-Fixed Housing & Bills
@@ -1033,7 +1304,7 @@ export function generateIntelligentCategoryCaps(
     const baseHousing = Math.max(housingStats.avgAcrossAllMonths, housingStats.activeMonthMedian * 0.9);
     housingCap = Math.max(300, Math.round((baseHousing * 1.08) / 10) * 10);
   }
-  housingCap = Math.max(housingCap, housingStats.requiredThisMonthFloor);
+  housingCap = applyLockIfSet('Housing & Bills', Math.max(housingCap, housingStats.requiredThisMonthFloor));
   committedCapsSum += housingCap;
   suggestions.push({
     category: 'Housing & Bills',
@@ -1046,6 +1317,7 @@ export function generateIntelligentCategoryCaps(
     committedFloor: housingStats.committedFloor,
     unpaidBillReserve: housingStats.unpaidBillReserve,
     currentMonthSpent: housingStats.currentMonthSpent,
+    isLocked: Boolean(locked['Housing & Bills']),
   });
 
   // Tier C: Commute & Transport Trend
@@ -1054,7 +1326,7 @@ export function generateIntelligentCategoryCaps(
   if (transportStats.activeSampleCount > 0) {
     transportCap = Math.max(80, Math.round(transportStats.activeMonthMedian / 10) * 10);
   }
-  transportCap = Math.max(transportCap, transportStats.requiredThisMonthFloor);
+  transportCap = applyLockIfSet('Transport', Math.max(transportCap, transportStats.requiredThisMonthFloor));
   committedCapsSum += transportCap;
   suggestions.push({
     category: 'Transport',
@@ -1067,6 +1339,7 @@ export function generateIntelligentCategoryCaps(
     committedFloor: transportStats.committedFloor,
     unpaidBillReserve: transportStats.unpaidBillReserve,
     currentMonthSpent: transportStats.currentMonthSpent,
+    isLocked: Boolean(locked['Transport']),
   });
 
   // Parents support
@@ -1074,12 +1347,11 @@ export function generateIntelligentCategoryCaps(
   let parentsCap = 0;
   if (parentsStats.activeSampleCount > 0 || parentsStats.requiredThisMonthFloor > 0) {
     const baseParents =
-      parentsStats.activeSampleCount > 0
-        ? Math.round(parentsStats.activeMonthMedian / 50) * 50
-        : 0;
+      parentsStats.activeSampleCount > 0 ? Math.round(parentsStats.activeMonthMedian / 50) * 50 : 0;
     parentsCap = Math.max(baseParents, parentsStats.requiredThisMonthFloor);
-    committedCapsSum += parentsCap;
   }
+  parentsCap = applyLockIfSet('Parents', parentsCap);
+  committedCapsSum += parentsCap;
   suggestions.push({
     category: 'Parents',
     currentCap: resolveCategoryCapValue('Parents', currentCaps, 0),
@@ -1091,6 +1363,7 @@ export function generateIntelligentCategoryCaps(
     committedFloor: parentsStats.committedFloor,
     unpaidBillReserve: parentsStats.unpaidBillReserve,
     currentMonthSpent: parentsStats.currentMonthSpent,
+    isLocked: Boolean(locked['Parents']),
   });
 
   // Health baseline
@@ -1099,7 +1372,7 @@ export function generateIntelligentCategoryCaps(
   if (healthStats.activeSampleCount > 0) {
     healthCap = Math.max(50, Math.round(healthStats.avgAcrossAllMonths / 10) * 10);
   }
-  healthCap = Math.max(healthCap, healthStats.requiredThisMonthFloor);
+  healthCap = applyLockIfSet('Health', Math.max(healthCap, healthStats.requiredThisMonthFloor));
   committedCapsSum += healthCap;
   suggestions.push({
     category: 'Health',
@@ -1112,6 +1385,7 @@ export function generateIntelligentCategoryCaps(
     committedFloor: healthStats.committedFloor,
     unpaidBillReserve: healthStats.unpaidBillReserve,
     currentMonthSpent: healthStats.currentMonthSpent,
+    isLocked: Boolean(locked['Health']),
   });
 
   // Education baseline
@@ -1120,7 +1394,7 @@ export function generateIntelligentCategoryCaps(
   if (educationStats.activeSampleCount > 0) {
     educationCap = Math.max(50, Math.round(educationStats.avgAcrossAllMonths / 10) * 10);
   }
-  educationCap = Math.max(educationCap, educationStats.requiredThisMonthFloor);
+  educationCap = applyLockIfSet('Education', Math.max(educationCap, educationStats.requiredThisMonthFloor));
   committedCapsSum += educationCap;
   suggestions.push({
     category: 'Education',
@@ -1133,6 +1407,7 @@ export function generateIntelligentCategoryCaps(
     committedFloor: educationStats.committedFloor,
     unpaidBillReserve: educationStats.unpaidBillReserve,
     currentMonthSpent: educationStats.currentMonthSpent,
+    isLocked: Boolean(locked['Education']),
   });
 
   // 5. Allocate Remaining Discretionary Living Pool
@@ -1151,10 +1426,7 @@ export function generateIntelligentCategoryCaps(
         : cat === 'Sport'
         ? 120
         : 100;
-    const avg =
-      st && st.avgAcrossAllMonths > 0
-        ? st.avgAcrossAllMonths
-        : fallbackDefault;
+    const avg = st && st.avgAcrossAllMonths > 0 ? st.avgAcrossAllMonths : fallbackDefault;
     discretionaryAvgs[cat] = avg;
     totalDiscretionaryAvg += avg;
   });
@@ -1166,7 +1438,10 @@ export function generateIntelligentCategoryCaps(
     600,
     Math.round((remainingDiscretionaryPool * effectiveFoodWeight) / 10) * 10
   );
-  const suggestedFoodCap = Math.max(baseSuggestedFoodCap, foodStats.requiredThisMonthFloor);
+  const suggestedFoodCap = applyLockIfSet(
+    'Food & Dining',
+    Math.max(baseSuggestedFoodCap, foodStats.requiredThisMonthFloor)
+  );
 
   suggestions.push({
     category: 'Food & Dining',
@@ -1179,6 +1454,7 @@ export function generateIntelligentCategoryCaps(
     committedFloor: foodStats.committedFloor,
     unpaidBillReserve: foodStats.unpaidBillReserve,
     currentMonthSpent: foodStats.currentMonthSpent,
+    isLocked: Boolean(locked['Food & Dining']),
   });
 
   const poolAfterFood = Math.max(200, remainingDiscretionaryPool - suggestedFoodCap);
@@ -1191,7 +1467,7 @@ export function generateIntelligentCategoryCaps(
     const weight = discretionaryAvgs[cat] / otherDiscretionaryTotalAvg;
     const minFloor = cat === 'Shopping' ? 150 : cat === 'Sport' ? 80 : 50;
     const baseAllocated = Math.max(minFloor, Math.round((poolAfterFood * weight) / 10) * 10);
-    const allocated = Math.max(baseAllocated, st.requiredThisMonthFloor);
+    const allocated = applyLockIfSet(cat, Math.max(baseAllocated, st.requiredThisMonthFloor));
 
     suggestions.push({
       category: cat,
@@ -1204,19 +1480,10 @@ export function generateIntelligentCategoryCaps(
       committedFloor: st.committedFloor,
       unpaidBillReserve: st.unpaidBillReserve,
       currentMonthSpent: st.currentMonthSpent,
+      isLocked: Boolean(locked[cat]),
     });
   });
 
-  // Preserve user-locked category caps if supplied
-  if (options?.lockedCaps) {
-    for (const s of suggestions) {
-      if (options.lockedCaps[s.category]) {
-        s.suggestedCap = resolveCategoryCapValue(s.category, options.configuredCaps, s.suggestedCap);
-      }
-    }
-  }
-
-  // Record pre-rebalance caps so we can track exact rebalancedDelta per category
   const preTrimCapMap = new Map<string, number>();
   for (const s of suggestions) {
     const st = statsMap.get(s.category)!;
@@ -1228,27 +1495,24 @@ export function generateIntelligentCategoryCaps(
         : otherDiscretionaryNames.includes(s.category)
         ? Math.max(50, Math.round((poolAfterFood * (discretionaryAvgs[s.category] / otherDiscretionaryTotalAvg)) / 10) * 10)
         : s.suggestedCap;
-    if (st.requiredThisMonthFloor > normalWithoutSpike) {
+    if (!s.isLocked && st.requiredThisMonthFloor > normalWithoutSpike) {
       s.rebalancedDelta = st.requiredThisMonthFloor - normalWithoutSpike;
     }
     preTrimCapMap.set(s.category, s.suggestedCap);
   }
 
-  // 6. Strict Hard Constraint: Sum of ALL Suggested Caps MUST be <= targetLivingBudget.
-  // Trimming preserves user locks (options.lockedCaps) and never trims below requiredThisMonthFloor.
-  const isLocked = (cat: string) => Boolean(options?.lockedCaps && options.lockedCaps[cat]);
+  // 6. Strict Hard Constraint + Dynamic Cross-Category Rebalancing (NEVER trimming locked categories!)
   const currentTotal = suggestions.reduce((sum, s) => sum + s.suggestedCap, 0);
-
   if (currentTotal > targetLivingBudget) {
     let excess = currentTotal - targetLivingBudget;
     const byCategory = new Map(suggestions.map((s) => [s.category, s]));
 
-    // Pass 1: Trim unspent/unreserved slack from unlocked discretionary categories
+    // Pass 1: Trim unspent/unreserved slack from UNLOCKED discretionary categories
     const discretionaryTrimOrder = ['Other', 'Gift', 'Entertainment', 'Shopping', 'Sport', 'Food & Dining'];
     while (excess > 0) {
       let trimmedAny = false;
       for (const catName of discretionaryTrimOrder) {
-        if (isLocked(catName)) continue;
+        if (locked[catName]) continue;
         const item = byCategory.get(catName);
         if (!item) continue;
         const st = statsMap.get(catName)!;
@@ -1265,11 +1529,11 @@ export function generateIntelligentCategoryCaps(
       if (!trimmedAny) break;
     }
 
-    // Pass 2: Trim unlocked quasi-fixed and trend categories (Transport -> Education -> Health)
+    // Pass 2: Trim UNLOCKED quasi-fixed and trend categories (Transport -> Education -> Health)
     if (excess > 0) {
       const flexibleTrimOrder = ['Transport', 'Education', 'Health'];
       for (const catName of flexibleTrimOrder) {
-        if (isLocked(catName)) continue;
+        if (locked[catName]) continue;
         const item = byCategory.get(catName);
         if (!item) continue;
         const st = statsMap.get(catName)!;
@@ -1283,10 +1547,10 @@ export function generateIntelligentCategoryCaps(
       }
     }
 
-    // Pass 3: Trim any remaining unspent/unreserved slack down to exact `requiredThisMonthFloor`
+    // Pass 3: Trim any remaining unspent/unreserved slack in UNLOCKED categories down to exact `requiredThisMonthFloor`
     if (excess > 0) {
       for (const catName of REBALANCE_DONOR_ORDER) {
-        if (isLocked(catName)) continue;
+        if (locked[catName]) continue;
         const item = byCategory.get(catName);
         if (!item) continue;
         const st = statsMap.get(catName)!;
@@ -1300,10 +1564,10 @@ export function generateIntelligentCategoryCaps(
       }
     }
 
-    // Pass 4: Final mathematical guarantee if total spend already exceeded targetLivingBudget
+    // Pass 4: Final mathematical guarantee across UNLOCKED categories
     if (excess > 0) {
       for (const catName of REBALANCE_DONOR_ORDER) {
-        if (isLocked(catName)) continue;
+        if (locked[catName]) continue;
         const item = byCategory.get(catName);
         if (!item) continue;
         if (item.suggestedCap > 0 && excess > 0) {
@@ -1315,7 +1579,6 @@ export function generateIntelligentCategoryCaps(
       }
     }
 
-    // Update rebalancedDelta for donor categories
     for (const s of suggestions) {
       const beforeTrim = preTrimCapMap.get(s.category) ?? s.suggestedCap;
       if (s.suggestedCap < beforeTrim && !s.rebalancedDelta) {
@@ -1324,7 +1587,6 @@ export function generateIntelligentCategoryCaps(
     }
   }
 
-  // Synchronize reasoning, dailyAllowance, and sharePercent AFTER trimming & rebalancing!
   synchronizeSuggestionMetadata(suggestions, targetLivingBudget, totalSavingsPct);
 
   const totalSuggestedCaps = suggestions.reduce((sum, s) => sum + s.suggestedCap, 0);
@@ -1355,7 +1617,7 @@ export function generateIntelligentCategoryCaps(
 
 /**
  * Only Food & Dining is a daily variable expense category.
- * All other categories are budget-capped buckets ("spend one time, use whole month").
+ * All other categories (and any foreign-currency / trip-tagged expense) are lump-sum or trip-quarantined buckets.
  */
 export function isDailyCategory(category?: string): boolean {
   if (!category) return false;
@@ -1364,22 +1626,30 @@ export function isDailyCategory(category?: string): boolean {
 }
 
 /**
- * Determines whether an expense belongs to a monthly-capped bucket ("spend one time, use whole month")
- * rather than a daily variable burn-rate routine.
+ * Determines whether an expense belongs to a monthly-capped or trip-quarantined bucket
+ * rather than a domestic daily variable burn-rate routine.
  */
-export function isLumpSumExpense(category: string, _amount?: number): boolean {
+export function isLumpSumExpense(
+  category: string,
+  _amount?: number,
+  txContext?: GenericTransaction | null
+): boolean {
+  if (txContext && isTripQuarantinedExpense(txContext)) {
+    return true;
+  }
   return !isDailyCategory(category);
 }
 
 /**
  * Scales or trims a record of category caps so that their sum is strictly <= maxLivingBudget (Income - Savings).
- * Preserves explicit 0 caps, respects fixed recurring commitments, and protects user-locked categories.
+ * Strictly preserves explicit 0 caps and user-locked caps (`lockedCaps`).
  */
 export function fitCapsToLivingBudget(
   caps: Record<string, number>,
   maxLivingBudget: number,
   lockedCaps?: Record<string, boolean>
 ): Record<string, number> {
+  const locked = lockedCaps || getLockedCategoryCaps();
   const result: Record<string, number> = {};
   const keys = Object.keys(caps).length > 0 ? Object.keys(caps) : Array.from(CANONICAL_EXPENSE_CATEGORIES);
 
@@ -1391,28 +1661,16 @@ export function fitCapsToLivingBudget(
   const currentSum = Object.values(result).reduce((sum, v) => sum + v, 0);
   if (currentSum <= maxLivingBudget && currentSum > 0) return result;
 
-  const isLocked = (cat: string) => Boolean(lockedCaps && lockedCaps[cat]);
-  const fixedCategories = new Set<string>();
-  keys.forEach((cat) => {
-    if (isLocked(cat)) {
-      fixedCategories.add(cat);
-    }
-  });
-  if (fixedCategories.size === 0 && result['Insurance'] !== undefined) {
-    fixedCategories.add('Insurance');
-  }
-
+  const fixedCategories = new Set(['Insurance', ...Object.keys(locked).filter((k) => locked[k])]);
   let fixedSum = 0;
   fixedCategories.forEach((cat) => {
     if (result[cat]) fixedSum += result[cat];
   });
 
   if (fixedSum >= maxLivingBudget) {
-    const scale = maxLivingBudget / (currentSum || 1);
-    keys.forEach((cat) => {
-      if (!isLocked(cat)) {
-        result[cat] = Math.max(0, Math.floor((result[cat] * scale) / 10) * 10);
-      }
+    const unlockedKeys = keys.filter((k) => !locked[k]);
+    unlockedKeys.forEach((cat) => {
+      result[cat] = 0;
     });
   } else {
     const availableForFlexible = maxLivingBudget - fixedSum;
@@ -1446,7 +1704,8 @@ export function fitCapsToLivingBudget(
       'Food & Dining',
     ];
     for (const cat of trimOrder) {
-      if (!isLocked(cat) && result[cat] > 0 && excess > 0) {
+      if (locked[cat]) continue;
+      if (result[cat] > 0 && excess > 0) {
         const cut = Math.min(result[cat], excess);
         result[cat] -= cut;
         excess -= cut;
@@ -1455,7 +1714,8 @@ export function fitCapsToLivingBudget(
     }
     if (excess > 0) {
       for (const cat of Object.keys(result)) {
-        if (!isLocked(cat) && result[cat] > 0 && excess > 0) {
+        if (locked[cat]) continue;
+        if (result[cat] > 0 && excess > 0) {
           const cut = Math.min(result[cat], excess);
           result[cat] -= cut;
           excess -= cut;
@@ -1469,12 +1729,8 @@ export function fitCapsToLivingBudget(
 }
 
 /**
- * Dynamically predicts month-end savings and investments based on:
- * 1. User's baseline income (from Income Allocation).
- * 2. Distinction between one-time / episodic lump sums (Education, Insurance, Bills)
- *    and routine daily burn rate (Food).
- * 3. Per-category unpaid recurring commitments & installments due later this month.
- * 4. User's target savings and investment percentage split.
+ * Dynamically predicts month-end savings and investments while quarantining foreign/trip-tagged
+ * travel expenses (`tripQuarantinedSpent`) so vacation spending never contaminates domestic daily food burn rate!
  */
 export function predictMonthlySavingsAndInvestments(
   currentMonthTransactions: GenericTransaction[] = [],
@@ -1519,6 +1775,7 @@ export function predictMonthlySavingsAndInvestments(
 
   let lumpSumSpent = 0;
   let dailyVariableSpent = 0;
+  let tripQuarantinedSpent = 0;
 
   validTxs.forEach((t) => {
     if (String(t.type || '').toLowerCase() !== 'expense' || t.id === 'tx_sample') return;
@@ -1526,9 +1783,15 @@ export function predictMonthlySavingsAndInvestments(
 
     const amt = getAmountInBaseCurrency(t.amount || 0, t.currency, t.baseAmount);
     if (amt <= 0) return;
-    const cat = t.category || 'Other';
 
-    if (isLumpSumExpense(cat, amt)) {
+    // Pillar 2: Quarantine trip-tagged expenses from domestic daily living burn rate!
+    if (isTripQuarantinedExpense(t)) {
+      tripQuarantinedSpent += amt;
+      return;
+    }
+
+    const cat = t.category || 'Other';
+    if (isLumpSumExpense(cat, amt, t)) {
       lumpSumSpent += amt;
     } else {
       dailyVariableSpent += amt;
@@ -1537,9 +1800,9 @@ export function predictMonthlySavingsAndInvestments(
 
   lumpSumSpent = Number(lumpSumSpent.toFixed(2));
   dailyVariableSpent = Number(dailyVariableSpent.toFixed(2));
+  tripQuarantinedSpent = Number(tripQuarantinedSpent.toFixed(2));
   const spentSoFar = Number((lumpSumSpent + dailyVariableSpent).toFixed(2));
 
-  // Unpaid recurring commitments & installments due later this month
   const { unpaidReserveByCategory } = getCategoryCommitmentBreakdown(validTxs, monthFilter || defaultMonthPrefix);
   let unpaidCommittedReserve = 0;
   unpaidReserveByCategory.forEach((amt) => {
@@ -1627,6 +1890,7 @@ export function predictMonthlySavingsAndInvestments(
     spentSoFar,
     lumpSumSpent,
     dailyVariableSpent,
+    tripQuarantinedSpent,
     unpaidCommittedReserve,
     currentDailySpend,
     projectedTotalSpend,
@@ -1645,7 +1909,173 @@ export function predictMonthlySavingsAndInvestments(
 }
 
 /**
- * Solves Payday Cycle timing across any payday day (1-31), including wrap-around into next month.
+ * Pillar 1.2: Computes the Payday Settlement Auto-Envelope Plan when `cyclePhase === 'payday_settlement'`
+ * and a Salary/Income transaction (>= 80% of baseline income) is recorded this month.
+ */
+export function computePaydaySettlementEnvelope(
+  currentMonthTransactions: GenericTransaction[] = [],
+  options?: {
+    paydayDay?: number;
+    baselineIncome?: number;
+    savingsTargetPct?: number;
+    investmentTargetPct?: number;
+    referenceDate?: Date;
+  }
+): PaydayEnvelopeAllocationPlan {
+  const now = options?.referenceDate || new Date();
+  const todayStr = getLocalDateString(now);
+  const defaultMonthPrefix = todayStr.slice(0, 7);
+  const validTxs = Array.isArray(currentMonthTransactions) ? currentMonthTransactions : [];
+  const monthFilter = resolveEffectiveMonthFilter(validTxs, defaultMonthPrefix);
+
+  const profile = typeof window !== 'undefined' ? getUserMoneyProfile() : null;
+  const rawPayday = options?.paydayDay ?? profile?.paydayDay ?? 25;
+  const daysInfo = getMonthDaysInfo(undefined, now);
+  const todayDate = now.getDate();
+  const effectivePaydayInThisMonth = Math.min(Math.max(1, rawPayday), daysInfo.totalDays);
+
+  const daysInPrevMonth = new Date(daysInfo.year, daysInfo.month - 1, 0).getDate();
+  const prevPaydayClamped = Math.min(Math.max(1, rawPayday), daysInPrevMonth);
+  const daysSincePayday =
+    todayDate >= effectivePaydayInThisMonth
+      ? todayDate - effectivePaydayInThisMonth
+      : todayDate + (daysInPrevMonth - prevPaydayClamped);
+  const isPaydayWeek = daysSincePayday >= 0 && daysSincePayday <= 6;
+  const cyclePhase: 'living_phase' | 'payday_settlement' = isPaydayWeek ? 'payday_settlement' : 'living_phase';
+
+  const savedIncome =
+    typeof window !== 'undefined' ? parseFloat(localStorage.getItem('cashflow_baseline_income') || '0') : 0;
+  const baselineIncome =
+    options?.baselineIncome || (savedIncome > 0 ? savedIncome : profile?.baselineIncome ?? 3000);
+
+  const savedSavingsPct =
+    typeof window !== 'undefined' ? parseFloat(localStorage.getItem('cashflow_savings_target_pct') || '20') : 20;
+  const savingsTargetPct = options?.savingsTargetPct ?? (isNaN(savedSavingsPct) ? 20 : savedSavingsPct);
+
+  const savedInvestPct =
+    typeof window !== 'undefined' ? parseFloat(localStorage.getItem('cashflow_investment_target_pct') || '20') : 20;
+  const investmentTargetPct = options?.investmentTargetPct ?? (isNaN(savedInvestPct) ? 20 : savedInvestPct);
+
+  let salaryRecordedThisMonth = 0;
+  let alreadySavedThisMonth = 0;
+  let alreadyInvestedThisMonth = 0;
+
+  for (const t of validTxs) {
+    if (monthFilter && t?.date && t.date.length >= 7 && !t.date.startsWith(monthFilter)) continue;
+    const typeLower = String(t?.type || '').toLowerCase();
+    const cat = String(t?.category || '');
+    const subLower = String(t?.subCategory || '').toLowerCase();
+    const amt = getAmountInBaseCurrency(t?.amount || 0, t?.currency, t?.baseAmount);
+    if (amt <= 0) continue;
+
+    // Exclude dividend accruals from regular salary income detection
+    const isDividend =
+      cat === 'Investment Return' ||
+      subLower === 'dividend' ||
+      subLower === 'reinvest' ||
+      /dividend|asnb|distribution|股息|分红|派息/i.test(String(t?.description || ''));
+
+    if (typeLower === 'income' && !isDividend) {
+      salaryRecordedThisMonth += amt;
+    }
+
+    if (subLower !== 'sell') {
+      if (
+        cat === 'Stocks & Crypto' ||
+        cat === 'ASNB / Unit Trust' ||
+        (typeLower === 'investment' && !cat.includes('Savings') && cat !== 'Fixed Deposit')
+      ) {
+        alreadyInvestedThisMonth += amt;
+      } else if (
+        cat === 'Emergency Savings' ||
+        cat === 'Fixed Deposit' ||
+        cat === 'EPF / KWSP' ||
+        cat === 'Other Savings'
+      ) {
+        alreadySavedThisMonth += amt;
+      }
+    }
+  }
+
+  const effectiveBaseForSplit = salaryRecordedThisMonth >= baselineIncome ? salaryRecordedThisMonth : baselineIncome;
+  const plannedSavingsAmount = Math.round(effectiveBaseForSplit * (savingsTargetPct / 100));
+  const plannedInvestmentAmount = Math.round(effectiveBaseForSplit * (investmentTargetPct / 100));
+
+  const remainingToSave = Math.max(0, Math.round(plannedSavingsAmount - alreadySavedThisMonth));
+  const remainingToInvest = Math.max(0, Math.round(plannedInvestmentAmount - alreadyInvestedThisMonth));
+
+  const proposedTransfers: PaydayEnvelopeTransferItem[] = [];
+  const activeMonth = monthFilter || defaultMonthPrefix;
+
+  if (remainingToSave > 0) {
+    proposedTransfers.push({
+      id: `tx_payday_sav_${activeMonth}`,
+      type: 'Investment',
+      category: 'Emergency Savings',
+      subCategory: 'Payday Auto-Envelope',
+      description: `Payday Savings Envelope (${savingsTargetPct}%)`,
+      amount: remainingToSave,
+      currency: 'MYR',
+      date: todayStr,
+      notes: `[PaydayEnvelope:${activeMonth}] Automated ${savingsTargetPct}% salary savings allocation`,
+    });
+  }
+
+  if (remainingToInvest > 0) {
+    proposedTransfers.push({
+      id: `tx_payday_inv_${activeMonth}`,
+      type: 'Investment',
+      category: 'Stocks & Crypto',
+      subCategory: 'Payday Auto-Envelope',
+      description: `Payday Investment Envelope (${investmentTargetPct}%)`,
+      amount: remainingToInvest,
+      currency: 'MYR',
+      date: todayStr,
+      notes: `[PaydayEnvelope:${activeMonth}] Automated ${investmentTargetPct}% salary investment allocation`,
+    });
+  }
+
+  const hasQualifyingSalary = salaryRecordedThisMonth >= baselineIncome * 0.8;
+  const shouldPrompt =
+    cyclePhase === 'payday_settlement' &&
+    hasQualifyingSalary &&
+    proposedTransfers.length > 0;
+
+  const totalPct = savingsTargetPct + investmentTargetPct;
+  const headline = shouldPrompt
+    ? `💰 Salary of RM ${salaryRecordedThisMonth.toLocaleString()} detected! Allocate your ${totalPct}% Payday Envelope?`
+    : proposedTransfers.length === 0
+    ? `✅ Payday Envelope Complete (RM ${(alreadySavedThisMonth + alreadyInvestedThisMonth).toLocaleString()} allocated)`
+    : `Payday Envelope Preview (${totalPct}% target)`;
+
+  const summaryText = shouldPrompt
+    ? `1-tap transfer of RM ${remainingToSave.toLocaleString()} to Emergency Savings (${savingsTargetPct}%) and RM ${remainingToInvest.toLocaleString()} to Stocks & Crypto (${investmentTargetPct}%) to lock in your monthly wealth goal.`
+    : proposedTransfers.length === 0
+    ? `Your planned savings and investment envelopes for ${activeMonth} are fully funded.`
+    : `Planned envelope: RM ${remainingToSave.toLocaleString()} savings + RM ${remainingToInvest.toLocaleString()} investments.`;
+
+  return {
+    shouldPrompt,
+    salaryRecordedThisMonth: Number(salaryRecordedThisMonth.toFixed(2)),
+    baselineIncome,
+    cyclePhase,
+    savingsTargetPct,
+    investmentTargetPct,
+    plannedSavingsAmount,
+    plannedInvestmentAmount,
+    alreadySavedThisMonth: Number(alreadySavedThisMonth.toFixed(2)),
+    alreadyInvestedThisMonth: Number(alreadyInvestedThisMonth.toFixed(2)),
+    remainingToSave,
+    remainingToInvest,
+    proposedTransfers,
+    headline,
+    summaryText,
+  };
+}
+
+/**
+ * Solves Payday Cycle timing across any payday day (1-31), including wrap-around into next month
+ * and attaches `envelopePlan` for 1-tap Payday Settlement allocation.
  */
 export function getPaydayCycleIntelligence(
   currentMonthTransactions: GenericTransaction[] = [],
@@ -1706,6 +2136,7 @@ export function getPaydayCycleIntelligence(
 
   const actualSavedThisMonth = validTxs.reduce((acc, t) => {
     if (monthFilter && t.date && t.date.length >= 7 && !t.date.startsWith(monthFilter)) return acc;
+    if (String(t.subCategory || '').toLowerCase() === 'sell') return acc;
     const isInvest = String(t.type || '').toLowerCase() === 'investment';
     const isSavingsCat =
       t.category === 'Fixed Deposit' ||
@@ -1727,6 +2158,7 @@ export function getPaydayCycleIntelligence(
 
   const totalLivingSpent = validTxs.reduce((acc, t) => {
     if (monthFilter && t.date && t.date.length >= 7 && !t.date.startsWith(monthFilter)) return acc;
+    if (isTripQuarantinedExpense(t)) return acc;
     if (String(t.type || '').toLowerCase() === 'expense' && t.id !== 'tx_sample') {
       return acc + getAmountInBaseCurrency(t.amount || 0, t.currency, t.baseAmount);
     }
@@ -1738,6 +2170,14 @@ export function getPaydayCycleIntelligence(
     daysInfo.daysRemaining > 0 ? Number((remainingLivingBudget / daysInfo.daysRemaining).toFixed(2)) : 0;
   const paydayDivisor = Math.max(1, daysUntilPayday > 0 ? daysUntilPayday : daysInfo.daysRemaining);
   const paydayWindowDailyAllowance = Number((remainingLivingBudget / paydayDivisor).toFixed(2));
+
+  const envelopePlan = computePaydaySettlementEnvelope(validTxs, {
+    paydayDay: rawPayday,
+    baselineIncome,
+    savingsTargetPct,
+    investmentTargetPct,
+    referenceDate: now,
+  });
 
   let headline = '';
   let detail = '';
@@ -1773,13 +2213,12 @@ export function getPaydayCycleIntelligence(
     savingsProgressPct,
     headline,
     detail,
+    envelopePlan,
   };
 }
 
 /**
- * Computes real-time in-context category budget feedback:
- * 1. Includes `committedReserve` (unpaid recurring commitments + active installments for this category) so bills are reserved inside the category!
- * 2. When spending exceeds the category cap (or unreserved balance), automatically computes `rebalanceSuggestion` showing which other categories have unused slack to cover the difference!
+ * Computes real-time in-context category budget feedback.
  */
 export function getCategoryRealtimeBudgetStatus(
   category: string,
@@ -1809,9 +2248,10 @@ export function getCategoryRealtimeBudgetStatus(
   let todaySpentInCategory = 0;
 
   validTxs.forEach((t) => {
-    if (String(t.type || '').toLowerCase() !== 'expense' || t.id === 'tx_sample' || !t.date) return;
+    if (String(t?.type || '').toLowerCase() !== 'expense' || t?.id === 'tx_sample' || !t?.date) return;
     if (options?.ignoreTransactionId && String(t.id) === String(options.ignoreTransactionId)) return;
     if (monthFilter && t.date.length >= 7 && !t.date.startsWith(monthFilter)) return;
+    if (isTripQuarantinedExpense(t)) return;
 
     if (t.category === category) {
       const amt = getAmountInBaseCurrency(t.amount || 0, t.currency, t.baseAmount);
@@ -1822,7 +2262,6 @@ export function getCategoryRealtimeBudgetStatus(
     }
   });
 
-  // Compute unpaid bill reserve specifically for this category
   const { unpaidReserveByCategory, unpaidItemsByCategory } = getCategoryCommitmentBreakdown(validTxs, effectiveMonth);
   const committedReserve = Number((unpaidReserveByCategory.get(category) || 0).toFixed(2));
   const unpaidItems = unpaidItemsByCategory.get(category) || [];
@@ -1886,18 +2325,17 @@ export function getCategoryRealtimeBudgetStatus(
     billReserveNote = `📌 Bill Reserve in ${category}: RM ${committedReserve.toFixed(2)} reserved for upcoming bills (${names}) · Free unreserved balance: RM ${Math.max(0, unreservedRemainingAfter).toFixed(2)}.`;
   }
 
-  // If this category is over cap (or proposed spend dips into reserved bills), compute a smart cross-category rebalance plan!
   let rebalanceSuggestion: CategoryRebalanceSuggestion | undefined;
   if (isOverCapAfter || unreservedRemainingAfter < 0) {
     rebalanceSuggestion = rebalanceCategoryCapsForSpending({
       currentMonthTransactions: validTxs,
       currentCaps,
+      lockedCaps: options?.lockedCaps,
       maxLivingBudget: options?.maxLivingBudget,
       targetCategory: category,
       proposedAmount: validProposed,
       targetMonth: effectiveMonth,
       referenceDate: now,
-      lockedCaps: options?.lockedCaps,
     });
   }
 
@@ -1928,10 +2366,25 @@ export function getCategoryRealtimeBudgetStatus(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Unified Income Allocation & Dividend Accrual Isolation (Pillar 1 + Pillar 3.1)
+// ---------------------------------------------------------------------------
+
+export interface DividendAccrualSummary {
+  dividendAccrualThisMonth: number;
+  reinvestedDividendsThisMonth: number;
+  cashDividendsThisMonth: number;
+  ytdDividendTotal: number;
+  recentDividendRecords: Array<{ date: string; description: string; amountMyr: number; isReinvested: boolean }>;
+}
+
 export interface UnifiedIncomeAllocation {
   baselineIncome: number;
   isIncomeAutoDetected: boolean;
   actualIncomeThisMonth: number;
+  dividendAccrualThisMonth: number;
+  reinvestedDividendsThisMonth: number;
+  dividendSummary: DividendAccrualSummary;
   savingsTargetPct: number;
   investmentTargetPct: number;
   livingBudgetPct: number;
@@ -1947,9 +2400,29 @@ export interface UnifiedIncomeAllocation {
 }
 
 /**
+ * Detects whether a transaction is a passive dividend / distribution (ASNB, Bursa/US Stock dividend, FD interest)
+ * so it can be tracked under `Investment Return` and isolated from regular active salary income.
+ */
+export function isDividendOrDistributionTransaction(tx?: GenericTransaction | null): boolean {
+  if (!tx) return false;
+  const cat = String(tx.category || '').trim();
+  const sub = String(tx.subCategory || '').trim().toUpperCase();
+  const desc = String(tx.description || '').toLowerCase();
+  const notes = String(tx.notes || '').toLowerCase();
+
+  if (cat === 'Investment Return') return true;
+  if (sub === 'DIVIDEND' || sub === 'REINVEST') return true;
+  if (/\b(?:dividend|div|asnb\s*dist|distribution|coupon|fd\s*interest)\b|股息|分红|派息|利息收入/i.test(`${desc} ${notes}`)) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Single Source of Truth for Income Allocation across Home (Money Cockpit), Income Advisor,
- * Budget Page, and Investment Page so numbers and designs never diverge.
- * Automatically infers monthly income from recorded Income transactions if user has not manually set baselineIncome.
+ * Budget Page, and Investment Page.
+ * Isolates dividend accruals (`Investment Return`, `DIVIDEND`, `REINVEST`) so passive distributions
+ * never artificially inflate regular monthly salary income or living budget caps!
  */
 export function getUnifiedIncomeAllocation(
   allTransactions: GenericTransaction[] = [],
@@ -1963,39 +2436,73 @@ export function getUnifiedIncomeAllocation(
 ): UnifiedIncomeAllocation {
   const profile = typeof window !== 'undefined' ? getUserMoneyProfile() : null;
   const now = options?.referenceDate || new Date();
-  const currentMonthPrefix = options?.selectedMonth && /^\d{4}-\d{2}$/.test(options.selectedMonth)
-    ? options.selectedMonth
-    : getLocalDateString(now).slice(0, 7);
+  const currentMonthPrefix =
+    options?.selectedMonth && /^\d{4}-\d{2}$/.test(options.selectedMonth)
+      ? options.selectedMonth
+      : getLocalDateString(now).slice(0, 7);
+  const currentYearPrefix = currentMonthPrefix.slice(0, 4);
 
   const savedIncome =
     typeof window !== 'undefined' ? parseFloat(localStorage.getItem('cashflow_baseline_income') || '0') : 0;
 
-  // Compute actual monthly income from ledger transactions if baselineIncome is not manually configured
   const validTxs = Array.isArray(allTransactions) ? allTransactions : [];
-  const incomeByMonth = new Map<string, number>();
+  const salaryByMonth = new Map<string, number>();
   let actualIncomeThisMonth = 0;
+  let dividendAccrualThisMonth = 0;
+  let reinvestedDividendsThisMonth = 0;
+  let cashDividendsThisMonth = 0;
+  let ytdDividendTotal = 0;
+  const recentDividendRecords: DividendAccrualSummary['recentDividendRecords'] = [];
 
   for (const t of validTxs) {
-    if (String(t?.type || '').toLowerCase() !== 'income' || !t?.date || t.date.length < 7) continue;
+    if (!t?.date || t.date.length < 7) continue;
+    const typeLower = String(t.type || '').toLowerCase();
+    const subUpper = String(t.subCategory || '').toUpperCase();
     const amt = getAmountInBaseCurrency(t.amount || 0, t.currency, t.baseAmount);
     if (amt <= 0) continue;
     const m = t.date.slice(0, 7);
-    incomeByMonth.set(m, (incomeByMonth.get(m) || 0) + amt);
-    if (m === currentMonthPrefix) {
-      actualIncomeThisMonth += amt;
+
+    const isDiv = isDividendOrDistributionTransaction(t);
+    if (isDiv && (typeLower === 'income' || typeLower === 'investment' || subUpper === 'DIVIDEND' || subUpper === 'REINVEST')) {
+      const isReinvest =
+        subUpper === 'REINVEST' ||
+        /reinvest|再投资|复投|asnb/i.test(`${t.description || ''} ${t.notes || ''}`);
+      if (t.date.startsWith(currentYearPrefix)) {
+        ytdDividendTotal += amt;
+      }
+      if (m === currentMonthPrefix) {
+        dividendAccrualThisMonth += amt;
+        if (isReinvest) reinvestedDividendsThisMonth += amt;
+        else cashDividendsThisMonth += amt;
+      }
+      recentDividendRecords.push({
+        date: t.date.slice(0, 10),
+        description: t.description || t.category || 'Dividend',
+        amountMyr: Number(amt.toFixed(2)),
+        isReinvested: isReinvest,
+      });
+      continue;
+    }
+
+    if (typeLower === 'income') {
+      salaryByMonth.set(m, (salaryByMonth.get(m) || 0) + amt);
+      if (m === currentMonthPrefix) {
+        actualIncomeThisMonth += amt;
+      }
     }
   }
 
   let autoDetectedIncome = 0;
   if (actualIncomeThisMonth > 0) {
     autoDetectedIncome = actualIncomeThisMonth;
-  } else if (incomeByMonth.size > 0) {
-    const vals = Array.from(incomeByMonth.values()).sort((a, b) => a - b);
+  } else if (salaryByMonth.size > 0) {
+    const vals = Array.from(salaryByMonth.values()).sort((a, b) => a - b);
     autoDetectedIncome = vals[Math.floor(vals.length / 2)];
   }
 
   const explicitIncome = options?.baselineIncome || (savedIncome > 0 ? savedIncome : profile?.baselineIncome || 0);
-  const baselineIncome = explicitIncome > 0 ? explicitIncome : autoDetectedIncome > 0 ? Math.round(autoDetectedIncome) : 3000;
+  const baselineIncome =
+    explicitIncome > 0 ? explicitIncome : autoDetectedIncome > 0 ? Math.round(autoDetectedIncome) : 3000;
   const isIncomeAutoDetected = explicitIncome <= 0 && autoDetectedIncome > 0;
 
   const pred = predictMonthlySavingsAndInvestments(validTxs, {
@@ -2006,29 +2513,49 @@ export function getUnifiedIncomeAllocation(
     referenceDate: now,
   });
 
-  // Separate actual cash savings vs actual market investments executed this month (excluding SELL liquidations)
   let actualSavedThisMonth = 0;
-  let actualInvestedThisMonth = 0;
+  let actualInvestedThisMonth = reinvestedDividendsThisMonth;
   for (const t of validTxs) {
     if (!t?.date || !t.date.startsWith(currentMonthPrefix)) continue;
-    const subLower = String((t as any).subCategory || '').toLowerCase();
+    if (isDividendOrDistributionTransaction(t)) continue;
+    const subLower = String(t.subCategory || '').toLowerCase();
     if (subLower === 'sell') continue;
     const amt = getAmountInBaseCurrency(t.amount || 0, t.currency, t.baseAmount);
     if (amt <= 0) continue;
 
     const cat = t.category || '';
     const isInvestType = String(t.type || '').toLowerCase() === 'investment';
-    if (cat === 'Stocks & Crypto' || cat === 'ASNB / Unit Trust' || (isInvestType && !cat.includes('Savings') && cat !== 'Fixed Deposit')) {
+    if (
+      cat === 'Stocks & Crypto' ||
+      cat === 'ASNB / Unit Trust' ||
+      (isInvestType && !cat.includes('Savings') && cat !== 'Fixed Deposit')
+    ) {
       actualInvestedThisMonth += amt;
-    } else if (cat === 'Emergency Savings' || cat === 'Fixed Deposit' || cat === 'EPF / KWSP' || cat === 'Other Savings') {
+    } else if (
+      cat === 'Emergency Savings' ||
+      cat === 'Fixed Deposit' ||
+      cat === 'EPF / KWSP' ||
+      cat === 'Other Savings'
+    ) {
       actualSavedThisMonth += amt;
     }
   }
+
+  recentDividendRecords.sort((a, b) => b.date.localeCompare(a.date));
 
   return {
     baselineIncome,
     isIncomeAutoDetected,
     actualIncomeThisMonth: Number(actualIncomeThisMonth.toFixed(2)),
+    dividendAccrualThisMonth: Number(dividendAccrualThisMonth.toFixed(2)),
+    reinvestedDividendsThisMonth: Number(reinvestedDividendsThisMonth.toFixed(2)),
+    dividendSummary: {
+      dividendAccrualThisMonth: Number(dividendAccrualThisMonth.toFixed(2)),
+      reinvestedDividendsThisMonth: Number(reinvestedDividendsThisMonth.toFixed(2)),
+      cashDividendsThisMonth: Number(cashDividendsThisMonth.toFixed(2)),
+      ytdDividendTotal: Number(ytdDividendTotal.toFixed(2)),
+      recentDividendRecords: recentDividendRecords.slice(0, 10),
+    },
     savingsTargetPct: pred.savingsTargetPct,
     investmentTargetPct: pred.investmentTargetPct,
     livingBudgetPct: Math.max(0, 100 - pred.totalSavingsTargetPct),
@@ -2046,21 +2573,23 @@ export function getUnifiedIncomeAllocation(
 
 /**
  * Atomically saves Income Allocation settings AND synchronizes cashflow_monthly_budget and cashflow_category_caps
- * so Home Page, Income Advisor, and Budget Page never diverge.
+ * (while respecting lockedCaps) so Home Page, Income Advisor, and Budget Page never diverge.
  */
 export function saveUnifiedIncomeAllocation(params: {
   baselineIncome: number;
   savingsTargetPct: number;
   investmentTargetPct: number;
   allTransactions?: GenericTransaction[];
+  lockedCaps?: Record<string, boolean>;
   autoRebalanceCategoryCaps?: boolean;
+  referenceDate?: Date;
 }): UnifiedIncomeAllocation {
   const income = Math.max(0, Math.round(Number(params.baselineIncome) || 0));
   const savPct = Math.min(80, Math.max(0, Number(params.savingsTargetPct) || 0));
   const invPct = Math.min(80 - savPct, Math.max(0, Number(params.investmentTargetPct) || 0));
   const targetLivingBudget = Math.max(500, Math.round(income * ((100 - savPct - invPct) / 100)));
 
-  if (typeof window !== 'undefined') {
+  if (typeof window !== 'undefined' || typeof localStorage !== 'undefined') {
     try {
       localStorage.setItem('cashflow_baseline_income', String(income));
       localStorage.setItem('cashflow_savings_target_pct', String(savPct));
@@ -2084,7 +2613,9 @@ export function saveUnifiedIncomeAllocation(params: {
       baselineIncome: income,
       savingsTargetPct: savPct,
       investmentTargetPct: invPct,
+      lockedCaps: params.lockedCaps,
       monthlyBudgetCap: targetLivingBudget,
+      referenceDate: params.referenceDate,
     });
     const nextCaps: Record<string, number> = {};
     plan.suggestions.forEach((s) => {
@@ -2097,5 +2628,6 @@ export function saveUnifiedIncomeAllocation(params: {
     baselineIncome: income,
     savingsTargetPct: savPct,
     investmentTargetPct: invPct,
+    referenceDate: params.referenceDate,
   });
 }

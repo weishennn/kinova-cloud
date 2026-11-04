@@ -1,6 +1,12 @@
 import { getLocalDateString, getDaysInMonth } from './date-helper.ts';
 import { getAmountInBaseCurrency } from './currency.ts';
-import { isLumpSumExpense, resolveCategoryCapValue, getSavedCategoryCaps } from './category-budget-helper.ts';
+import {
+  isLumpSumExpense,
+  isTripQuarantinedExpense,
+  resolveCategoryCapValue,
+  getSavedCategoryCaps,
+  predictMonthlySavingsAndInvestments,
+} from './category-budget-helper.ts';
 import { type MinimalTransaction } from './habit-suggestions.ts';
 
 export interface ProactiveAlert {
@@ -14,6 +20,16 @@ export interface ProactiveAlert {
   actionCategory?: string;
   actionSearchTerm?: string;
   matchingTransactionIds: string[];
+}
+
+export interface SwNotificationPayload {
+  tag: string;
+  title: string;
+  body: string;
+  url: string;
+  slot: 'morning_safe_to_spend' | 'evening_meal_checkin' | 'budget_alert';
+  timestamp: number;
+  data: Record<string, unknown>;
 }
 
 const KNOWN_SUBSCRIPTION_KEYWORDS = [
@@ -31,11 +47,11 @@ const FIXED_OR_PERIODIC_CATEGORIES = new Set([
 
 /**
  * Mines transactions to discover explainable, numerical proactive alerts:
- * 1. Month-end budget overspend projection (separates fixed/lump-sum bills from daily burn rate so Day-1 rent never triggers a false 30x overspend alert!)
+ * 1. Month-end budget overspend projection (separates fixed/lump-sum bills and quarantined trip expenses from daily burn rate!)
  * 2. Subscription/recurring bill price changes (in base currency MYR)
- * 3. Category spending spikes vs trailing 3-month daily pace (only for variable/discretionary categories, or when fixed category exceeds its own monthly cap/average)
+ * 3. Category spending spikes vs trailing 3-month daily pace (excluding quarantined trip expenses)
  */
-export function generateProactiveAlerts<T extends MinimalTransaction & { baseAmount?: number }>(
+export function generateProactiveAlerts<T extends MinimalTransaction & { baseAmount?: number; tripTag?: string; tripId?: string; notes?: string }>(
   allTransactions: T[],
   budgetCap?: number,
   referenceDateStr?: string,
@@ -72,13 +88,21 @@ export function generateProactiveAlerts<T extends MinimalTransaction & { baseAmo
   const daysRemaining = Math.max(0, totalDaysInMonth - dayOfMonth);
 
   const currentMonthExpenses = allTransactions.filter(
-    (t) => String(t.type || '').toLowerCase() === 'expense' && t.date?.startsWith(currentMonthStr) && t.amount > 0
+    (t) =>
+      String(t.type || '').toLowerCase() === 'expense' &&
+      t.date?.startsWith(currentMonthStr) &&
+      t.amount > 0 &&
+      !isTripQuarantinedExpense(t)
   );
 
   const prevMonthDate = new Date(currentYear, currentMonthNum - 2, 1);
   const prevMonthStr = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`;
   const prevMonthExpenses = allTransactions.filter(
-    (t) => String(t.type || '').toLowerCase() === 'expense' && t.date?.startsWith(prevMonthStr) && t.amount > 0
+    (t) =>
+      String(t.type || '').toLowerCase() === 'expense' &&
+      t.date?.startsWith(prevMonthStr) &&
+      t.amount > 0 &&
+      !isTripQuarantinedExpense(t)
   );
 
   let currentMonthTotal = 0;
@@ -89,7 +113,7 @@ export function generateProactiveAlerts<T extends MinimalTransaction & { baseAmo
     const amt = getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount);
     currentMonthTotal += amt;
     const cat = t.category || 'Other';
-    if (isLumpSumExpense(cat, amt)) {
+    if (isLumpSumExpense(cat, amt, t)) {
       lumpSumSpent += amt;
     } else {
       dailyVariableSpent += amt;
@@ -106,7 +130,7 @@ export function generateProactiveAlerts<T extends MinimalTransaction & { baseAmo
       .toFixed(2)
   );
 
-  // 1. Month-End Overspend Projection (Lump-sum aware! Never multiplies Day-1 rent/insurance by 30!)
+  // 1. Month-End Overspend Projection (Lump-sum & Trip-Quarantine aware!)
   const baselineThreshold = budgetCap && budgetCap > 0 ? budgetCap : prevMonthTotal;
   if (dayOfMonth >= 3 && currentMonthTotal > 80 && baselineThreshold > 100) {
     const dailyVariablePace = dailyVariableSpent / dayOfMonth;
@@ -232,9 +256,7 @@ export function generateProactiveAlerts<T extends MinimalTransaction & { baseAmo
     }
   }
 
-  // 3. Category Spending Spikes
-  // Fix: Do NOT divide a one-time monthly bill (Insurance, Housing & Bills, Parents, Education) by dayOfMonth!
-  // For fixed/periodic categories, only alert if the total monthly spend exceeds trailing monthly average by >=25%.
+  // 3. Category Spending Spikes (excluding quarantined trip expenses)
   const trailingCatTotals = new Map<string, { total: number; days: number; months: number }>();
   for (let mOffset = 1; mOffset <= 3; mOffset++) {
     const pDate = new Date(currentYear, currentMonthNum - 1 - mOffset, 1);
@@ -242,7 +264,11 @@ export function generateProactiveAlerts<T extends MinimalTransaction & { baseAmo
     const pDays = getDaysInMonth(pDate.getFullYear(), pDate.getMonth() + 1);
 
     const mExpenses = allTransactions.filter(
-      (t) => String(t.type || '').toLowerCase() === 'expense' && t.date?.startsWith(pStr) && t.amount > 0
+      (t) =>
+        String(t.type || '').toLowerCase() === 'expense' &&
+        t.date?.startsWith(pStr) &&
+        t.amount > 0 &&
+        !isTripQuarantinedExpense(t)
     );
 
     const monthCatMap = new Map<string, number>();
@@ -280,7 +306,6 @@ export function generateProactiveAlerts<T extends MinimalTransaction & { baseAmo
     const catCap = resolveCategoryCapValue(cat, savedCaps, 0);
 
     if (isFixedBucket) {
-      // Compare total month spend vs historical monthly average (not daily pace!)
       const histMonthlyAvg = hist.total / Math.max(1, hist.months);
       const exceedsCap = catCap > 0 ? curr.total > catCap * 1.05 : true;
       if (curr.total >= 150 && exceedsCap && curr.total >= histMonthlyAvg * 1.25) {
@@ -320,7 +345,6 @@ export function generateProactiveAlerts<T extends MinimalTransaction & { baseAmo
       continue;
     }
 
-    // For daily/discretionary categories, wait until at least day 5 so Day 1-4 purchases don't cause false alarms
     if (dayOfMonth < 5) continue;
 
     const histDailyPace = hist.total / hist.days;
@@ -423,3 +447,159 @@ export function generateProactiveAlerts<T extends MinimalTransaction & { baseAmo
 
   return alerts;
 }
+
+/**
+ * Pillar 4.2: Builds Service Worker / Local Push Notification Payloads for:
+ * 1. Morning Safe-to-Spend Briefing (e.g. "Safe to spend today: RM 48.50")
+ * 2. Evening Unlogged Meal Check-in (if no Food & Dining expense was logged today)
+ */
+export function buildDailyNotificationPayloads<
+  T extends MinimalTransaction & { baseAmount?: number; tripTag?: string; tripId?: string; notes?: string }
+>(params: {
+  allTransactions: T[];
+  monthlyBudgetCap?: number;
+  baselineIncome?: number;
+  referenceDate?: Date;
+  language?: 'zh' | 'en' | 'ms' | 'auto';
+}): {
+  morningBriefing: SwNotificationPayload;
+  eveningMealCheckin: SwNotificationPayload | null;
+} {
+  const {
+    allTransactions = [],
+    monthlyBudgetCap = 0,
+    baselineIncome = 0,
+    referenceDate = new Date(),
+    language = 'zh',
+  } = params;
+
+  const effLang = language === 'en' || language === 'ms' ? language : 'zh';
+  const todayStr = getLocalDateString(referenceDate);
+
+  const prediction = predictMonthlySavingsAndInvestments(allTransactions, {
+    baselineIncome: baselineIncome > 0 ? baselineIncome : monthlyBudgetCap > 0 ? monthlyBudgetCap : undefined,
+    referenceDate,
+  });
+
+  const effectivePool = monthlyBudgetCap > 0 ? monthlyBudgetCap : prediction.targetLivingBudget;
+  const safeDaily = Number(prediction.safeDailyLivingAllowance.toFixed(2));
+  const unpaidReserve = Number(prediction.unpaidCommittedReserve || 0);
+  const freeRemaining = Number(Math.max(0, effectivePool - prediction.spentSoFar - unpaidReserve).toFixed(2));
+
+  const morningBriefing: SwNotificationPayload = {
+    tag: `kinova_morning_briefing_${todayStr}`,
+    slot: 'morning_safe_to_spend',
+    url: '/budget',
+    timestamp: referenceDate.getTime(),
+    title:
+      effLang === 'en'
+        ? `☀️ Today's Safe-to-Spend: RM ${safeDaily.toFixed(2)}`
+        : effLang === 'ms'
+        ? `☀️ Had Belanja Selamat Hari Ini: RM ${safeDaily.toFixed(2)}`
+        : `☀️ 今日安全可用额度：RM ${safeDaily.toFixed(2)}`,
+    body:
+      effLang === 'en'
+        ? `Free living budget remaining: RM ${freeRemaining.toFixed(0)}${
+            unpaidReserve > 0
+              ? ` (RM ${unpaidReserve.toFixed(0)} reserved for upcoming bills)`
+              : ''
+          }.`
+        : effLang === 'ms'
+        ? `Baki bajet bebas: RM ${freeRemaining.toFixed(0)}${
+            unpaidReserve > 0
+              ? ` (RM ${unpaidReserve.toFixed(0)} dikhaskan untuk bil)`
+              : ''
+          }.`
+        : `本月自由可用余额 RM ${freeRemaining.toFixed(0)}${
+            unpaidReserve > 0
+              ? `（已预留待付固定账单 RM ${unpaidReserve.toFixed(0)}）`
+              : ''
+          }，保持节奏即可稳守储蓄目标。`,
+    data: {
+      date: todayStr,
+      safeDailyBurnRemaining: safeDaily,
+      freeRemaining,
+      upcomingCommitmentsRemaining: unpaidReserve,
+    },
+  };
+
+  const todayFoodLogged = allTransactions.some(
+    (t) =>
+      String(t.type || '').toLowerCase() === 'expense' &&
+      t.date === todayStr &&
+      ((t.category || '').toLowerCase().includes('food') ||
+        (t.category || '').toLowerCase().includes('dining'))
+  );
+
+  const eveningMealCheckin: SwNotificationPayload | null = todayFoodLogged
+    ? null
+    : {
+        tag: `kinova_evening_checkin_${todayStr}`,
+        slot: 'evening_meal_checkin',
+        url: '/?quickRecord=food',
+        timestamp: referenceDate.getTime(),
+        title:
+          effLang === 'en'
+            ? `🍱 No meals logged yet today`
+            : effLang === 'ms'
+            ? `🍱 Belum ada rekod makanan hari ini`
+            : `🍱 今天还没有记录餐饮开销哦`,
+        body:
+          effLang === 'en'
+            ? `Tap to log today's lunch or dinner in 1 second (Safe daily allowance: RM ${safeDaily.toFixed(2)}).`
+            : effLang === 'ms'
+            ? `Ketik untuk merekod makan tengah hari atau malam (Had selamat: RM ${safeDaily.toFixed(2)}).`
+            : `点击即可语音或一句话补记今日午/晚餐（今日安全额度 RM ${safeDaily.toFixed(2)}）。`,
+        data: {
+          date: todayStr,
+          safeDailyBurnRemaining: safeDaily,
+        },
+      };
+
+  return {
+    morningBriefing,
+    eveningMealCheckin,
+  };
+}
+
+/**
+ * Pillar 4.2: Dispatches a deduplicated notification via the PWA Service Worker
+ * (`navigator.serviceWorker.ready`) with fallback to standard `Notification` API.
+ */
+export async function dispatchServiceWorkerBriefingNotification(
+  payload: SwNotificationPayload,
+): Promise<boolean> {
+  if (typeof window === 'undefined' || typeof Notification === 'undefined') return false;
+  if (Notification.permission !== 'granted') return false;
+
+  const dedupeKey = `cashflow_sw_notified_${payload.tag}`;
+  try {
+    if (localStorage.getItem(dedupeKey) === '1') {
+      return false; // Already shown today
+    }
+
+    if ('serviceWorker' in navigator) {
+      const registration = await navigator.serviceWorker.ready;
+      if (registration && typeof registration.showNotification === 'function') {
+        await registration.showNotification(payload.title, {
+          body: payload.body,
+          tag: payload.tag,
+          data: { url: payload.url, ...payload.data },
+        });
+        localStorage.setItem(dedupeKey, '1');
+        return true;
+      }
+    }
+
+    new Notification(payload.title, {
+      body: payload.body,
+      tag: payload.tag,
+      data: { url: payload.url, ...payload.data },
+    });
+    localStorage.setItem(dedupeKey, '1');
+    return true;
+  } catch {
+    return false;
+  }
+}
+

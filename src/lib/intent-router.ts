@@ -1,5 +1,5 @@
 /**
- * Local Intent Router for Kinova.
+ * Local Intent Router for Kinova (Master Upgrade v3).
  *
  * Runs completely locally with 0ms latency, 0 API cost, and 0 storage side-effects for:
  * 1. Session control commands: "undo", "撤回", "记错了", "padam", "tak jadi"
@@ -10,7 +10,9 @@
  * 6. Fast-path expenses: single amount + unambiguous merchant ("Shell 60", "午餐 15")
  *
  * NOTE: This function is 100% pure (called inside React useMemo on every keystroke).
- * Never perform localStorage or network writes inside routeLocalIntent!
+ * Natural-language rebalancing requests ("I overspent RM 150 on dinner, can you fix my budget?",
+ * "帮我平衡这个月的超支") return null here so they route to `kinova-assistant.ts` where full
+ * ledger transactions and `rebalance_caps` proposedAction cards are generated!
  */
 
 import { parseNaturalExpense } from './natural-expense-parser.ts';
@@ -59,19 +61,21 @@ export type LocalRouteResult =
 
 const QUESTION_OR_ADVICE_WORDS = [
   '?', '？', 'should i', 'can i', 'how much', '怎么看', '能不能', '贵不贵', '值得',
-  'worth it', 'afford', 'over budget', '超支', '税', 'sst', 'tax', 'relief',
+  'worth it', 'afford', 'over budget', 'overspent', 'rebalance', 'fix my budget',
+  'balance my budget', '超支', '平账', '平衡', '调配', '税', 'sst', 'tax', 'relief',
   '扣税', '减税', 'compare', '比较', '哪家便宜', 'cheaper', 'mana murah',
   'bila', 'boleh ke', 'kenapa', 'why', 'what is', 'analysis', '分析', '够不够', '还剩多少',
 ];
 
 const EXTENDED_REASONING_HINTS = [
   'should i', 'can i afford', 'how much', 'how many', 'worth it', 'afford', 'over budget', 'budget',
+  'overspent', 'rebalance', 'fix my budget', 'balance my budget', 'adjust my budget',
   'expense history', 'transaction history', 'what did i spend', 'what have i spent', 'my spending',
   'my expenses', 'my ledger', 'show me', 'list my', 'summary', 'summarize', 'summarise',
   'trend', 'forecast', 'compare', 'cheaper', 'cheapest', 'which store', 'expensive', 'too much',
   'tax', 'sst', 'relief', 'analysis', 'analyze', 'analyse', 'recommend', 'advice',
   'portfolio performance', 'stock analysis', 'investment advice',
-  'what about', 'how about', '怎么看', '能不能', '贵不贵', '值得', '超支', '扣税', '减税',
+  'what about', 'how about', '怎么看', '能不能', '贵不贵', '值得', '超支', '平账', '平衡', '调配', '扣税', '减税',
   '比较', '哪家', '多少', '预算', '税务', '建议', '分析', '统计', '总结', '旅行预算',
   '分期预算', '股票分析', '投资建议', 'pelaburan mana bagus', 'berapa', 'bajet', 'cukai', 'banding',
 ];
@@ -85,6 +89,13 @@ const IMAGE_REASONING_HINTS = [
 export function isQuestionOrAdviceRequest(text: string): boolean {
   const lower = text.toLowerCase().trim();
   return QUESTION_OR_ADVICE_WORDS.some((w) => lower.includes(w));
+}
+
+export function isRebalanceBudgetRequest(text: string): boolean {
+  const lower = text.toLowerCase().trim();
+  return /(?:rebalance|overspent|over\s*budget.*(?:fix|balance|adjust)|(?:fix|balance|adjust).*(?:budget|caps?|overspend)|平账|平衡.*(?:超支|预算)|(?:超支|预算).*平衡|调配.*预算|自动调整.*预算|imbangkan\s*bajet)/i.test(
+    lower
+  );
 }
 
 export function requiresExtendedReasoning(text: string, hasImage = false): boolean {
@@ -105,8 +116,8 @@ export function routeLocalIntent(
   if (!trimmed) return null;
   const lower = trimmed.toLowerCase();
 
-  // Never intercept questions or advice queries in local preference/expense fast-paths
-  if (isQuestionOrAdviceRequest(trimmed)) {
+  // Never intercept questions, advice queries, or smart rebalance requests in local fast-paths
+  if (isQuestionOrAdviceRequest(trimmed) || isRebalanceBudgetRequest(trimmed)) {
     return null;
   }
 
@@ -226,7 +237,7 @@ export function routeLocalIntent(
     }
   }
 
-  // 4c. Total Monthly budget preference (strictly anchored so "旅行预算" or "餐饮预算" never overwrite total budget!)
+  // 4c. Total Monthly budget preference
   const budgetMatch =
     trimmed.match(/^(?:set\s+)?(?:(?:my|total|overall|monthly)\s+)?budget(?:\s*(?:cap|is|set|to|：|:|\s))\s*(?:rm|myr)?\s*(\d+(?:\.\d+)?)$/i) ||
     trimmed.match(/^(?:设置|设定|把|将)?(?:我的)?(?:每月|月度|总)?预算(?:上限)?(?:\s*(?:是|设为|为|：|:|\s))\s*(?:rm|myr)?\s*(\d+(?:\.\d+)?)$/i) ||

@@ -1,37 +1,41 @@
 /**
- * Kinova Assistant Client Orchestrator.
+ * Kinova Assistant Client Orchestrator (Master Upgrade v3).
  *
  * Implements the "two speeds, one assistant" architecture:
  * 1. Fast Path (Local, 0ms, 0 API cost):
  *    - Session control (undo, repeat, correct)
- *    - Instant preferences (payday, budget, alias)
+ *    - Instant preferences (payday, budget, category cap, alias)
  *    - Clear unambiguous expenses ("Shell 60", "午餐 15") -> labeled "Quick parse"
- * 2. Assistant Path (Gemini with Thinking):
- *    - Debounced ~400ms after user stops typing
- *    - Advice, questions, judgment ("can I afford this?", "怎么看这笔")
- *    - Complex multi-part input, tax relief, trades, installments, trips
- *    - Receipt & payment screenshot interpretation
+ * 2. Assistant Path (Gemini + Deterministic CFO Autopilot):
+ *    - Receives a complete, deterministic `cashflowBriefing` on EVERY turn (anchored to `safeRefDate`).
+ *    - Supports interactive `proposedAction.type = 'rebalance_caps'` (1-Tap Rebalance Confirmation Card)
+ *      and `proposedAction.type = 'allocate_payday_envelope'` (1-Tap Payday Settlement Envelope Card).
  */
 
 import {
   isQuestionOrAdviceRequest,
+  isRebalanceBudgetRequest,
   requiresExtendedReasoning,
   routeLocalIntent,
   type LocalRouteResult,
 } from './intent-router.ts';
 import { parseNaturalExpense } from './natural-expense-parser.ts';
 import { getUserMoneyProfile, type UserMoneyProfile } from './user-money-profile.ts';
-import { getLocalDateString } from './date-helper.ts';
+import { getLocalDateString, parseLocalDate } from './date-helper.ts';
 import { getAmountInBaseCurrency } from './currency.ts';
 import {
   getSavedCategoryCaps,
+  getLockedCategoryCaps,
   resolveCategoryCapValue,
   getCategoryCommitmentBreakdown,
   predictMonthlySavingsAndInvestments,
   getPaydayCycleIntelligence,
   rebalanceCategoryCapsForSpending,
+  isTripQuarantinedExpense,
+  type CategoryRebalanceSuggestion,
+  type PaydayEnvelopeAllocationPlan,
 } from './category-budget-helper.ts';
-import { CANONICAL_EXPENSE_CATEGORIES } from './canonical-categories.ts';
+import { CANONICAL_EXPENSE_CATEGORIES, normalizeToCanonicalCategory } from './canonical-categories.ts';
 import type { AiCommand } from '../types/ai-command.ts';
 import {
   computeDeterministicLedgerFacts as computeCopilotFacts,
@@ -88,7 +92,13 @@ export function shouldUseTransactionCapturePrompt(
   hasImage: boolean,
   candidate: AssistantParserCandidate | null,
 ): boolean {
-  return Boolean(candidate && text.trim() && !hasImage && !isQuestionOrAdviceRequest(text));
+  return Boolean(
+    candidate &&
+    text.trim() &&
+    !hasImage &&
+    !isQuestionOrAdviceRequest(text) &&
+    !isRebalanceBudgetRequest(text)
+  );
 }
 
 export function updateAssistantConversation(
@@ -114,6 +124,7 @@ export interface CategoryCashflowSnapshot {
   spent: number;
   unpaidBillReserve: number;
   unreservedRemaining: number;
+  isLocked?: boolean;
   status: 'on_track' | 'tight' | 'over_cap';
 }
 
@@ -124,6 +135,7 @@ export interface PersonalCashflowBriefing {
   targetInvestmentAmount: number;
   targetLivingBudget: number;
   spentSoFar: number;
+  tripQuarantinedSpent: number;
   unpaidCommittedBillsReserve: number;
   remainingSafeLivingPool: number;
   safeDailyLivingAllowance: number;
@@ -133,6 +145,8 @@ export interface PersonalCashflowBriefing {
   categorySnapshots: CategoryCashflowSnapshot[];
   overCapCategories: string[];
   smartRebalanceSummary?: string;
+  rebalancePlan?: CategoryRebalanceSuggestion;
+  paydayEnvelopePlan?: PaydayEnvelopeAllocationPlan;
 }
 
 export interface DeterministicLedgerFacts {
@@ -140,6 +154,7 @@ export interface DeterministicLedgerFacts {
   currentMonthBudgetRemaining: number | null;
   categorySpending: Record<string, number>;
   categoryCaps?: Record<string, number>;
+  lockedCaps?: Record<string, boolean>;
   categoryMedians: Record<string, number>;
   matchedRecordCount: number;
   matchedExactSpent: number;
@@ -160,13 +175,24 @@ export interface DeterministicLedgerFacts {
   cashflowBriefing?: PersonalCashflowBriefing;
 }
 
+export type ProposedActionType =
+  | 'save_transaction'
+  | 'save_trade'
+  | 'save_installment'
+  | 'save_trip'
+  | 'set_preference'
+  | 'navigate'
+  | 'undo'
+  | 'rebalance_caps'
+  | 'allocate_payday_envelope';
+
 export interface AssistantApiResponse {
-  mode: 'record' | 'advise' | 'correct' | 'repeat' | 'undo' | 'set_preference' | 'navigate' | 'clarify' | 'unknown';
+  mode: 'record' | 'advise' | 'correct' | 'repeat' | 'undo' | 'set_preference' | 'navigate' | 'clarify' | 'rebalance' | 'unknown';
   reasoning: string;
   answer: string;
   proposedAction: {
     label: string;
-    type: 'save_transaction' | 'save_trade' | 'save_installment' | 'save_trip' | 'set_preference' | 'navigate' | 'undo';
+    type: ProposedActionType;
     payload: Record<string, unknown>;
   } | null;
   command: AiCommand | null;
@@ -196,8 +222,113 @@ export type KinovaTurnResult =
     };
 
 /**
- * Computes deterministic facts across 100% of the user's ledger transactions in base MYR.
- * Includes active categoryCaps so Gemini can answer "can I afford this?" against both category cap and monthly cap.
+ * Helper: Builds an executable `rebalance_caps` proposedAction when the user asks to rebalance
+ * their budget (e.g. "I overspent RM 150 on dinner, can you fix my budget?" or "帮我平衡这个月的超支").
+ */
+export function buildRebalanceCapsProposedAction(
+  queryText: string,
+  transactions: Array<any>,
+  profile: UserMoneyProfile,
+  today: string = getLocalDateString()
+): {
+  rebalancePlan: CategoryRebalanceSuggestion;
+  proposedAction: NonNullable<AssistantApiResponse['proposedAction']>;
+} | null {
+  const parsedRef = parseLocalDate(today);
+  const safeRefDate = !Number.isNaN(parsedRef.getTime()) ? parsedRef : new Date();
+  const currentYearMonth = today.slice(0, 7);
+  const categoryCaps = getSavedCategoryCaps();
+  const lockedCaps = getLockedCategoryCaps();
+
+  // Detect if the user mentioned a specific overspent category/amount in the sentence
+  // e.g. "I overspent RM 150 on dinner, can you fix my budget?"
+  const parsedCandidate = parseNaturalExpense(queryText);
+  const inferredCategory =
+    parsedCandidate?.category && parsedCandidate.category !== 'Other'
+      ? parsedCandidate.category
+      : normalizeToCanonicalCategory(queryText, 'Expense', queryText);
+
+  // Check if that amount is already recorded today or is a proposed/unrecorded overspend
+  const candidateAmt = parsedCandidate?.amount && parsedCandidate.amount > 0 ? parsedCandidate.amount : 0;
+  const alreadyRecordedToday =
+    candidateAmt > 0 &&
+    transactions.some(
+      (t) =>
+        t?.date === today &&
+        String(t?.type || '').toLowerCase() === 'expense' &&
+        Math.abs(getAmountInBaseCurrency(Number(t.amount) || 0, t.currency, t.baseAmount) - candidateAmt) < 0.05
+    );
+
+  const savingsPred = predictMonthlySavingsAndInvestments(transactions, {
+    baselineIncome: profile.baselineIncome || undefined,
+    savingsTargetPct: profile.savingsTargetPct,
+    investmentTargetPct: profile.investmentTargetPct,
+    selectedMonth: currentYearMonth,
+    referenceDate: safeRefDate,
+  });
+
+  // Determine target category to rebalance: explicit mentioned category, or first over-cap category
+  let targetCategory = inferredCategory && inferredCategory !== 'Other' ? inferredCategory : '';
+  if (!targetCategory) {
+    const { unpaidReserveByCategory } = getCategoryCommitmentBreakdown(transactions, currentYearMonth);
+    for (const cat of CANONICAL_EXPENSE_CATEGORIES) {
+      const cap = resolveCategoryCapValue(cat, categoryCaps, 0);
+      const spent = transactions
+        .filter(
+          (t) =>
+            String(t?.type || '').toLowerCase() === 'expense' &&
+            String(t?.date || '').startsWith(currentYearMonth) &&
+            t?.category === cat &&
+            !isTripQuarantinedExpense(t)
+        )
+        .reduce((s, t) => s + getAmountInBaseCurrency(Number(t.amount) || 0, t.currency, t.baseAmount), 0);
+      const reserve = unpaidReserveByCategory.get(cat) || 0;
+      if (spent + reserve > cap) {
+        targetCategory = cat;
+        break;
+      }
+    }
+  }
+  if (!targetCategory) targetCategory = 'Food & Dining';
+
+  const rebalancePlan = rebalanceCategoryCapsForSpending({
+    currentMonthTransactions: transactions,
+    currentCaps: categoryCaps,
+    lockedCaps,
+    maxLivingBudget: savingsPred.targetLivingBudget,
+    targetCategory,
+    proposedAmount: !alreadyRecordedToday ? candidateAmt : 0,
+    targetMonth: currentYearMonth,
+    referenceDate: safeRefDate,
+  });
+
+  if (rebalancePlan.donors.length === 0 && rebalancePlan.newTargetCap <= rebalancePlan.previousTargetCap) {
+    return null;
+  }
+
+  return {
+    rebalancePlan,
+    proposedAction: {
+      label: 'Apply New Caps',
+      type: 'rebalance_caps',
+      payload: {
+        targetCategory: rebalancePlan.targetCategory,
+        previousTargetCap: rebalancePlan.previousTargetCap,
+        newTargetCap: rebalancePlan.newTargetCap,
+        targetIncrease: Number(Math.max(0, rebalancePlan.newTargetCap - rebalancePlan.previousTargetCap).toFixed(2)),
+        deficitCovered: rebalancePlan.deficitCovered,
+        unfundedDeficit: rebalancePlan.unfundedDeficit,
+        donors: rebalancePlan.donors,
+        updatedCaps: rebalancePlan.updatedCaps,
+        summaryText: rebalancePlan.summaryText,
+      },
+    },
+  };
+}
+
+/**
+ * Computes deterministic facts AND a holistic Personal Cashflow Briefing across 100% of the user's ledger.
+ * Strictly anchors all date calculations to `today` (`safeRefDate`).
  */
 export function computeDeterministicLedgerFacts(
   transactions: Array<{
@@ -205,11 +336,14 @@ export function computeDeterministicLedgerFacts(
     date?: string;
     type?: string;
     category?: string;
+    subCategory?: string;
     description?: string;
     amount?: number;
     currency?: string;
     baseAmount?: number;
     notes?: string;
+    tripTag?: string;
+    TripTag?: string;
     receiptItems?: any[];
   }>,
   profile: UserMoneyProfile,
@@ -217,7 +351,10 @@ export function computeDeterministicLedgerFacts(
   today: string = getLocalDateString(),
   pendingReceipt?: { amount: number; merchant?: string; date?: string }
 ): DeterministicLedgerFacts {
+  const parsedRef = parseLocalDate(today);
+  const safeRefDate = !Number.isNaN(parsedRef.getTime()) ? parsedRef : new Date();
   const currentYearMonth = today.slice(0, 7);
+
   let currentMonthTotalSpent = 0;
   let actualIncomeThisMonth = 0;
   const categorySpending: Record<string, number> = {};
@@ -228,22 +365,22 @@ export function computeDeterministicLedgerFacts(
   for (const t of transactions) {
     if (!t || typeof t !== 'object') continue;
     const typeLower = String(t.type || '').toLowerCase();
-    const isExpense = typeLower === 'expense';
-    const isIncome = typeLower === 'income';
     const rawAmount = Number(t.amount) || 0;
     const baseAmount = getAmountInBaseCurrency(rawAmount, t.currency, t.baseAmount);
     const dateStr = String(t.date || '');
     const category = String(t.category || 'Other');
     const description = String(t.description || '');
 
-    if (isIncome && baseAmount > 0 && dateStr.startsWith(currentYearMonth)) {
+    if (typeLower === 'income' && baseAmount > 0 && dateStr.startsWith(currentYearMonth)) {
       actualIncomeThisMonth += baseAmount;
     }
 
-    if (isExpense && baseAmount > 0) {
+    if (typeLower === 'expense' && baseAmount > 0) {
       if (dateStr.startsWith(currentYearMonth)) {
         currentMonthTotalSpent += baseAmount;
-        categorySpending[category] = Number(((categorySpending[category] || 0) + baseAmount).toFixed(2));
+        if (!isTripQuarantinedExpense(t)) {
+          categorySpending[category] = Number(((categorySpending[category] || 0) + baseAmount).toFixed(2));
+        }
       }
 
       if (!categoryValues[category]) categoryValues[category] = [];
@@ -276,11 +413,9 @@ export function computeDeterministicLedgerFacts(
   }
 
   const categoryCaps = getSavedCategoryCaps();
+  const lockedCaps = getLockedCategoryCaps();
   const sumOfCategoryCaps = Object.values(categoryCaps).reduce((s, v) => s + (Number(v) || 0), 0);
 
-  // Build holistic PersonalCashflowBriefing so the AI Assistant understands income, bill reserves, and category caps
-  const refDate = new Date(`${today}T12:00:00Z`);
-  const safeRefDate = isNaN(refDate.getTime()) ? undefined : refDate;
   const savingsPred = predictMonthlySavingsAndInvestments(transactions, {
     baselineIncome: profile.baselineIncome || (actualIncomeThisMonth > 0 ? actualIncomeThisMonth : undefined),
     savingsTargetPct: profile.savingsTargetPct,
@@ -288,6 +423,7 @@ export function computeDeterministicLedgerFacts(
     selectedMonth: currentYearMonth,
     referenceDate: safeRefDate,
   });
+
   const paydayInfo = getPaydayCycleIntelligence(transactions, {
     paydayDay: profile.paydayDay ?? undefined,
     baselineIncome: savingsPred.baselineIncome,
@@ -295,10 +431,12 @@ export function computeDeterministicLedgerFacts(
     investmentTargetPct: savingsPred.investmentTargetPct,
     referenceDate: safeRefDate,
   });
+
   const { unpaidReserveByCategory } = getCategoryCommitmentBreakdown(transactions, currentYearMonth);
 
   const categorySnapshots: CategoryCashflowSnapshot[] = [];
   const overCapCategories: string[] = [];
+
   for (const cat of CANONICAL_EXPENSE_CATEGORIES) {
     const cap = resolveCategoryCapValue(cat, categoryCaps, 0);
     const spent = Number((categorySpending[cat] || 0).toFixed(2));
@@ -315,21 +453,30 @@ export function computeDeterministicLedgerFacts(
       spent,
       unpaidBillReserve,
       unreservedRemaining,
+      isLocked: Boolean(lockedCaps[cat]),
       status,
     });
   }
 
   let smartRebalanceSummary: string | undefined;
-  if (overCapCategories.length > 0) {
-    const rebal = rebalanceCategoryCapsForSpending({
-      currentMonthTransactions: transactions,
-      currentCaps: categoryCaps,
-      maxLivingBudget: savingsPred.targetLivingBudget,
-      targetCategory: overCapCategories[0],
-      targetMonth: currentYearMonth,
-      referenceDate: safeRefDate,
-    });
-    smartRebalanceSummary = rebal.summaryText;
+  let rebalancePlan: CategoryRebalanceSuggestion | undefined;
+  if (overCapCategories.length > 0 || (queryKeyword && isRebalanceBudgetRequest(queryKeyword))) {
+    const built = buildRebalanceCapsProposedAction(queryKeyword || '', transactions, profile, today);
+    if (built) {
+      rebalancePlan = built.rebalancePlan;
+      smartRebalanceSummary = built.rebalancePlan.summaryText;
+    } else if (overCapCategories.length > 0) {
+      rebalancePlan = rebalanceCategoryCapsForSpending({
+        currentMonthTransactions: transactions,
+        currentCaps: categoryCaps,
+        lockedCaps,
+        maxLivingBudget: savingsPred.targetLivingBudget,
+        targetCategory: overCapCategories[0],
+        targetMonth: currentYearMonth,
+        referenceDate: safeRefDate,
+      });
+      smartRebalanceSummary = rebalancePlan.summaryText;
+    }
   }
 
   const cashflowBriefing: PersonalCashflowBriefing = {
@@ -339,6 +486,7 @@ export function computeDeterministicLedgerFacts(
     targetInvestmentAmount: savingsPred.targetInvestmentAmount,
     targetLivingBudget: savingsPred.targetLivingBudget,
     spentSoFar: savingsPred.spentSoFar,
+    tripQuarantinedSpent: savingsPred.tripQuarantinedSpent || 0,
     unpaidCommittedBillsReserve: savingsPred.unpaidCommittedReserve || 0,
     remainingSafeLivingPool: Number(
       Math.max(0, savingsPred.targetLivingBudget - savingsPred.spentSoFar - (savingsPred.unpaidCommittedReserve || 0)).toFixed(2)
@@ -350,11 +498,15 @@ export function computeDeterministicLedgerFacts(
     categorySnapshots,
     overCapCategories,
     smartRebalanceSummary,
+    rebalancePlan,
+    paydayEnvelopePlan: paydayInfo.envelopePlan,
   };
 
   const effectiveMonthlyBudget =
     profile.monthlyBudgetCap && profile.monthlyBudgetCap > 0
       ? profile.monthlyBudgetCap
+      : savingsPred.targetLivingBudget > 0
+      ? savingsPred.targetLivingBudget
       : sumOfCategoryCaps > 0
       ? sumOfCategoryCaps
       : null;
@@ -426,6 +578,7 @@ export function computeDeterministicLedgerFacts(
       currentMonthBudgetRemaining !== null ? Number(currentMonthBudgetRemaining.toFixed(2)) : null,
     categorySpending,
     categoryCaps,
+    lockedCaps,
     categoryMedians,
     matchedRecordCount,
     matchedExactSpent: Number(matchedExactSpent.toFixed(2)),
@@ -474,7 +627,8 @@ export async function runKinovaTurn(
   }
 
   const allTx = options.transactions || [];
-  const useExtendedReasoning = requiresExtendedReasoning(text, Boolean(options.imageBase64));
+  const isRebalanceReq = Boolean(text && isRebalanceBudgetRequest(text));
+  const useExtendedReasoning = isRebalanceReq || requiresExtendedReasoning(text, Boolean(options.imageBase64));
   const includeLedgerContext =
     useExtendedReasoning ||
     Boolean(options.factQuery || options.pendingReceipt);
@@ -518,6 +672,8 @@ export async function runKinovaTurn(
         paydayDay: profile.paydayDay,
         monthlyBudgetCap: profile.monthlyBudgetCap,
         baselineIncome: profile.baselineIncome,
+        savingsTargetPct: profile.savingsTargetPct,
+        investmentTargetPct: profile.investmentTargetPct,
         emergencyReserve: profile.emergencyReserve,
         goals: profile.goals,
         rejectedChips: profile.rejectedChips,
@@ -547,9 +703,23 @@ export async function runKinovaTurn(
     throw new Error(responseJson.error || 'Empty response from Kinova Assistant');
   }
 
+  const assistantResult = responseJson.data as AssistantApiResponse;
+
+  // Pillar 1.1: If user requested budget rebalancing (or Gemini returned mode='rebalance')
+  // and proposedAction isn't already populated, attach the deterministic `rebalance_caps` action card!
+  if (
+    (isRebalanceReq || assistantResult.mode === 'rebalance') &&
+    (!assistantResult.proposedAction || assistantResult.proposedAction.type !== 'rebalance_caps')
+  ) {
+    const builtRebalance = buildRebalanceCapsProposedAction(text, allTx, profile, today);
+    if (builtRebalance) {
+      assistantResult.proposedAction = builtRebalance.proposedAction;
+    }
+  }
+
   return {
     source: 'assistant',
-    assistantResult: responseJson.data as AssistantApiResponse,
+    assistantResult,
     model: responseJson.model,
   };
 }

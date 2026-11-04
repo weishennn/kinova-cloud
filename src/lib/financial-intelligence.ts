@@ -1,6 +1,11 @@
 import { getLocalDateString, getDaysInMonth, parseLocalDate, getTransactionRecordedInfo } from './date-helper.ts';
 import { getAmountInBaseCurrency } from './currency.ts';
-import { isLumpSumExpense, getSavedCategoryCaps } from './category-budget-helper.ts';
+import {
+  isLumpSumExpense,
+  isTripQuarantinedExpense,
+  isDividendOrDistributionTransaction,
+  getSavedCategoryCaps,
+} from './category-budget-helper.ts';
 
 export interface RecurringCommitmentItem {
   id: string;
@@ -73,6 +78,8 @@ export interface MinimalTransactionRecord {
   merchant?: string;
   notes?: string;
   currency?: string;
+  tripTag?: string;
+  tripId?: string;
 }
 
 // -------------------------------------------------------------
@@ -131,7 +138,11 @@ export function calculateFinancialHealthScore(params: {
     (t) => String(t.type || '').toLowerCase() === 'expense' && t.date?.startsWith(currentMonthStr) && t.amount > 0
   );
   const currentIncome = transactions.filter(
-    (t) => String(t.type || '').toLowerCase() === 'income' && t.date?.startsWith(currentMonthStr) && t.amount > 0
+    (t) =>
+      String(t.type || '').toLowerCase() === 'income' &&
+      t.date?.startsWith(currentMonthStr) &&
+      t.amount > 0 &&
+      !isDividendOrDistributionTransaction(t)
   );
 
   let totalExpense = 0;
@@ -140,8 +151,14 @@ export function calculateFinancialHealthScore(params: {
 
   for (const t of currentExpenses) {
     const amt = getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount);
+    // Quarantine foreign/trip-tagged expenses from distorting domestic monthly budget pacing
+    if (isTripQuarantinedExpense(t)) {
+      lumpSumExpense += amt;
+      totalExpense += amt;
+      continue;
+    }
     totalExpense += amt;
-    if (isLumpSumExpense(t.category || 'Other', amt)) {
+    if (isLumpSumExpense(t.category || 'Other', amt, t)) {
       lumpSumExpense += amt;
     } else {
       dailyVariableExpense += amt;
@@ -218,8 +235,6 @@ export function calculateFinancialHealthScore(params: {
   }
 
   // Dimension 2: Budget Adherence / Pacing (预算执行度: 25分)
-  // Fix: If monthlyBudgetCap is not set, fall back to the sum of saved category caps.
-  // And NEVER multiply one-time lump sums (Rent/Insurance) by 30!
   let budgetScore = 20;
   let budgetStatus: HealthDimension['status'] = 'good';
   let budgetDetails =
@@ -614,9 +629,12 @@ export function predictCashflowTrajectory(params: {
     0
   );
 
-  // Exclude large one-off expenses (> RM 1,500) AND fixed bills already tracked in commitments
+  // Exclude large one-off expenses (> RM 1,500), fixed bills, AND quarantined trip expenses
   const normalizedExpenses = recentExpenses.filter(
-    (t) => getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount) <= 1500 && !isLumpSumExpense(t.category || 'Other')
+    (t) =>
+      getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount) <= 1500 &&
+      !isLumpSumExpense(t.category || 'Other', getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount), t) &&
+      !isTripQuarantinedExpense(t)
   );
   const normalizedTotal = normalizedExpenses.reduce(
     (sum, t) => sum + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount),
@@ -1171,3 +1189,408 @@ export function generateAiFinancialBriefing(
     actionableTip,
   };
 }
+
+// -------------------------------------------------------------
+// 6. 📈 Pillar 3.2: 投资组合成本基准 (FIFO / 加权平均)、已实现盈亏与资产配置偏离引擎
+// -------------------------------------------------------------
+export interface TradeExecutionRecord {
+  id: string;
+  date: string;
+  ticker: string;
+  name?: string;
+  assetType?: 'US Stock' | 'MY Stock' | 'Crypto' | 'ETF' | 'Unit Trust' | 'Fixed Deposit' | 'Cash' | 'Other';
+  side: 'buy' | 'sell' | 'dividend' | 'reinvest';
+  quantity: number;
+  unitPrice: number;
+  fee?: number;
+  currency?: string;
+  fxRateToMyr?: number;
+}
+
+export interface PositionCostBasisSummary {
+  ticker: string;
+  name: string;
+  assetType: string;
+  currency: string;
+  openQuantity: number;
+  fifoAvgCostNative: number;
+  fifoCostBasisNative: number;
+  fifoCostBasisMyr: number;
+  weightedAvgCostNative: number;
+  weightedCostBasisNative: number;
+  weightedCostBasisMyr: number;
+  realizedPnLFifoNative: number;
+  realizedPnLFifoMyr: number;
+  realizedPnLWeightedNative: number;
+  realizedPnLWeightedMyr: number;
+  cumulativeDividendsNative: number;
+  cumulativeDividendsMyr: number;
+  currentPriceNative: number;
+  marketValueNative: number;
+  marketValueMyr: number;
+  unrealizedPnLFifoNative: number;
+  unrealizedPnLFifoMyr: number;
+  unrealizedPnLPctFifo: number;
+  totalReturnWithDividendsMyr: number;
+}
+
+export interface AssetAllocationDriftItem {
+  bucket: 'Stocks & ETFs' | 'Fixed Income / ASNB / FD' | 'Crypto' | 'Cash / Emergency';
+  actualValueMyr: number;
+  actualPct: number;
+  targetPct: number;
+  driftPct: number;
+  rebalanceDeltaMyr: number;
+  status: 'on_target' | 'overweight' | 'underweight';
+  actionHint: string;
+}
+
+export interface PortfolioAnalyticsReport {
+  positions: PositionCostBasisSummary[];
+  totalCostBasisMyr: number;
+  totalMarketValueMyr: number;
+  totalUnrealizedPnLMyr: number;
+  totalRealizedPnLFifoMyr: number;
+  totalRealizedPnLWeightedMyr: number;
+  totalDividendsMyr: number;
+  allocationDrift: AssetAllocationDriftItem[];
+  maxDriftPct: number;
+  driftAlertMessage: string | null;
+}
+
+function mapAssetTypeToAllocationBucket(
+  assetType?: string,
+  ticker?: string
+): AssetAllocationDriftItem['bucket'] {
+  const t = (assetType || '').toLowerCase();
+  const sym = (ticker || '').toLowerCase();
+  if (t.includes('crypto') || ['btc', 'eth', 'sol'].includes(sym)) {
+    return 'Crypto';
+  }
+  if (
+    t.includes('fixed') ||
+    t.includes('unit trust') ||
+    t.includes('asnb') ||
+    sym.includes('asm') ||
+    sym.includes('asb') ||
+    sym.includes('fd')
+  ) {
+    return 'Fixed Income / ASNB / FD';
+  }
+  if (t.includes('cash') || t.includes('emergency')) {
+    return 'Cash / Emergency';
+  }
+  return 'Stocks & ETFs';
+}
+
+/**
+ * Computes FIFO & Weighted-Average cost basis across partial share sales,
+ * realized & unrealized P&L in native currency and MYR, dividend yield accrual,
+ * and Asset Allocation Drift against target portfolio weights.
+ */
+export function computePortfolioCostBasisAndDrift(params: {
+  trades: TradeExecutionRecord[];
+  livePrices?: Record<string, { priceNative: number; fxRateToMyr?: number }>;
+  emergencyCashMyr?: number;
+  fixedDepositAndAsnbMyr?: number;
+  targetWeightsPct?: Partial<Record<AssetAllocationDriftItem['bucket'], number>>;
+  driftThresholdPct?: number;
+  language?: 'zh' | 'en' | 'ms' | 'auto';
+}): PortfolioAnalyticsReport {
+  const {
+    trades = [],
+    livePrices = {},
+    emergencyCashMyr = 0,
+    fixedDepositAndAsnbMyr = 0,
+    targetWeightsPct = {},
+    driftThresholdPct = 5,
+    language,
+  } = params;
+
+  const effLang = resolveIntelligenceLanguage(language);
+
+  const defaultTargets: Record<AssetAllocationDriftItem['bucket'], number> = {
+    'Stocks & ETFs': targetWeightsPct['Stocks & ETFs'] ?? 50,
+    'Fixed Income / ASNB / FD': targetWeightsPct['Fixed Income / ASNB / FD'] ?? 25,
+    Crypto: targetWeightsPct['Crypto'] ?? 5,
+    'Cash / Emergency': targetWeightsPct['Cash / Emergency'] ?? 20,
+  };
+
+  // Group trades by ticker and sort chronologically
+  const byTicker = new Map<string, TradeExecutionRecord[]>();
+  for (const trade of trades) {
+    const ticker = String(trade.ticker || '').trim().toUpperCase();
+    if (!ticker) continue;
+    if (!byTicker.has(ticker)) byTicker.set(ticker, []);
+    byTicker.get(ticker)!.push(trade);
+  }
+
+  const positions: PositionCostBasisSummary[] = [];
+
+  for (const [ticker, tickerTrades] of byTicker.entries()) {
+    const sorted = [...tickerTrades].sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+    const first = sorted[0];
+    const currency = String(first.currency || (ticker.endsWith('.KL') ? 'MYR' : 'USD')).toUpperCase();
+    const assetType = first.assetType || (ticker.endsWith('.KL') ? 'MY Stock' : 'US Stock');
+    const name = first.name || ticker;
+
+    // FIFO queue of open lots: { qty, unitCostNative, fxRateToMyr }
+    const fifoLots: Array<{ qty: number; unitCostNative: number; fxRate: number }> = [];
+
+    // Weighted average state
+    let weightedQty = 0;
+    let weightedTotalCostNative = 0;
+    let weightedTotalCostMyr = 0;
+
+    let realizedFifoNative = 0;
+    let realizedFifoMyr = 0;
+    let realizedWeightedNative = 0;
+    let realizedWeightedMyr = 0;
+    let cumulativeDividendsNative = 0;
+    let cumulativeDividendsMyr = 0;
+    let lastKnownPriceNative = first.unitPrice || 0;
+    let lastKnownFx = first.fxRateToMyr && first.fxRateToMyr > 0 ? first.fxRateToMyr : currency === 'MYR' ? 1 : 4.4;
+
+    for (const tr of sorted) {
+      const qty = Math.max(0, Number(tr.quantity) || 0);
+      const price = Math.max(0, Number(tr.unitPrice) || 0);
+      const fee = Math.max(0, Number(tr.fee) || 0);
+      const fx = tr.fxRateToMyr && tr.fxRateToMyr > 0 ? tr.fxRateToMyr : lastKnownFx;
+      if (price > 0) lastKnownPriceNative = price;
+      lastKnownFx = fx;
+
+      if (tr.side === 'dividend') {
+        const divAmtNative = qty > 0 && price > 0 ? qty * price - fee : Math.max(0, price - fee);
+        cumulativeDividendsNative += divAmtNative;
+        cumulativeDividendsMyr += divAmtNative * fx;
+        continue;
+      }
+
+      if (tr.side === 'buy' || tr.side === 'reinvest') {
+        if (qty <= 0) continue;
+        const totalBuyCostNative = qty * price + fee;
+        const effectiveUnitCost = totalBuyCostNative / qty;
+        fifoLots.push({ qty, unitCostNative: effectiveUnitCost, fxRate: fx });
+
+        weightedQty += qty;
+        weightedTotalCostNative += totalBuyCostNative;
+        weightedTotalCostMyr += totalBuyCostNative * fx;
+
+        if (tr.side === 'reinvest') {
+          cumulativeDividendsNative += totalBuyCostNative;
+          cumulativeDividendsMyr += totalBuyCostNative * fx;
+        }
+        continue;
+      }
+
+      if (tr.side === 'sell' && qty > 0) {
+        const netProceedsNative = Math.max(0, qty * price - fee);
+        const netProceedsPerShare = netProceedsNative / qty;
+
+        // 1. FIFO lot consumption
+        let remainingToSell = qty;
+        let fifoCostSoldNative = 0;
+        let fifoCostSoldMyr = 0;
+        while (remainingToSell > 1e-8 && fifoLots.length > 0) {
+          const head = fifoLots[0];
+          const matched = Math.min(remainingToSell, head.qty);
+          fifoCostSoldNative += matched * head.unitCostNative;
+          fifoCostSoldMyr += matched * head.unitCostNative * head.fxRate;
+          head.qty -= matched;
+          remainingToSell -= matched;
+          if (head.qty <= 1e-8) {
+            fifoLots.shift();
+          }
+        }
+        const matchedSellQty = qty - remainingToSell;
+        const matchedProceedsNative = matchedSellQty * netProceedsPerShare;
+        realizedFifoNative += matchedProceedsNative - fifoCostSoldNative;
+        realizedFifoMyr += matchedProceedsNative * fx - fifoCostSoldMyr;
+
+        // 2. Weighted Average consumption
+        if (weightedQty > 1e-8) {
+          const sellFraction = Math.min(1, qty / weightedQty);
+          const wCostSoldNative = weightedTotalCostNative * sellFraction;
+          const wCostSoldMyr = weightedTotalCostMyr * sellFraction;
+          realizedWeightedNative += netProceedsNative - wCostSoldNative;
+          realizedWeightedMyr += netProceedsNative * fx - wCostSoldMyr;
+
+          weightedQty = Math.max(0, weightedQty - qty);
+          weightedTotalCostNative = Math.max(0, weightedTotalCostNative - wCostSoldNative);
+          weightedTotalCostMyr = Math.max(0, weightedTotalCostMyr - wCostSoldMyr);
+        }
+      }
+    }
+
+    const openQuantity = Number(fifoLots.reduce((s, l) => s + l.qty, 0).toFixed(6));
+    const fifoCostBasisNative = Number(
+      fifoLots.reduce((s, l) => s + l.qty * l.unitCostNative, 0).toFixed(2)
+    );
+    const fifoCostBasisMyr = Number(
+      fifoLots.reduce((s, l) => s + l.qty * l.unitCostNative * l.fxRate, 0).toFixed(2)
+    );
+    const fifoAvgCostNative = openQuantity > 0 ? Number((fifoCostBasisNative / openQuantity).toFixed(4)) : 0;
+
+    const weightedCostBasisNative = Number(weightedTotalCostNative.toFixed(2));
+    const weightedCostBasisMyr = Number(weightedTotalCostMyr.toFixed(2));
+    const weightedAvgCostNative =
+      weightedQty > 0 ? Number((weightedTotalCostNative / weightedQty).toFixed(4)) : 0;
+
+    const liveOverride = livePrices[ticker];
+    const currentPriceNative = liveOverride?.priceNative ?? lastKnownPriceNative;
+    const currentFx = liveOverride?.fxRateToMyr ?? lastKnownFx;
+
+    const marketValueNative = Number((openQuantity * currentPriceNative).toFixed(2));
+    const marketValueMyr = Number((marketValueNative * currentFx).toFixed(2));
+    const unrealizedPnLFifoNative = Number((marketValueNative - fifoCostBasisNative).toFixed(2));
+    const unrealizedPnLFifoMyr = Number((marketValueMyr - fifoCostBasisMyr).toFixed(2));
+    const unrealizedPnLPctFifo =
+      fifoCostBasisNative > 0 ? Number(((unrealizedPnLFifoNative / fifoCostBasisNative) * 100).toFixed(2)) : 0;
+
+    const totalReturnWithDividendsMyr = Number(
+      (unrealizedPnLFifoMyr + realizedFifoMyr + cumulativeDividendsMyr).toFixed(2)
+    );
+
+    positions.push({
+      ticker,
+      name,
+      assetType,
+      currency,
+      openQuantity,
+      fifoAvgCostNative,
+      fifoCostBasisNative,
+      fifoCostBasisMyr,
+      weightedAvgCostNative,
+      weightedCostBasisNative,
+      weightedCostBasisMyr,
+      realizedPnLFifoNative: Number(realizedFifoNative.toFixed(2)),
+      realizedPnLFifoMyr: Number(realizedFifoMyr.toFixed(2)),
+      realizedPnLWeightedNative: Number(realizedWeightedNative.toFixed(2)),
+      realizedPnLWeightedMyr: Number(realizedWeightedMyr.toFixed(2)),
+      cumulativeDividendsNative: Number(cumulativeDividendsNative.toFixed(2)),
+      cumulativeDividendsMyr: Number(cumulativeDividendsMyr.toFixed(2)),
+      currentPriceNative,
+      marketValueNative,
+      marketValueMyr,
+      unrealizedPnLFifoNative,
+      unrealizedPnLFifoMyr,
+      unrealizedPnLPctFifo,
+      totalReturnWithDividendsMyr,
+    });
+  }
+
+  const totalCostBasisMyr = Number(positions.reduce((s, p) => s + p.fifoCostBasisMyr, 0).toFixed(2));
+  const totalPositionsMarketValueMyr = positions.reduce((s, p) => s + p.marketValueMyr, 0);
+  const totalMarketValueMyr = Number(
+    (totalPositionsMarketValueMyr + Math.max(0, emergencyCashMyr) + Math.max(0, fixedDepositAndAsnbMyr)).toFixed(2)
+  );
+  const totalUnrealizedPnLMyr = Number(positions.reduce((s, p) => s + p.unrealizedPnLFifoMyr, 0).toFixed(2));
+  const totalRealizedPnLFifoMyr = Number(positions.reduce((s, p) => s + p.realizedPnLFifoMyr, 0).toFixed(2));
+  const totalRealizedPnLWeightedMyr = Number(positions.reduce((s, p) => s + p.realizedPnLWeightedMyr, 0).toFixed(2));
+  const totalDividendsMyr = Number(positions.reduce((s, p) => s + p.cumulativeDividendsMyr, 0).toFixed(2));
+
+  // Bucket actual values
+  const bucketTotals: Record<AssetAllocationDriftItem['bucket'], number> = {
+    'Stocks & ETFs': 0,
+    'Fixed Income / ASNB / FD': Math.max(0, fixedDepositAndAsnbMyr),
+    Crypto: 0,
+    'Cash / Emergency': Math.max(0, emergencyCashMyr),
+  };
+
+  for (const pos of positions) {
+    if (pos.marketValueMyr <= 0) continue;
+    const bucket = mapAssetTypeToAllocationBucket(pos.assetType, pos.ticker);
+    bucketTotals[bucket] += pos.marketValueMyr;
+  }
+
+  const bucketsOrder: AssetAllocationDriftItem['bucket'][] = [
+    'Stocks & ETFs',
+    'Fixed Income / ASNB / FD',
+    'Crypto',
+    'Cash / Emergency',
+  ];
+
+  const allocationDrift: AssetAllocationDriftItem[] = bucketsOrder.map((bucket) => {
+    const actualValueMyr = Number(bucketTotals[bucket].toFixed(2));
+    const actualPct = totalMarketValueMyr > 0 ? Number(((actualValueMyr / totalMarketValueMyr) * 100).toFixed(1)) : 0;
+    const targetPct = defaultTargets[bucket];
+    const driftPct = Number((actualPct - targetPct).toFixed(1));
+    const targetValueMyr = (totalMarketValueMyr * targetPct) / 100;
+    const rebalanceDeltaMyr = Number((targetValueMyr - actualValueMyr).toFixed(2));
+
+    let status: AssetAllocationDriftItem['status'] = 'on_target';
+    let actionHint =
+      effLang === 'en'
+        ? 'Within target band'
+        : effLang === 'ms'
+        ? 'Dalam julat sasaran'
+        : '处于目标配置区间内';
+
+    if (driftPct >= driftThresholdPct) {
+      status = 'overweight';
+      actionHint =
+        effLang === 'en'
+          ? `Overweight by +${driftPct.toFixed(1)}% · Trim or pause new buys (~RM ${Math.abs(rebalanceDeltaMyr).toFixed(0)})`
+          : effLang === 'ms'
+          ? `Melebihi sasaran +${driftPct.toFixed(1)}% · Kurangkan (~RM ${Math.abs(rebalanceDeltaMyr).toFixed(0)})`
+          : `超配 +${driftPct.toFixed(1)}% · 建议暂停追高或减仓约 RM ${Math.abs(rebalanceDeltaMyr).toFixed(0)}`;
+    } else if (driftPct <= -driftThresholdPct) {
+      status = 'underweight';
+      actionHint =
+        effLang === 'en'
+          ? `Underweight by ${driftPct.toFixed(1)}% · Top up ~RM ${Math.abs(rebalanceDeltaMyr).toFixed(0)}`
+          : effLang === 'ms'
+          ? `Kurang ${driftPct.toFixed(1)}% · Tambah ~RM ${Math.abs(rebalanceDeltaMyr).toFixed(0)}`
+          : `低配 ${driftPct.toFixed(1)}% · 建议下次定投优先补仓约 RM ${Math.abs(rebalanceDeltaMyr).toFixed(0)}`;
+    }
+
+    return {
+      bucket,
+      actualValueMyr,
+      actualPct,
+      targetPct,
+      driftPct,
+      rebalanceDeltaMyr,
+      status,
+      actionHint,
+    };
+  });
+
+  const maxDriftItem = [...allocationDrift].sort((a, b) => Math.abs(b.driftPct) - Math.abs(a.driftPct))[0];
+  const maxDriftPct = maxDriftItem ? Number(Math.abs(maxDriftItem.driftPct).toFixed(1)) : 0;
+
+  let driftAlertMessage: string | null = null;
+  if (totalMarketValueMyr > 0 && maxDriftItem && Math.abs(maxDriftItem.driftPct) >= driftThresholdPct) {
+    const overItem = allocationDrift.find((d) => d.status === 'overweight');
+    const underItem = allocationDrift.find((d) => d.status === 'underweight');
+    if (effLang === 'en') {
+      driftAlertMessage = `Portfolio drift alert: ${
+        overItem ? `${overItem.bucket} is +${overItem.driftPct.toFixed(1)}% overweight` : ''
+      }${overItem && underItem ? ' while ' : ''}${
+        underItem ? `${underItem.bucket} is ${underItem.driftPct.toFixed(1)}% underweight` : ''
+      }. Direct your next monthly contribution to rebalance.`;
+    } else if (effLang === 'ms') {
+      driftAlertMessage = `Amaran sisihan portfolio: ${maxDriftItem.bucket} menyimpang ${maxDriftItem.driftPct > 0 ? '+' : ''}${maxDriftItem.driftPct.toFixed(1)}% daripada sasaran.`;
+    } else {
+      driftAlertMessage = `资产配置偏离提醒：${
+        overItem ? `「${overItem.bucket}」较目标超配 +${overItem.driftPct.toFixed(1)}%` : ''
+      }${overItem && underItem ? '，而' : ''}${
+        underItem ? `「${underItem.bucket}」低配 ${underItem.driftPct.toFixed(1)}%（差额约 RM ${Math.abs(underItem.rebalanceDeltaMyr).toFixed(0)}）` : ''
+      }，建议将下月新增定投优先拨入低配资产。`;
+    }
+  }
+
+  return {
+    positions,
+    totalCostBasisMyr,
+    totalMarketValueMyr,
+    totalUnrealizedPnLMyr,
+    totalRealizedPnLFifoMyr,
+    totalRealizedPnLWeightedMyr,
+    totalDividendsMyr,
+    allocationDrift,
+    maxDriftPct,
+    driftAlertMessage,
+  };
+}
+
