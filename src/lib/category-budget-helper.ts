@@ -9,15 +9,15 @@ export interface CategoryBudgetCap {
 }
 
 export const DEFAULT_CATEGORY_CAPS: Record<string, number> = {
-  'Food & Dining': 600,
+  'Food & Dining': 900,
   'Housing & Bills': 500,
-  'Insurance': 250,
-  'Transport': 150,
-  'Education': 100,
-  'Health': 100,
-  'Shopping': 100,
-  'Sport': 50,
-  'Entertainment': 50,
+  'Insurance': 200,
+  'Transport': 200,
+  'Shopping': 150,
+  'Sport': 150,
+  'Health': 80,
+  'Entertainment': 80,
+  'Education': 50,
   'Gift': 50,
   'Other': 50,
   'Parents': 0,
@@ -110,7 +110,7 @@ export function getSavedCategoryCaps(): Record<string, number> {
           }
         }
         if (Object.keys(sanitized).length > 0) {
-          return sanitized;
+          return { ...DEFAULT_CATEGORY_CAPS, ...sanitized };
         }
       }
     }
@@ -1644,85 +1644,252 @@ export function isLumpSumExpense(
  * Scales or trims a record of category caps so that their sum is strictly <= maxLivingBudget (Income - Savings).
  * Strictly preserves explicit 0 caps and user-locked caps (`lockedCaps`).
  */
+export interface BudgetCategoryRowItem {
+  category: string;
+  cap: number;
+  spent: number;
+  unpaidBillReserve: number;
+  unreservedRemaining: number;
+  spentPercent: number;
+  reservePercent: number;
+  dailyAllowance: number;
+  isDailyCategory: boolean;
+  isLocked: boolean;
+  isOverCap: boolean;
+  unpaidBills: Array<{ name: string; amount: number; kind: 'recurring' | 'installment' }>;
+}
+
+/**
+ * Always returns all 12 canonical expense categories (plus any custom category in caps/transactions)
+ * so the Budget Page NEVER hides unspent categories (like Housing & Bills, Insurance, Transport)
+ * at the start of the month!
+ */
+export function getAllBudgetCategoryRows(
+  currentMonthTransactions: GenericTransaction[] = [],
+  options?: {
+    caps?: Record<string, number>;
+    lockedCaps?: Record<string, boolean>;
+    targetMonth?: string;
+    referenceDate?: Date;
+  }
+): BudgetCategoryRowItem[] {
+  const now = options?.referenceDate || new Date();
+  const defaultMonthPrefix = options?.targetMonth || getLocalDateString(now).slice(0, 7);
+  const validTxs = Array.isArray(currentMonthTransactions) ? currentMonthTransactions : [];
+  const monthFilter = resolveEffectiveMonthFilter(validTxs, defaultMonthPrefix, options?.targetMonth);
+  const effectiveMonth = monthFilter || defaultMonthPrefix;
+  const daysInfo = getMonthDaysInfo(effectiveMonth, now);
+
+  const savedCaps = options?.caps ? { ...DEFAULT_CATEGORY_CAPS, ...options.caps } : getSavedCategoryCaps();
+  const locked = options?.lockedCaps || getLockedCategoryCaps();
+  const { unpaidReserveByCategory, unpaidItemsByCategory } = getCategoryCommitmentBreakdown(
+    validTxs,
+    effectiveMonth
+  );
+
+  const spentByCat = new Map<string, number>();
+  for (const t of validTxs) {
+    if (String(t?.type || '').toLowerCase() !== 'expense' || t?.id === 'tx_sample' || !t?.date) continue;
+    if (monthFilter && t.date.length >= 7 && !t.date.startsWith(monthFilter)) continue;
+    if (isTripQuarantinedExpense(t)) continue;
+    const cat = t.category || 'Other';
+    const amt = getAmountInBaseCurrency(t.amount || 0, t.currency, t.baseAmount);
+    if (amt > 0) {
+      spentByCat.set(cat, (spentByCat.get(cat) || 0) + amt);
+    }
+  }
+
+  const allCategoryNames = Array.from(
+    new Set([
+      ...CANONICAL_EXPENSE_CATEGORIES,
+      ...Object.keys(savedCaps),
+      ...Array.from(spentByCat.keys()),
+      ...Array.from(unpaidReserveByCategory.keys()),
+    ])
+  );
+
+  const rows: BudgetCategoryRowItem[] = allCategoryNames.map((category) => {
+    const cap = resolveCategoryCapValue(category, savedCaps, DEFAULT_CATEGORY_CAPS[category] ?? 50);
+    const spent = Number((spentByCat.get(category) || 0).toFixed(2));
+    const unpaidBillReserve = Number((unpaidReserveByCategory.get(category) || 0).toFixed(2));
+    const unreservedRemaining = Number(Math.max(0, cap - spent - unpaidBillReserve).toFixed(2));
+    const spentPercent = cap > 0 ? Math.min(100, Number(((spent / cap) * 100).toFixed(1))) : spent > 0 ? 100 : 0;
+    const reservePercent =
+      cap > 0
+        ? Math.min(Math.max(0, 100 - spentPercent), Number(((unpaidBillReserve / cap) * 100).toFixed(1)))
+        : 0;
+    const dailyAllowance =
+      daysInfo.daysRemaining > 0 ? Number((unreservedRemaining / daysInfo.daysRemaining).toFixed(2)) : 0;
+
+    return {
+      category,
+      cap,
+      spent,
+      unpaidBillReserve,
+      unreservedRemaining,
+      spentPercent,
+      reservePercent,
+      dailyAllowance,
+      isDailyCategory: isDailyCategory(category),
+      isLocked: Boolean(locked[category]),
+      isOverCap: cap > 0 ? spent + unpaidBillReserve > cap : spent + unpaidBillReserve > 0,
+      unpaidBills: unpaidItemsByCategory.get(category) || [],
+    };
+  });
+
+  // Sort order:
+  // 1. Categories with active spend or unpaid bill reserves (or Food & Dining / Housing & Bills)
+  // 2. Categories with positive cap > 0
+  // 3. Categories explicitly set to cap === 0 and spent === 0 at the bottom
+  const priorityOrder: Record<string, number> = {
+    'Food & Dining': 1,
+    'Housing & Bills': 2,
+    Transport: 3,
+    Sport: 4,
+    Insurance: 5,
+    Shopping: 6,
+    Parents: 7,
+    Health: 8,
+    Entertainment: 9,
+    Education: 10,
+    Gift: 11,
+    Other: 12,
+  };
+
+  return rows.sort((a, b) => {
+    const aActive = a.spent > 0 || a.unpaidBillReserve > 0 ? 1 : 0;
+    const bActive = b.spent > 0 || b.unpaidBillReserve > 0 ? 1 : 0;
+    if (aActive !== bActive) return bActive - aActive;
+    const aHasCap = a.cap > 0 ? 1 : 0;
+    const bHasCap = b.cap > 0 ? 1 : 0;
+    if (aHasCap !== bHasCap) return bHasCap - aHasCap;
+    return (priorityOrder[a.category] ?? 99) - (priorityOrder[b.category] ?? 99);
+  });
+}
+
+/**
+ * Scales or trims a record of category caps so that their sum is strictly <= maxLivingBudget (Income - Savings)
+ * WITHOUT blindly slashing Food & Dining (e.g. down to RM 663!) or active Sport habits!
+ * Uses Priority Waterfall Trimming:
+ * 1. Trims idle/optional categories (`Other`, `Gift`, `Education`, `Entertainment`, `Health`) first.
+ * 2. Protects `Food & Dining` (at >= RM 900 when living budget >= RM 1,800) and `Sport` (at >= RM 150) until all non-essential slack is exhausted.
+ * 3. Strictly preserves explicit 0 caps, user-locked caps (`lockedCaps`), and clean RM 10 multiples.
+ */
 export function fitCapsToLivingBudget(
   caps: Record<string, number>,
   maxLivingBudget: number,
-  lockedCaps?: Record<string, boolean>
+  lockedCaps?: Record<string, boolean>,
+  currentMonthTransactions: GenericTransaction[] = []
 ): Record<string, number> {
   const locked = lockedCaps || getLockedCategoryCaps();
+  const mergedInput = Object.keys(caps).length > 0 ? { ...DEFAULT_CATEGORY_CAPS, ...caps } : { ...DEFAULT_CATEGORY_CAPS };
   const result: Record<string, number> = {};
-  const keys = Object.keys(caps).length > 0 ? Object.keys(caps) : Array.from(CANONICAL_EXPENSE_CATEGORIES);
+  const keys = Object.keys(mergedInput);
+
+  // Compute current month spent + unpaid bill reserves so Auto-Fit never cuts below what you already spent!
+  const currentMonthPrefix = getLocalDateString().slice(0, 7);
+  const { unpaidReserveByCategory } = getCategoryCommitmentBreakdown(currentMonthTransactions, currentMonthPrefix);
+  const spentByCat = new Map<string, number>();
+  for (const t of Array.isArray(currentMonthTransactions) ? currentMonthTransactions : []) {
+    if (String(t?.type || '').toLowerCase() !== 'expense' || t?.id === 'tx_sample') continue;
+    if (t?.date && t.date.length >= 7 && !t.date.startsWith(currentMonthPrefix)) continue;
+    if (isTripQuarantinedExpense(t)) continue;
+    const cat = t.category || 'Other';
+    const amt = getAmountInBaseCurrency(t.amount || 0, t.currency, t.baseAmount);
+    if (amt > 0) spentByCat.set(cat, (spentByCat.get(cat) || 0) + amt);
+  }
 
   keys.forEach((cat) => {
-    const val = Number(caps[cat]);
-    result[cat] = Number.isFinite(val) && val >= 0 ? val : 0;
+    const val = Number(mergedInput[cat]);
+    const cleanVal = Number.isFinite(val) && val >= 0 ? Math.round(val / 10) * 10 : 0;
+    const floorNeeded = Math.ceil(((spentByCat.get(cat) || 0) + (unpaidReserveByCategory.get(cat) || 0)) / 10) * 10;
+    result[cat] = locked[cat] ? (Number.isFinite(val) && val >= 0 ? val : 0) : Math.max(cleanVal, floorNeeded);
   });
+
+  // If Food & Dining was previously squashed (e.g. RM 663) and not locked, restore its healthy target before fitting
+  if (!locked['Food & Dining'] && result['Food & Dining'] > 0 && result['Food & Dining'] < 900 && maxLivingBudget >= 1800) {
+    result['Food & Dining'] = 900;
+  }
+  if (!locked['Sport'] && result['Sport'] > 0 && result['Sport'] < 150 && (spentByCat.get('Sport') || 0) > 0) {
+    result['Sport'] = Math.max(150, result['Sport']);
+  }
 
   const currentSum = Object.values(result).reduce((sum, v) => sum + v, 0);
   if (currentSum <= maxLivingBudget && currentSum > 0) return result;
 
-  const fixedCategories = new Set(['Insurance', ...Object.keys(locked).filter((k) => locked[k])]);
-  let fixedSum = 0;
-  fixedCategories.forEach((cat) => {
-    if (result[cat]) fixedSum += result[cat];
-  });
+  let excess = currentSum - maxLivingBudget;
 
-  if (fixedSum >= maxLivingBudget) {
-    const unlockedKeys = keys.filter((k) => !locked[k]);
-    unlockedKeys.forEach((cat) => {
-      result[cat] = 0;
-    });
-  } else {
-    const availableForFlexible = maxLivingBudget - fixedSum;
-    const flexibleSum = Object.entries(result)
-      .filter(([cat]) => !fixedCategories.has(cat))
-      .reduce((sum, [, v]) => sum + v, 0);
-
-    if (flexibleSum > 0) {
-      const scale = availableForFlexible / flexibleSum;
-      keys.forEach((cat) => {
-        if (!fixedCategories.has(cat)) {
-          result[cat] = Math.max(0, Math.floor((result[cat] * scale) / 10) * 10);
-        }
-      });
+  // Protected floors for each category during Priority Waterfall Trimming:
+  const getProtectedFloor = (cat: string, stage: 1 | 2 | 3): number => {
+    const hardSpendFloor = Math.ceil(((spentByCat.get(cat) || 0) + (unpaidReserveByCategory.get(cat) || 0)) / 10) * 10;
+    if (stage === 1) {
+      // Stage 1: Protect Food & Dining, Sport, Transport, Housing & Bills, Insurance; cut idle optional buckets down to hardSpendFloor
+      if (cat === 'Food & Dining') return Math.max(hardSpendFloor, maxLivingBudget >= 1800 ? 900 : 650);
+      if (cat === 'Sport') return Math.max(hardSpendFloor, 150);
+      if (cat === 'Transport') return Math.max(hardSpendFloor, 150);
+      if (cat === 'Housing & Bills') return Math.max(hardSpendFloor, 400);
+      if (cat === 'Insurance') return Math.max(hardSpendFloor, 150);
+      if (cat === 'Shopping') return Math.max(hardSpendFloor, 80);
+      return hardSpendFloor; // Other, Gift, Education, Entertainment, Health, Parents can be trimmed to hardSpendFloor (0 if unspent)
     }
+    if (stage === 2) {
+      // Stage 2: Trim uncommitted Insurance / Housing / Shopping / Transport slack before touching Food & Dining or Sport
+      if (cat === 'Food & Dining') return Math.max(hardSpendFloor, maxLivingBudget >= 1800 ? 850 : 600);
+      if (cat === 'Sport') return Math.max(hardSpendFloor, 120);
+      return hardSpendFloor;
+    }
+    // Stage 3: Final mathematical guarantee down to hardSpendFloor (or 0 if budget is tiny)
+    return 0;
+  };
+
+  const trimPass = (order: string[], stage: 1 | 2 | 3) => {
+    for (const cat of order) {
+      if (locked[cat] || excess <= 0) continue;
+      if (!(cat in result)) continue;
+      const floor = getProtectedFloor(cat, stage);
+      if (result[cat] > floor) {
+        const availableCut = result[cat] - floor;
+        const cut = Math.min(availableCut, Math.ceil(excess / 10) * 10);
+        const actualCut = Math.min(availableCut, cut);
+        result[cat] = Math.max(floor, result[cat] - actualCut);
+        excess = Object.values(result).reduce((s, v) => s + v, 0) - maxLivingBudget;
+      }
+    }
+  };
+
+  // Stage 1: Trim idle optional categories first
+  trimPass(
+    ['Other', 'Gift', 'Education', 'Entertainment', 'Health', 'Parents', 'Shopping'],
+    1
+  );
+
+  // Stage 2: Trim uncommitted fixed/trend slack if still over maxLivingBudget
+  if (excess > 0) {
+    trimPass(
+      ['Insurance', 'Shopping', 'Transport', 'Housing & Bills', 'Sport', 'Food & Dining'],
+      2
+    );
   }
 
-  const adjustedSum = Object.values(result).reduce((sum, v) => sum + v, 0);
-  if (adjustedSum > maxLivingBudget) {
-    let excess = adjustedSum - maxLivingBudget;
-    const trimOrder = [
-      'Other',
-      'Gift',
-      'Entertainment',
-      'Shopping',
-      'Sport',
-      'Education',
-      'Health',
-      'Transport',
-      'Housing & Bills',
-      'Food & Dining',
-    ];
-    for (const cat of trimOrder) {
-      if (locked[cat]) continue;
-      if (result[cat] > 0 && excess > 0) {
-        const cut = Math.min(result[cat], excess);
-        result[cat] -= cut;
-        excess -= cut;
-        if (excess <= 0) break;
-      }
-    }
-    if (excess > 0) {
-      for (const cat of Object.keys(result)) {
-        if (locked[cat]) continue;
-        if (result[cat] > 0 && excess > 0) {
-          const cut = Math.min(result[cat], excess);
-          result[cat] -= cut;
-          excess -= cut;
-          if (excess <= 0) break;
-        }
-      }
-    }
+  // Stage 3: Final guarantee so sum is strictly <= maxLivingBudget
+  if (excess > 0) {
+    trimPass(
+      [
+        'Other',
+        'Gift',
+        'Education',
+        'Entertainment',
+        'Health',
+        'Parents',
+        'Insurance',
+        'Shopping',
+        'Transport',
+        'Housing & Bills',
+        'Sport',
+        'Food & Dining',
+      ],
+      3
+    );
   }
 
   return result;
@@ -2248,7 +2415,7 @@ export function getCategoryRealtimeBudgetStatus(
   let todaySpentInCategory = 0;
 
   validTxs.forEach((t) => {
-    if (String(t?.type || '').toLowerCase() !== 'expense' || t?.id === 'tx_sample' || !t?.date) return;
+    if (String(t.type || '').toLowerCase() !== 'expense' || t.id === 'tx_sample' || !t.date) return;
     if (options?.ignoreTransactionId && String(t.id) === String(options.ignoreTransactionId)) return;
     if (monthFilter && t.date.length >= 7 && !t.date.startsWith(monthFilter)) return;
     if (isTripQuarantinedExpense(t)) return;

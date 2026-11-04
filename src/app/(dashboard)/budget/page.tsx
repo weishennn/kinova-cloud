@@ -20,6 +20,8 @@ import { RecurringCommitments } from '@/components/dashboard/recurring-commitmen
 import { InstallmentDashboard } from '@/components/dashboard/installment-dashboard';
 import {
   getSavedCategoryCaps,
+  getAllBudgetCategoryRows,
+  type BudgetCategoryRowItem,
   getTripEnvelopeSummaries,
   type TripBudgetEnvelope,
   type TripEnvelopeStatus,
@@ -215,6 +217,16 @@ export default function BudgetPage() {
   // Locked category caps
   const [lockedCategories, setLockedCategories] = useState<Record<string, boolean>>({});
 
+  // Canonical and custom category rows for selected month (CRITICAL FIX A: never hides unspent categories!)
+  const budgetCategoryRows = useMemo(() => {
+    const txs = allTransactions.length > 0 ? allTransactions : transactions;
+    return getAllBudgetCategoryRows(txs, {
+      caps: categoryCaps,
+      lockedCaps: lockedCategories,
+      targetMonth: selectedMonth,
+    });
+  }, [allTransactions, transactions, categoryCaps, lockedCategories, selectedMonth]);
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem('cashflow_locked_category_caps');
@@ -389,18 +401,21 @@ export default function BudgetPage() {
 
   // Cross-category smart rebalance suggestion if any category exceeds cap or touches reserved bills
   const topRebalanceSuggestion = useMemo<CategoryRebalanceSuggestion | null>(() => {
-    for (const item of breakdown) {
-      const status = getCategoryRealtimeBudgetStatus(item.name, transactions, categoryCaps, 0, {
-        targetMonth: selectedMonth,
-        lockedCaps: lockedCategories,
-        maxLivingBudget,
-      });
-      if ((status.isOverCapBefore || status.unreservedRemainingBefore < 0) && status.rebalanceSuggestion?.canAutoRebalance) {
-        return status.rebalanceSuggestion;
+    const txs = allTransactions.length > 0 ? allTransactions : transactions;
+    for (const row of budgetCategoryRows) {
+      if (row.isOverCap || row.unreservedRemaining < 0) {
+        const status = getCategoryRealtimeBudgetStatus(row.category, txs, categoryCaps, 0, {
+          targetMonth: selectedMonth,
+          lockedCaps: lockedCategories,
+          maxLivingBudget,
+        });
+        if (status.rebalanceSuggestion?.canAutoRebalance) {
+          return status.rebalanceSuggestion;
+        }
       }
     }
     return null;
-  }, [breakdown, transactions, categoryCaps, selectedMonth, lockedCategories, maxLivingBudget]);
+  }, [budgetCategoryRows, allTransactions, transactions, categoryCaps, selectedMonth, lockedCategories, maxLivingBudget]);
 
   const [isAutoTuneOpen, setIsAutoTuneOpen] = useState(false);
   const [customCapsDraft, setCustomCapsDraft] = useState<Record<string, number>>({});
@@ -428,7 +443,8 @@ export default function BudgetPage() {
   }, [isAutoTuneOpen, intelligentPlan]);
 
   const handleApplySmartCaps = () => {
-    const safeCaps = fitCapsToLivingBudget(customCapsDraft, maxLivingBudget, lockedCategories);
+    const txs = allTransactions.length > 0 ? allTransactions : transactions;
+    const safeCaps = fitCapsToLivingBudget(customCapsDraft, maxLivingBudget, lockedCategories, txs);
     setCategoryCaps(safeCaps);
     saveCategoryCaps(safeCaps);
     toast.success('AI Smart Category Caps applied and saved to cloud sync!');
@@ -1334,40 +1350,29 @@ export default function BudgetPage() {
           </div>
         )}
 
-        {breakdown.length === 0 ? (
+        {budgetCategoryRows.length === 0 ? (
           <div className="text-center py-10 rounded-2xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/20">
-            <p className="text-xs text-slate-500 dark:text-zinc-400">No categorized expenses recorded for {formatMonthLabel(selectedMonth)}</p>
+            <p className="text-xs text-slate-500 dark:text-zinc-400">No category caps configured</p>
           </div>
         ) : (
-          breakdown.map((item) => {
-            const cap = categoryCaps[item.name] || DEFAULT_CATEGORY_CAPS[item.name] || 500;
-            const realtimeStatus = getCategoryRealtimeBudgetStatus(item.name, transactions, categoryCaps, 0, {
-              targetMonth: selectedMonth,
-              lockedCaps: lockedCategories,
-              maxLivingBudget,
-            });
-            const percentOfCap = cap > 0 ? (item.value / cap) * 100 : 0;
-            const isCatOver = item.value > cap;
-            const remainingCat = Math.max(0, cap - item.value);
-            const dailyCat = !dailyInfo.isAllTime && dailyInfo.daysRemaining > 0 ? remainingCat / dailyInfo.daysRemaining : 0;
-
-            const isEditingThis = editingCategory === item.name;
-            const suggestion = intelligentPlan?.suggestions?.find((s) => s.category === item.name);
+          budgetCategoryRows.map((row) => {
+            const isEditingThis = editingCategory === row.category;
+            const suggestion = intelligentPlan?.suggestions?.find((s) => s.category === row.category);
 
             return (
               <div
-                key={item.name}
+                key={row.category}
                 className={`rounded-2xl border p-4 space-y-2.5 transition-all ${
-                  isCatOver
+                  row.isOverCap
                     ? 'border-rose-500/30 bg-rose-950/15'
-                    : percentOfCap > 70
+                    : row.spentPercent > 70
                     ? 'border-amber-500/30 bg-amber-950/15'
                     : 'border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40'
                 }`}
               >
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-bold text-slate-950 dark:text-white text-sm">{item.name}</span>
+                    <span className="font-bold text-slate-950 dark:text-white text-sm">{row.category}</span>
                     {suggestion && (
                       <span className={`text-[9px] font-semibold px-2 py-0.5 rounded-full border ${
                         suggestion.nature === 'fixed'
@@ -1382,15 +1387,15 @@ export default function BudgetPage() {
                       </span>
                     )}
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                      isCatOver
+                      row.isOverCap
                         ? 'bg-rose-500/20 text-rose-800 dark:text-rose-400'
-                        : percentOfCap > 70
+                        : row.spentPercent > 70
                         ? 'bg-amber-500/20 text-amber-800 dark:text-amber-400'
                         : 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-400'
                     }`}>
-                      {percentOfCap.toFixed(0)}%
+                      {row.spentPercent.toFixed(0)}%
                     </span>
-                    {lockedCategories[item.name] && (
+                    {(row.isLocked || lockedCategories[row.category]) && (
                       <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 flex items-center gap-1">
                         <Lock className="h-2.5 w-2.5" />
                         <span>Locked</span>
@@ -1402,19 +1407,19 @@ export default function BudgetPage() {
                     {!isEditingThis ? (
                       <div className="flex items-center gap-2 text-slate-600 dark:text-zinc-400">
                         <span className="font-mono">
-                          <strong className="text-slate-950 dark:text-white font-bold">RM {item.value.toFixed(2)}</strong> / Cap: RM {cap.toFixed(0)}
+                          <strong className="text-slate-950 dark:text-white font-bold">RM {row.spent.toFixed(2)}</strong> / Cap: RM {row.cap.toFixed(0)}
                         </span>
                         <button
                           type="button"
-                          onClick={() => toggleLockCategory(item.name)}
+                          onClick={() => toggleLockCategory(row.category)}
                           className={`p-1 rounded-lg cursor-pointer transition-colors ${
-                            lockedCategories[item.name]
+                            lockedCategories[row.category] || row.isLocked
                               ? 'text-amber-500 bg-amber-500/15'
                               : 'text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800'
                           }`}
-                          title={lockedCategories[item.name] ? 'Category cap locked from auto-fit' : 'Lock category cap to protect from auto-fit changes'}
+                          title={lockedCategories[row.category] || row.isLocked ? 'Category cap locked from auto-fit' : 'Lock category cap to protect from auto-fit changes'}
                         >
-                          {lockedCategories[item.name] ? (
+                          {lockedCategories[row.category] || row.isLocked ? (
                             <Lock className="h-3.5 w-3.5" />
                           ) : (
                             <Unlock className="h-3.5 w-3.5" />
@@ -1422,8 +1427,8 @@ export default function BudgetPage() {
                         </button>
                         <button
                           onClick={() => {
-                            setEditingCategory(item.name);
-                            setCategoryCapInput(String(cap));
+                            setEditingCategory(row.category);
+                            setCategoryCapInput(String(row.cap));
                           }}
                           className="p-1 rounded-lg text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
                           title="Set category spending cap"
@@ -1441,7 +1446,7 @@ export default function BudgetPage() {
                           className="w-20 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2 py-1 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-indigo-500"
                         />
                         <button
-                          onClick={() => handleSaveCategoryCap(item.name)}
+                          onClick={() => handleSaveCategoryCap(row.category)}
                           className="p-1 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white dark:text-white cursor-pointer"
                         >
                           <Check className="h-3.5 w-3.5" />
@@ -1462,42 +1467,47 @@ export default function BudgetPage() {
                   {/* Segment 1: Spent so far */}
                   <div
                     className={`h-full transition-all duration-500 ${
-                      isCatOver
+                      row.isOverCap
                         ? 'bg-rose-500'
-                        : percentOfCap > 70
+                        : row.spentPercent > 70
                         ? 'bg-amber-400'
                         : 'bg-indigo-500'
                     }`}
-                    style={{ width: `${Math.min(percentOfCap, 100)}%` }}
-                    title={`Spent: RM ${item.value.toFixed(2)}`}
+                    style={{ width: `${Math.min(row.spentPercent, 100)}%` }}
+                    title={`Spent: RM ${row.spent.toFixed(2)}`}
                   />
                   {/* Segment 2: Reserved upcoming bills */}
-                  {realtimeStatus.committedReserve > 0 && cap > 0 && (
+                  {row.unpaidBillReserve > 0 && row.cap > 0 && (
                     <div
                       className="h-full bg-amber-400/80 dark:bg-amber-500/80 transition-all duration-500 border-l border-white/20"
                       style={{
-                        width: `${Math.min((realtimeStatus.committedReserve / cap) * 100, Math.max(0, 100 - percentOfCap))}%`,
+                        width: `${Math.min(row.reservePercent, Math.max(0, 100 - row.spentPercent))}%`,
                         backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(0,0,0,0.15) 3px, rgba(0,0,0,0.15) 6px)',
                       }}
-                      title={`Reserved for unpaid bills: RM ${realtimeStatus.committedReserve.toFixed(2)}`}
+                      title={`Reserved for unpaid bills: RM ${row.unpaidBillReserve.toFixed(2)}`}
                     />
                   )}
                 </div>
 
                 {/* Per-Category Bill Reserve Breakdown */}
-                {realtimeStatus.committedReserve > 0 && (
+                {row.unpaidBillReserve > 0 && (
                   <div className="text-[10px] text-amber-900 dark:text-amber-200 bg-amber-500/10 border border-amber-500/20 rounded-xl px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-1">
                     <span className="flex items-center gap-1 font-medium">
-                      📌 Bill Reserve: RM {realtimeStatus.committedReserve.toFixed(2)} reserved for upcoming bills
+                      📌 Bill Reserve: RM {row.unpaidBillReserve.toFixed(2)} reserved for upcoming bills
+                      {row.unpaidBills && row.unpaidBills.length > 0 && (
+                        <span className="opacity-80">
+                          ({row.unpaidBills.map((b) => `${b.name} RM ${b.amount.toFixed(0)}`).join(', ')})
+                        </span>
+                      )}
                     </span>
                     <span>
-                      Free Unreserved: <strong className="font-mono">RM {Math.max(0, realtimeStatus.unreservedRemainingBefore).toFixed(2)}</strong>
+                      Free Unreserved: <strong className="font-mono">RM {row.unreservedRemaining.toFixed(2)}</strong>
                     </span>
                   </div>
                 )}
 
                 {/* Food & Dining Extra Burn Rate Row */}
-                {item.name === 'Food & Dining' && dailyInfo.isCurrentMonth && (
+                {row.category === 'Food & Dining' && dailyInfo.isCurrentMonth && (
                   <div className="text-[11px] text-amber-900 dark:text-amber-200 bg-amber-500/10 border border-amber-500/20 rounded-xl px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-1">
                     <span className="flex items-center gap-1.5 font-medium">
                       <Utensils className="h-3 w-3" />
@@ -1512,15 +1522,19 @@ export default function BudgetPage() {
                 {/* Daily Safe Limit only for Food & Dining; Capped Monthly Bucket for all others */}
                 <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-zinc-400 pt-0.5">
                   <span>
-                    {isCatOver ? (
-                      <span className="text-rose-800 dark:text-rose-400 font-semibold">Over cap by RM {(item.value - cap).toFixed(2)}</span>
+                    {row.isOverCap ? (
+                      <span className="text-rose-800 dark:text-rose-400 font-semibold">
+                        Over cap by RM {Math.max(0, row.spent + row.unpaidBillReserve - row.cap).toFixed(2)}
+                      </span>
                     ) : (
-                      <span>Remaining: <strong className="text-slate-800 dark:text-zinc-200 font-mono">RM {remainingCat.toFixed(2)}</strong></span>
+                      <span>
+                        Remaining: <strong className="text-slate-800 dark:text-zinc-200 font-mono">RM {row.unreservedRemaining.toFixed(2)}</strong>
+                      </span>
                     )}
                   </span>
-                  {item.name === 'Food & Dining' ? (
+                  {row.isDailyCategory ? (
                     <span className="font-mono text-slate-700 dark:text-zinc-300">
-                      Daily pace: <strong className={isCatOver ? 'text-rose-800 dark:text-rose-400' : 'text-emerald-800 dark:text-emerald-400'}>RM {dailyCat.toFixed(2)} / day</strong>
+                      Daily pace: <strong className={row.isOverCap ? 'text-rose-800 dark:text-rose-400' : 'text-emerald-800 dark:text-emerald-400'}>RM {row.dailyAllowance.toFixed(2)} / day</strong>
                     </span>
                   ) : (
                     <span className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium">
