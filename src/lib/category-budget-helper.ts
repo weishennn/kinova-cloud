@@ -1,6 +1,6 @@
 import { getAmountInBaseCurrency } from './currency.ts';
 import { getLocalDateString, parseLocalDate } from './date-helper.ts';
-import { CANONICAL_EXPENSE_CATEGORIES } from './canonical-categories.ts';
+import { CANONICAL_EXPENSE_CATEGORIES, normalizeToCanonicalCategory } from './canonical-categories.ts';
 import { getUserMoneyProfile } from './user-money-profile.ts';
 
 export interface CategoryBudgetCap {
@@ -716,7 +716,7 @@ export function getCategoryCommitmentBreakdown(
           }
           if (amt <= 0) continue;
 
-          const cat = item?.category || 'Housing & Bills';
+          const cat = normalizeToCanonicalCategory(item?.category || 'Housing & Bills');
           const name = (item?.name || '').trim();
           totalCommittedByCategory.set(cat, (totalCommittedByCategory.get(cat) || 0) + amt);
 
@@ -758,7 +758,7 @@ export function getCategoryCommitmentBreakdown(
           const amt = Number(plan?.monthlyAmount ?? plan?.monthlyPayment) || 0;
           if (amt <= 0) continue;
 
-          const cat = plan?.category || 'Shopping';
+          const cat = normalizeToCanonicalCategory(plan?.category || 'Shopping');
           const name = (plan?.name || '').trim();
           totalCommittedByCategory.set(cat, (totalCommittedByCategory.get(cat) || 0) + amt);
 
@@ -872,7 +872,7 @@ export function rebalanceCategoryCapsForSpending(params: {
     if (String(t?.type || '').toLowerCase() !== 'expense' || t?.id === 'tx_sample' || !t?.date) continue;
     if (monthFilter && t.date.length >= 7 && !t.date.startsWith(monthFilter)) continue;
     if (isTripQuarantinedExpense(t)) continue;
-    const cat = t.category || 'Other';
+    const cat = normalizeToCanonicalCategory(t.category || 'Other', 'Expense', t.description);
     const amt = getAmountInBaseCurrency(t.amount || 0, t.currency, t.baseAmount);
     if (amt > 0) {
       spentByCat.set(cat, (spentByCat.get(cat) || 0) + amt);
@@ -1702,14 +1702,14 @@ export function getAllBudgetCategoryRows(
   const allCategoryNames = Array.from(
     new Set([
       ...CANONICAL_EXPENSE_CATEGORIES,
-      ...Object.keys(savedCaps),
+      ...Object.keys(savedCaps).map((c) => normalizeToCanonicalCategory(c)),
       ...Array.from(spentByCat.keys()),
       ...Array.from(unpaidReserveByCategory.keys()),
     ])
   );
 
   const rows: BudgetCategoryRowItem[] = allCategoryNames.map((category) => {
-    const cap = resolveCategoryCapValue(category, savedCaps, DEFAULT_CATEGORY_CAPS[category] ?? 50);
+    const cap = resolveCategoryCapValue(category, savedCaps, DEFAULT_CATEGORY_CAPS[category] ?? (category === 'Parents' ? resolveCategoryCapValue('Family', savedCaps, 0) : 50)) || (category === 'Parents' ? resolveCategoryCapValue('Family', savedCaps, 0) : 0);
     const spent = Number((spentByCat.get(category) || 0).toFixed(2));
     const unpaidBillReserve = Number((unpaidReserveByCategory.get(category) || 0).toFixed(2));
     const unreservedRemaining = Number(Math.max(0, cap - spent - unpaidBillReserve).toFixed(2));
