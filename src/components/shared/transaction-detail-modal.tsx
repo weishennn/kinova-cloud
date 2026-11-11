@@ -245,23 +245,17 @@ function TransactionDetailContent({
     if (!ok) return;
 
     const targetSheet = transaction._month || (transaction.date ? transaction.date.substring(0, 7) : 'Transactions');
+    const baseRecord = buildTransactionBaseRecord(transaction as unknown as Record<string, unknown>);
     const updatedData = {
-      Date: transaction.date,
-      Type: transaction.type,
-      Category: transaction.category,
-      SubCategory: transaction.subCategory || '',
-      subCategory: transaction.subCategory || '',
-      Description: transaction.description,
-      Amount: transaction.amount,
-      Currency: transaction.currency,
-      Notes: transaction.notes,
-      TripTag: transaction.tripTag || '',
       ReceiptUrl: '',
       receiptUrl: '',
       Id: transaction.id,
       id: transaction.id,
       _month: transaction._month,
-      _baseData: buildTransactionBaseRecord(transaction as unknown as Record<string, unknown>),
+      _baseData: {
+        Id: baseRecord.Id,
+        ReceiptUrl: baseRecord.ReceiptUrl,
+      },
     };
 
     // Optimistically clear receiptUrl in active queries + local SWR cache immediately (<10ms)
@@ -283,26 +277,20 @@ function TransactionDetailContent({
   const handleTripChange = (newTrip: string) => {
     setCurrentTrip(newTrip);
     const targetSheet = transaction._month || (transaction.date ? transaction.date.substring(0, 7) : 'Transactions');
+    const baseRecord = buildTransactionBaseRecord(transaction as unknown as Record<string, unknown>);
     updateMutation.mutate({
       sheetName: targetSheet,
       rowIndex: transaction._rowIndex || 2,
       rowData: {
-        Date: transaction.date,
-        Type: transaction.type,
-        Category: transaction.category,
-        SubCategory: transaction.subCategory || '',
-        subCategory: transaction.subCategory || '',
-        Description: transaction.description,
-        Amount: transaction.amount,
-        Currency: transaction.currency,
-        Notes: transaction.notes,
-        ReceiptUrl: transaction.receiptUrl || '',
         TripTag: newTrip,
         tripTag: newTrip,
         _month: transaction._month,
         Id: transaction.id,
         id: transaction.id,
-        _baseData: buildTransactionBaseRecord(transaction as unknown as Record<string, unknown>),
+        _baseData: {
+          Id: baseRecord.Id,
+          TripTag: baseRecord.TripTag,
+        },
       },
     });
     toast.success(newTrip ? `Tagged to ${newTrip}` : 'Removed from trip');
@@ -313,27 +301,23 @@ function TransactionDetailContent({
     const { subCategory, notes } = applyTaxReliefTag(newCatId, stripReceiptItemsFromNotes(transaction.notes || ''));
     const notesWithItems = withReceiptItemsInNotes(notes, transaction.receiptItems || []);
     const targetSheet = transaction._month || (transaction.date ? transaction.date.substring(0, 7) : 'Transactions');
+    const baseRecord = buildTransactionBaseRecord(transaction as unknown as Record<string, unknown>);
     updateMutation.mutate({
       sheetName: targetSheet,
       rowIndex: transaction._rowIndex || 2,
       rowData: {
-        Date: transaction.date,
-        Type: transaction.type,
-        Category: transaction.category,
         SubCategory: subCategory,
         subCategory: subCategory,
-        Description: transaction.description,
-        Amount: transaction.amount,
-        Currency: transaction.currency,
         Notes: notesWithItems,
         notes: notesWithItems,
-        ReceiptUrl: transaction.receiptUrl || '',
-        TripTag: currentTrip || '',
-        tripTag: currentTrip || '',
         _month: transaction._month,
         Id: transaction.id,
         id: transaction.id,
-        _baseData: buildTransactionBaseRecord(transaction as unknown as Record<string, unknown>),
+        _baseData: {
+          Id: baseRecord.Id,
+          SubCategory: baseRecord.SubCategory,
+          Notes: baseRecord.Notes,
+        },
       },
     });
     const cat = LHDN_TAX_CATEGORIES.find((c) => c.id === newCatId);

@@ -298,6 +298,73 @@ test('runKinovaTurn skips full-ledger work for a simple conversational message',
   assert.deepEqual(sentBody.profile.habits, []);
 });
 
+test('runKinovaTurn forwards compact habitMemories with keywords on every turn', async () => {
+  const originalFetch = globalThis.fetch;
+  let sentBody;
+  globalThis.fetch = async (_url, init) => {
+    sentBody = JSON.parse(String(init?.body || '{}'));
+    return new Response(JSON.stringify({
+      success: true,
+      model: 'mock-model',
+      data: {
+        mode: 'record',
+        reasoning: 'Matched user habit memory for TAN CHIN HONG.',
+        answer: 'Recorded 四夕豆花 RM 12.00',
+        proposedAction: null,
+        command: {
+          intent: 'transaction',
+          confidence: 0.96,
+          data: {
+            amount: 12,
+            currency: 'MYR',
+            type: 'Expense',
+            category: 'Food & Dining',
+            description: '四夕豆花',
+            date: '2026-10-29',
+          },
+        },
+        clarification: null,
+        pendingContext: null,
+        receiptAnalysis: null,
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+
+  try {
+    await runKinovaTurn({
+      text: '豆花店 12',
+      today: '2026-10-29',
+      profile: mockProfile,
+      transactions,
+      forceAssistant: true,
+      habitMemories: [
+        {
+          id: 'h1',
+          rawPattern: 'TAN CHIN HONG',
+          preferredAlias: '四夕豆花',
+          category: 'Food & Dining',
+          keywords: ['四夕', 'tanchinhong'],
+          frequency: 4,
+          confidence: 0.95,
+          learnedSource: 'auto_learned',
+          createdAt: '2026-10-01T00:00:00Z',
+          updatedAt: '2026-10-25T00:00:00Z',
+        },
+      ],
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(sentBody.profile.habitMemories.length, 1);
+  assert.deepEqual(sentBody.profile.habitMemories[0], {
+    rawPattern: 'TAN CHIN HONG',
+    preferredAlias: '四夕豆花',
+    category: 'Food & Dining',
+    keywords: ['四夕', 'tanchinhong'],
+  });
+});
+
 test('parseAssistantJsonResponse parses plain valid JSON', () => {
   const json = JSON.stringify({
     mode: 'record',

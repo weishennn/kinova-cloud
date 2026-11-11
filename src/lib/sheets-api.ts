@@ -800,6 +800,15 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 2
 
 let mutatingRequestQueue: Promise<unknown> = Promise.resolve();
 let initialWorkspaceResolvePromise: Promise<void> | null = null;
+let lastMutationActivityAt = 0;
+
+export function markLocalMutationActivity(): void {
+  lastMutationActivityAt = Date.now();
+}
+
+export function getLastMutationActivityAt(): number {
+  return lastMutationActivityAt;
+}
 
 function getLockedUserSpreadsheetId(): string {
   if (typeof window === 'undefined') return '';
@@ -844,6 +853,7 @@ export async function apiRequest<T>(options: ApiRequestOptions): Promise<T> {
   }
 
   if (isMutating) {
+    markLocalMutationActivity();
     return enqueueMutatingRequest(() => executeApiRequest<T>({ action, params, method, fresh }));
   }
 
@@ -939,7 +949,7 @@ async function executeApiRequest<T>(options: ApiRequestOptions): Promise<T> {
           }
           if (proxyRes.ok && data) {
             recordCloudResponse(data, requestStartedAt, action);
-            if (data.success && !fresh) {
+            if (data.success && !fresh && requestStartedAt >= lastMutationActivityAt) {
               setSwrCachedData(action, params, data);
             }
             return data;
@@ -967,6 +977,7 @@ async function executeApiRequest<T>(options: ApiRequestOptions): Promise<T> {
             throw new Error(data.message || 'Account restricted by administrator.');
           }
           if (proxyRes.ok && data) {
+            markLocalMutationActivity();
             recordCloudResponse(data, requestStartedAt, action);
             return data;
           }
@@ -1061,8 +1072,11 @@ async function executeApiRequest<T>(options: ApiRequestOptions): Promise<T> {
       data = await runDirectWithRetry(DEFAULT_APPS_SCRIPT_URL, DEFAULT_APPS_SCRIPT_API_KEY);
     }
 
+    if (isMutating) {
+      markLocalMutationActivity();
+    }
     recordCloudResponse(data, requestStartedAt, action);
-    if (method === 'GET' && data && data.success && !fresh) {
+    if (method === 'GET' && data && data.success && !fresh && requestStartedAt >= lastMutationActivityAt) {
       setSwrCachedData(action, params, data);
     }
     return data;

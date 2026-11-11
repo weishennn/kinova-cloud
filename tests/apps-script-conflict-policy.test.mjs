@@ -33,3 +33,13 @@ test('Apps Script conflict policy reports same-field concurrent edits', async ()
   );
   assert.deepEqual(Array.from(fields), ['Amount']);
 });
+
+test('Apps Script conflict policy treats Type and Currency casing differences as equivalent', async () => {
+  const findConflicts = await loadConflictHelpers();
+  const fields = findConflicts(
+    { Type: 'expense', Currency: 'myr', BaseCurrency: 'myr', Amount: 50 },
+    { Type: 'Expense', Currency: 'MYR', BaseCurrency: 'MYR', Amount: 50 },
+    { Type: 'expense', Currency: 'MYR', Amount: 80 }
+  );
+  assert.deepEqual(Array.from(fields), []);
+});

@@ -28,6 +28,60 @@ export const LOCKED_CAPS_STORAGE_KEY = 'cashflow_locked_category_caps';
 export const TRIP_ENVELOPES_STORAGE_KEY = 'cashflow_trip_budget_envelopes_v1';
 
 /**
+ * Normalizes a category caps record so legacy aliases (e.g. 'Family', 'Bills', 'Food', 'Groceries')
+ * map cleanly onto canonical categories without creating duplicate rows or clobbering explicit 0 caps.
+ */
+export function normalizeCategoryCapsRecord(
+  caps?: Record<string, number> | null,
+  mergeDefaults: boolean = true,
+  recoverLegacyZeroStubs: boolean = false
+): Record<string, number> {
+  const base: Record<string, number> = mergeDefaults ? { ...DEFAULT_CATEGORY_CAPS } : {};
+  if (!caps || typeof caps !== 'object') return base;
+
+  const canonicalInput: Record<string, number> = {};
+  const aliasInput: Array<{ canonical: string; value: number }> = [];
+
+  for (const [rawKey, rawVal] of Object.entries(caps)) {
+    const num = Number(rawVal);
+    if (!Number.isFinite(num) || num < 0) continue;
+    const cleanNum = Math.round(num * 100) / 100;
+    const trimmedKey = String(rawKey || '').trim();
+    if (!trimmedKey) continue;
+
+    if ((CANONICAL_EXPENSE_CATEGORIES as readonly string[]).includes(trimmedKey)) {
+      canonicalInput[trimmedKey] = cleanNum;
+    } else {
+      const mapped = normalizeToCanonicalCategory(trimmedKey, 'Expense');
+      aliasInput.push({ canonical: mapped, value: cleanNum });
+    }
+  }
+
+  const out: Record<string, number> = { ...base, ...canonicalInput };
+  const mergedAliasCanonical = new Set<string>();
+  for (const { canonical, value } of aliasInput) {
+    const hadCanonical = Object.prototype.hasOwnProperty.call(canonicalInput, canonical);
+    if (!hadCanonical) {
+      if (!mergedAliasCanonical.has(canonical)) {
+        out[canonical] = value;
+        mergedAliasCanonical.add(canonical);
+      } else {
+        out[canonical] = Math.round(((out[canonical] || 0) + value) * 100) / 100;
+      }
+    } else if (
+      recoverLegacyZeroStubs &&
+      value > 0 &&
+      canonicalInput[canonical] === 0 &&
+      (DEFAULT_CATEGORY_CAPS[canonical] ?? 0) === 0
+    ) {
+      out[canonical] = value;
+    }
+  }
+
+  return out;
+}
+
+/**
  * Resolves a numeric cap for a category while strictly preserving explicit 0 caps.
  * Fixes the `||` bug where setting a category cap to 0 fell back to default or 500.
  */
@@ -36,11 +90,23 @@ export function resolveCategoryCapValue(
   caps?: Record<string, number> | null,
   fallbackIfMissing = 0
 ): number {
+  const trimmed = String(category || '').trim();
+  const canonical = trimmed ? normalizeToCanonicalCategory(trimmed, 'Expense') : '';
+
   if (caps && Object.prototype.hasOwnProperty.call(caps, category)) {
     const val = Number(caps[category]);
     if (Number.isFinite(val) && val >= 0) {
       return val;
     }
+  }
+  if (canonical && canonical !== category && caps && Object.prototype.hasOwnProperty.call(caps, canonical)) {
+    const val = Number(caps[canonical]);
+    if (Number.isFinite(val) && val >= 0) {
+      return val;
+    }
+  }
+  if (canonical && Object.prototype.hasOwnProperty.call(DEFAULT_CATEGORY_CAPS, canonical)) {
+    return DEFAULT_CATEGORY_CAPS[canonical];
   }
   if (Object.prototype.hasOwnProperty.call(DEFAULT_CATEGORY_CAPS, category)) {
     return DEFAULT_CATEGORY_CAPS[category];
@@ -61,7 +127,10 @@ export function getLockedCategoryCaps(): Record<string, boolean> {
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const clean: Record<string, boolean> = {};
       for (const [k, v] of Object.entries(parsed)) {
-        if (v === true) clean[k] = true;
+        if (v === true) {
+          const canon = normalizeToCanonicalCategory(k, 'Expense');
+          clean[canon] = true;
+        }
       }
       return clean;
     }
@@ -70,16 +139,21 @@ export function getLockedCategoryCaps(): Record<string, boolean> {
 }
 
 /**
- * Persists user-locked category caps (`lockedCaps`) and broadcasts across tabs.
+ * Persists user-locked category caps (`lockedCaps`) and broadcasts across tabs + cloud sync.
  */
 export function saveLockedCategoryCaps(lockedCaps: Record<string, boolean>): void {
   if (typeof window === 'undefined' && typeof localStorage === 'undefined') return;
   const clean: Record<string, boolean> = {};
   for (const [k, v] of Object.entries(lockedCaps || {})) {
-    if (v === true) clean[k] = true;
+    if (v === true) {
+      const canon = normalizeToCanonicalCategory(k, 'Expense');
+      clean[canon] = true;
+    }
   }
   const serialized = JSON.stringify(clean);
+  let prevRaw: string | null = null;
   try {
+    prevRaw = localStorage.getItem(LOCKED_CAPS_STORAGE_KEY);
     localStorage.setItem(LOCKED_CAPS_STORAGE_KEY, serialized);
     if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
       window.dispatchEvent(
@@ -89,11 +163,23 @@ export function saveLockedCategoryCaps(lockedCaps: Record<string, boolean>): voi
       );
     }
   } catch {}
+  if (prevRaw !== serialized) {
+    try {
+      import('./cloud-settings-sync.ts')
+        .then((mod) => {
+          if (mod && mod.saveSettingWithCloudSync) {
+            mod.saveSettingWithCloudSync(LOCKED_CAPS_STORAGE_KEY, serialized, { forceSync: true });
+          }
+        })
+        .catch(() => {});
+    } catch {}
+  }
 }
 
 /**
  * Loads category budget caps from localStorage.
- * Strictly preserves any explicit 0 caps set by the user while ensuring all canonical categories exist.
+ * Strictly preserves any explicit 0 caps set by the user while ensuring all canonical categories exist
+ * and normalizing legacy alias keys.
  */
 export function getSavedCategoryCaps(): Record<string, number> {
   if (typeof window === 'undefined' && typeof localStorage === 'undefined') return { ...DEFAULT_CATEGORY_CAPS };
@@ -102,15 +188,9 @@ export function getSavedCategoryCaps(): Record<string, number> {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (typeof parsed === 'object' && parsed !== null && Object.keys(parsed).length > 0) {
-        const sanitized: Record<string, number> = {};
-        for (const [k, v] of Object.entries(parsed)) {
-          const num = Number(v);
-          if (Number.isFinite(num) && num >= 0) {
-            sanitized[k] = num;
-          }
-        }
-        if (Object.keys(sanitized).length > 0) {
-          return { ...DEFAULT_CATEGORY_CAPS, ...sanitized };
+        const normalized = normalizeCategoryCapsRecord(parsed as Record<string, number>, true, true);
+        if (Object.keys(normalized).length > 0) {
+          return normalized;
         }
       }
     }
@@ -123,15 +203,11 @@ export function getSavedCategoryCaps(): Record<string, number> {
  */
 export function saveCategoryCaps(caps: Record<string, number>): void {
   if (typeof window === 'undefined' && typeof localStorage === 'undefined') return;
-  const sanitized: Record<string, number> = {};
-  for (const [k, v] of Object.entries(caps || {})) {
-    const num = Number(v);
-    if (Number.isFinite(num) && num >= 0) {
-      sanitized[k] = Math.round(num * 100) / 100;
-    }
-  }
+  const sanitized = normalizeCategoryCapsRecord(caps, false, false);
   const serialized = JSON.stringify(sanitized);
+  let prevRaw: string | null = null;
   try {
+    prevRaw = localStorage.getItem(STORAGE_KEY);
     localStorage.setItem(STORAGE_KEY, serialized);
     if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
       window.dispatchEvent(
@@ -150,15 +226,17 @@ export function saveCategoryCaps(caps: Record<string, number>): void {
       })
       .catch(() => {});
   } catch {}
-  try {
-    import('./cloud-settings-sync.ts')
-      .then((mod) => {
-        if (mod && mod.saveSettingWithCloudSync) {
-          mod.saveSettingWithCloudSync(STORAGE_KEY, serialized);
-        }
-      })
-      .catch(() => {});
-  } catch {}
+  if (prevRaw !== serialized) {
+    try {
+      import('./cloud-settings-sync.ts')
+        .then((mod) => {
+          if (mod && mod.saveSettingWithCloudSync) {
+            mod.saveSettingWithCloudSync(STORAGE_KEY, serialized, { forceSync: true });
+          }
+        })
+        .catch(() => {});
+    } catch {}
+  }
 }
 
 /**
@@ -245,15 +323,18 @@ export function calculateDailySafeSpend(
   totalBudget: number,
   totalSpent: number,
   monthStr?: string,
-  referenceDate?: Date
+  referenceDate?: Date,
+  options?: { unpaidReserve?: number }
 ) {
   const { totalDays, todayDate, daysRemaining, isCurrentMonth, isPastMonth } = getMonthDaysInfo(
     monthStr,
     referenceDate
   );
+  const unpaidReserve = !isPastMonth ? Math.max(0, Number(options?.unpaidReserve) || 0) : 0;
   const remainingBudget = Math.max(0, totalBudget - totalSpent);
+  const safeRemainingBudget = Math.max(0, totalBudget - totalSpent - unpaidReserve);
   const divisor = daysRemaining > 0 ? daysRemaining : totalDays;
-  const dailyAllowance = remainingBudget / (divisor || 1);
+  const dailyAllowance = safeRemainingBudget / (divisor || 1);
   const isOverBudget = totalBudget > 0 && totalSpent > totalBudget;
   const overAmount = isOverBudget ? totalSpent - totalBudget : 0;
   const spentPercent = totalBudget > 0 ? (totalSpent / totalBudget) * 100 : 0;
@@ -262,6 +343,7 @@ export function calculateDailySafeSpend(
     totalBudget,
     totalSpent,
     remainingBudget: Number(remainingBudget.toFixed(2)),
+    safeRemainingBudget: Number(safeRemainingBudget.toFixed(2)),
     dailyAllowance: Number(dailyAllowance.toFixed(2)),
     daysRemaining,
     todayDate,
@@ -659,6 +741,7 @@ interface StoredRecurringLike {
   category?: string;
   amount?: number;
   dayOfMonth?: number;
+  effectiveFrom?: string;
   history?: Array<{ effectiveFrom: string; amount: number }>;
 }
 
@@ -666,6 +749,8 @@ interface StoredInstallmentLike {
   id?: string;
   name?: string;
   category?: string;
+  currency?: string;
+  tripTag?: string;
   monthlyAmount?: number;
   monthlyPayment?: number;
   remainingMonths?: number;
@@ -680,9 +765,33 @@ export interface CategoryCommitmentBreakdown {
   unpaidItemsByCategory: Map<string, Array<{ name: string; amount: number; kind: 'recurring' | 'installment' }>>;
 }
 
+/**
+ * Counts distinct active living expense calendar months ('YYYY-MM') in a ledger.
+ * Used to keep 'all' time budget caps consistent across Hero, category rows, and Home cockpit.
+ */
+export function countActiveBudgetMonths(transactions: GenericTransaction[] = []): number {
+  const validTxs = Array.isArray(transactions) ? transactions : [];
+  const expenseMonths = new Set<string>();
+  const allMonths = new Set<string>();
+  for (const t of validTxs) {
+    if (!t || t.id === 'tx_sample' || !t.date || t.date.length < 7) continue;
+    const m = t.date.slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(m)) continue;
+    allMonths.add(m);
+    if (String(t.type || '').toLowerCase() === 'expense' && !isTripQuarantinedExpense(t)) {
+      expenseMonths.add(m);
+    }
+  }
+  return Math.max(1, expenseMonths.size > 0 ? expenseMonths.size : allMonths.size);
+}
+
 export function getCategoryCommitmentBreakdown(
   monthTransactions: GenericTransaction[] = [],
-  targetMonthPrefix: string = getLocalDateString().slice(0, 7)
+  targetMonthPrefix: string = getLocalDateString().slice(0, 7),
+  options?: {
+    referenceDate?: Date;
+    skipReserveForPastMonth?: boolean;
+  }
 ): CategoryCommitmentBreakdown {
   const totalCommittedByCategory = new Map<string, number>();
   const unpaidReserveByCategory = new Map<string, number>();
@@ -695,12 +804,18 @@ export function getCategoryCommitmentBreakdown(
     return { totalCommittedByCategory, unpaidReserveByCategory, unpaidItemsByCategory };
   }
 
-  const monthExpenses = (Array.isArray(monthTransactions) ? monthTransactions : []).filter(
-    (t) =>
-      String(t?.type || '').toLowerCase() === 'expense' &&
-      t?.id !== 'tx_sample' &&
-      (!t?.date || t.date.startsWith(targetMonthPrefix))
+  // Multi-month aggregates ('all' / 'year-YYYY') never reserve single-month pending bills
+  if (!targetMonthPrefix || targetMonthPrefix === 'all' || targetMonthPrefix.startsWith('year-')) {
+    return { totalCommittedByCategory, unpaidReserveByCategory, unpaidItemsByCategory };
+  }
+
+  const daysInfo = getMonthDaysInfo(targetMonthPrefix, options?.referenceDate);
+  const skipReserve = (options?.skipReserveForPastMonth ?? true) && daysInfo.isPastMonth;
+
+  const allExpenses = (Array.isArray(monthTransactions) ? monthTransactions : []).filter(
+    (t) => String(t?.type || '').toLowerCase() === 'expense' && t?.id !== 'tx_sample'
   );
+  const monthExpenses = allExpenses.filter((t) => !t?.date || t.date.startsWith(targetMonthPrefix));
 
   try {
     const rawRec = localStorage.getItem('cashflow_recurring_commitments');
@@ -708,6 +823,22 @@ export function getCategoryCommitmentBreakdown(
       const list = JSON.parse(rawRec) as StoredRecurringLike[];
       if (Array.isArray(list)) {
         for (const item of list) {
+          // Do not include or reserve commitments scheduled to start in a future month
+          const validHistoryMonths = Array.isArray(item?.history)
+            ? item.history
+                .map((h) => (typeof h?.effectiveFrom === 'string' ? h.effectiveFrom.slice(0, 7) : ''))
+                .filter((m) => /^\d{4}-\d{2}$/.test(m))
+            : [];
+          const fallbackEffective =
+            typeof item?.effectiveFrom === 'string' && /^\d{4}-\d{2}$/.test(item.effectiveFrom.slice(0, 7))
+              ? item.effectiveFrom.slice(0, 7)
+              : '';
+          const earliestEffective =
+            validHistoryMonths.length > 0 ? validHistoryMonths.sort()[0] : fallbackEffective;
+          if (earliestEffective && targetMonthPrefix < earliestEffective) {
+            continue;
+          }
+
           let amt = Number(item?.amount) || 0;
           if (Array.isArray(item?.history) && item.history.length > 0) {
             const sorted = [...item.history].sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom));
@@ -716,19 +847,33 @@ export function getCategoryCommitmentBreakdown(
           }
           if (amt <= 0) continue;
 
-          const cat = normalizeToCanonicalCategory(item?.category || 'Housing & Bills');
+          const cat = normalizeToCanonicalCategory(item?.category || 'Housing & Bills', 'Expense', item?.name);
           const name = (item?.name || '').trim();
+          const sanitizedRecId = item?.id ? String(item.id).replace(/[^A-Za-z0-9_-]/g, '_') : '';
           totalCommittedByCategory.set(cat, (totalCommittedByCategory.get(cat) || 0) + amt);
+
+          if (skipReserve) continue;
 
           const isAlreadyPaid = monthExpenses.some((tx) => {
             const notes = String(tx.notes || '');
-            if (item.id && notes.includes(`[Recurring:${item.id}]`)) return true;
+            const txId = String(tx.id || '');
+            if (
+              item?.id &&
+              (notes.includes(`[Recurring:${item.id}]`) ||
+                txId.startsWith(`tx_rec_${item.id}_`) ||
+                txId.startsWith(`tx_rec_${sanitizedRecId}_`))
+            ) {
+              return true;
+            }
             const descLower = String(tx.description || '').trim().toLowerCase();
             const nameLower = name.toLowerCase();
             if (!nameLower || !descLower) return false;
             if (descLower === nameLower) return true;
-            const txCat = String(tx.category || '').trim().toLowerCase();
-            if (txCat === cat.toLowerCase() && nameLower.length >= 3 && descLower.length >= 3) {
+            const rawTxCat = String(tx.category || '').trim();
+            const txCatCanonical = rawTxCat
+              ? normalizeToCanonicalCategory(rawTxCat, 'Expense', String(tx.description || ''))
+              : '';
+            if ((!txCatCanonical || txCatCanonical === cat) && nameLower.length >= 3 && descLower.length >= 3) {
               return descLower.includes(nameLower) || nameLower.includes(descLower);
             }
             return false;
@@ -751,28 +896,70 @@ export function getCategoryCommitmentBreakdown(
       const list = JSON.parse(rawInst) as StoredInstallmentLike[];
       if (Array.isArray(list)) {
         for (const plan of list) {
-          if (plan?.endDate && plan.endDate < targetMonthPrefix) continue;
+          // Quarantine trip-tagged installment plans out of domestic living budget reserves
+          if (plan?.tripTag && isTripQuarantinedExpense({ tripTag: plan.tripTag })) continue;
+          if (plan?.endDate && plan.endDate.slice(0, 7) < targetMonthPrefix) continue;
           if (plan?.startDate && plan.startDate.slice(0, 7) > targetMonthPrefix) continue;
           if (typeof plan?.remainingMonths === 'number' && plan.remainingMonths <= 0) continue;
 
-          const amt = Number(plan?.monthlyAmount ?? plan?.monthlyPayment) || 0;
+          const rawAmt = Number(plan?.monthlyAmount ?? plan?.monthlyPayment) || 0;
+          if (rawAmt <= 0) continue;
+          const amt = getAmountInBaseCurrency(rawAmt, plan?.currency || 'MYR');
           if (amt <= 0) continue;
 
-          const cat = normalizeToCanonicalCategory(plan?.category || 'Shopping');
+          const cat = normalizeToCanonicalCategory(plan?.category || 'Shopping', 'Expense', plan?.name);
           const name = (plan?.name || '').trim();
-          totalCommittedByCategory.set(cat, (totalCommittedByCategory.get(cat) || 0) + amt);
+          const nameLower = name.toLowerCase();
+          const sanitizedPlanId = plan?.id ? String(plan.id).replace(/[^A-Za-z0-9_-]/g, '_') : '';
 
-          const isAlreadyPaid = monthExpenses.some((tx) => {
+          const matchesPlanTx = (tx: GenericTransaction): boolean => {
+            const txId = String(tx.id || '');
+            if (
+              plan?.id &&
+              (txId.startsWith(`tx_inst_${plan.id}_`) || txId.startsWith(`tx_inst_${sanitizedPlanId}_`))
+            ) {
+              return true;
+            }
             const desc = String(tx.description || '').toLowerCase();
             const notes = String(tx.notes || '').toLowerCase();
-            if (plan.id && String(tx.id || '').startsWith(`tx_inst_${plan.id}_`)) return true;
             const isInstTx = desc.includes('(installment') || notes.includes('[installment plan');
-            if (!isInstTx) return false;
-            const baseName = desc.replace(/\s*\(installment.*?\)/i, '').trim();
-            return Boolean(name && (baseName === name.toLowerCase() || desc.includes(name.toLowerCase())));
-          });
+            if (isInstTx) {
+              const baseName = desc.replace(/\s*\(installment.*?\)/i, '').trim();
+              return Boolean(nameLower && (baseName === nameLower || desc.includes(nameLower)));
+            }
+            if (nameLower.length >= 4 && desc) {
+              const rawTxCat = String(tx.category || '').trim();
+              const txCatCanonical = rawTxCat
+                ? normalizeToCanonicalCategory(rawTxCat, 'Expense', String(tx.description || ''))
+                : '';
+              const txAmtMyr = getAmountInBaseCurrency(tx.amount || 0, tx.currency, tx.baseAmount);
+              const amtTolerance = Math.max(2, amt * 0.15);
+              if (
+                (!txCatCanonical || txCatCanonical === cat) &&
+                (desc === nameLower || desc.includes(nameLower)) &&
+                Math.abs(txAmtMyr - amt) <= amtTolerance
+              ) {
+                return true;
+              }
+            }
+            return false;
+          };
 
-          if (!isAlreadyPaid) {
+          const isAlreadyPaid = monthExpenses.some(matchesPlanTx);
+          const tenure = Number(plan?.tenureMonths) || 0;
+          if (!isAlreadyPaid && tenure > 0) {
+            const lifetimePaidCount = allExpenses.filter((tx) => {
+              if (tx?.date && tx.date.length >= 7 && tx.date.slice(0, 7) > targetMonthPrefix) return false;
+              return matchesPlanTx(tx);
+            }).length;
+            if (lifetimePaidCount >= tenure) {
+              continue;
+            }
+          }
+
+          totalCommittedByCategory.set(cat, (totalCommittedByCategory.get(cat) || 0) + amt);
+
+          if (!skipReserve && !isAlreadyPaid) {
             unpaidReserveByCategory.set(cat, (unpaidReserveByCategory.get(cat) || 0) + amt);
             const arr = unpaidItemsByCategory.get(cat) || [];
             arr.push({ name: name || 'Installment', amount: amt, kind: 'installment' });
@@ -847,16 +1034,8 @@ export function rebalanceCategoryCapsForSpending(params: {
   const daysInfo = getMonthDaysInfo(effectiveMonth, now);
 
   const locked = params.lockedCaps || getLockedCategoryCaps();
-  const baseCaps = params.currentCaps || getSavedCategoryCaps();
-  const updatedCaps: Record<string, number> = {};
-  CANONICAL_EXPENSE_CATEGORIES.forEach((cat) => {
-    updatedCaps[cat] = resolveCategoryCapValue(cat, baseCaps, DEFAULT_CATEGORY_CAPS[cat] ?? 50);
-  });
-  Object.keys(baseCaps).forEach((cat) => {
-    if (!(cat in updatedCaps)) {
-      updatedCaps[cat] = resolveCategoryCapValue(cat, baseCaps, 0);
-    }
-  });
+  const baseCaps = normalizeCategoryCapsRecord(params.currentCaps || getSavedCategoryCaps(), true, false);
+  const updatedCaps: Record<string, number> = { ...baseCaps };
 
   const currentTotalCaps = Object.values(updatedCaps).reduce((s, v) => s + v, 0);
   const maxBudget =
@@ -881,11 +1060,14 @@ export function rebalanceCategoryCapsForSpending(params: {
 
   const { unpaidReserveByCategory, totalCommittedByCategory } = getCategoryCommitmentBreakdown(
     validTxs,
-    effectiveMonth
+    effectiveMonth,
+    { referenceDate: now }
   );
 
   // 2. Expand target category (and any non-locked over-cap category) to cover (spent + unpaidBillReserve + proposedAmount)
-  const targetCat = params.targetCategory || '';
+  const targetCat = params.targetCategory
+    ? normalizeToCanonicalCategory(params.targetCategory, 'Expense')
+    : '';
   const proposed = Math.max(0, Number(params.proposedAmount) || 0);
   const previousTargetCap = targetCat ? updatedCaps[targetCat] ?? 0 : 0;
 
@@ -1102,22 +1284,22 @@ export function generateIntelligentCategoryCaps(
   }
 ): IntelligentBudgetPlan {
   const now = options?.referenceDate || new Date();
-  const profile = typeof window !== 'undefined' ? getUserMoneyProfile() : null;
-  const currentCaps = options?.configuredCaps || getSavedCategoryCaps();
+  const hasLocalStorage = typeof window !== 'undefined' || typeof localStorage !== 'undefined';
+  const profile = hasLocalStorage ? getUserMoneyProfile() : null;
+  const currentCaps = options?.configuredCaps
+    ? normalizeCategoryCapsRecord(options.configuredCaps, true, false)
+    : getSavedCategoryCaps();
   const locked = options?.lockedCaps || getLockedCategoryCaps();
 
   // 1. Resolve Monthly Income & Target Savings
-  const savedIncome =
-    typeof window !== 'undefined' ? parseFloat(localStorage.getItem('cashflow_baseline_income') || '0') : 0;
+  const savedIncome = hasLocalStorage ? parseFloat(localStorage.getItem('cashflow_baseline_income') || '0') : 0;
   const baselineIncome =
     options?.baselineIncome || (savedIncome > 0 ? savedIncome : profile?.baselineIncome ?? 3000);
 
-  const savedSavingsPct =
-    typeof window !== 'undefined' ? parseFloat(localStorage.getItem('cashflow_savings_target_pct') || '20') : 20;
+  const savedSavingsPct = hasLocalStorage ? parseFloat(localStorage.getItem('cashflow_savings_target_pct') || '20') : 20;
   const savingsTargetPct = options?.savingsTargetPct ?? (isNaN(savedSavingsPct) ? 20 : savedSavingsPct);
 
-  const savedInvestPct =
-    typeof window !== 'undefined' ? parseFloat(localStorage.getItem('cashflow_investment_target_pct') || '20') : 20;
+  const savedInvestPct = hasLocalStorage ? parseFloat(localStorage.getItem('cashflow_investment_target_pct') || '20') : 20;
   const investmentTargetPct = options?.investmentTargetPct ?? (isNaN(savedInvestPct) ? 20 : savedInvestPct);
 
   const totalSavingsPct = Math.min(80, Math.max(0, savingsTargetPct + investmentTargetPct));
@@ -1149,7 +1331,7 @@ export function generateIntelligentCategoryCaps(
     // Quarantine foreign trip expenses so vacation spending doesn't skew domestic monthly category caps
     if (isTripQuarantinedExpense(t)) return;
 
-    const cat = t.category || 'Other';
+    const cat = normalizeToCanonicalCategory(t.category || 'Other', 'Expense', t.description);
     const monthKey = t.date.slice(0, 7);
     const amount = getAmountInBaseCurrency(t.amount || 0, t.currency, t.baseAmount);
     if (amount <= 0) return;
@@ -1178,7 +1360,8 @@ export function generateIntelligentCategoryCaps(
 
   const { totalCommittedByCategory, unpaidReserveByCategory } = getCategoryCommitmentBreakdown(
     validTxs,
-    currentMonthPrefix
+    currentMonthPrefix,
+    { referenceDate: now }
   );
 
   // 3. Compute Statistical Profile per Category
@@ -1620,9 +1803,11 @@ export function generateIntelligentCategoryCaps(
  * All other categories (and any foreign-currency / trip-tagged expense) are lump-sum or trip-quarantined buckets.
  */
 export function isDailyCategory(category?: string): boolean {
-  if (!category) return false;
-  const normalized = category.trim().toLowerCase();
-  return normalized === 'food & dining' || normalized === 'food';
+  if (!category || !category.trim()) return false;
+  const trimmed = category.trim();
+  const normalized = trimmed.toLowerCase();
+  if (normalized === 'food & dining' || normalized === 'food') return true;
+  return normalizeToCanonicalCategory(trimmed, 'Expense') === 'Food & Dining';
 }
 
 /**
@@ -1674,25 +1859,61 @@ export function getAllBudgetCategoryRows(
   }
 ): BudgetCategoryRowItem[] {
   const now = options?.referenceDate || new Date();
-  const defaultMonthPrefix = options?.targetMonth || getLocalDateString(now).slice(0, 7);
+  const todayMonthPrefix = getLocalDateString(now).slice(0, 7);
+  const requestedTarget = options?.targetMonth;
+  const isYearMode = Boolean(requestedTarget && /^year-\d{4}$/.test(requestedTarget));
+  const isAllTime = requestedTarget === 'all';
   const validTxs = Array.isArray(currentMonthTransactions) ? currentMonthTransactions : [];
-  const monthFilter = resolveEffectiveMonthFilter(validTxs, defaultMonthPrefix, options?.targetMonth);
-  const effectiveMonth = monthFilter || defaultMonthPrefix;
-  const daysInfo = getMonthDaysInfo(effectiveMonth, now);
 
-  const savedCaps = options?.caps ? { ...DEFAULT_CATEGORY_CAPS, ...options.caps } : getSavedCategoryCaps();
-  const locked = options?.lockedCaps || getLockedCategoryCaps();
+  const monthFilter =
+    isYearMode || isAllTime
+      ? null
+      : resolveEffectiveMonthFilter(validTxs, todayMonthPrefix, requestedTarget);
+  const effectivePeriod =
+    requestedTarget && (isYearMode || isAllTime)
+      ? requestedTarget
+      : monthFilter || todayMonthPrefix;
+  const daysInfo = isAllTime
+    ? {
+        year: now.getFullYear(),
+        month: 0,
+        todayDate: 0,
+        totalDays: 0,
+        daysRemaining: 0,
+        isCurrentMonth: false,
+        isPastMonth: false,
+        isYearView: false,
+      }
+    : getMonthDaysInfo(effectivePeriod, now);
+
+  const savedCaps = options?.caps
+    ? normalizeCategoryCapsRecord(options.caps, true, false)
+    : getSavedCategoryCaps();
+  const rawLocked = options?.lockedCaps || getLockedCategoryCaps();
+  const locked: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(rawLocked || {})) {
+    if (v === true) locked[normalizeToCanonicalCategory(k, 'Expense')] = true;
+  }
+
   const { unpaidReserveByCategory, unpaidItemsByCategory } = getCategoryCommitmentBreakdown(
     validTxs,
-    effectiveMonth
+    effectivePeriod,
+    { referenceDate: now }
   );
+
+  const yearPrefix = isYearMode && requestedTarget ? requestedTarget.replace('year-', '') : '';
+  const capMultiplier = isYearMode ? 12 : isAllTime ? countActiveBudgetMonths(validTxs) : 1;
 
   const spentByCat = new Map<string, number>();
   for (const t of validTxs) {
     if (String(t?.type || '').toLowerCase() !== 'expense' || t?.id === 'tx_sample' || !t?.date) continue;
-    if (monthFilter && t.date.length >= 7 && !t.date.startsWith(monthFilter)) continue;
+    if (isYearMode) {
+      if (!t.date.startsWith(yearPrefix)) continue;
+    } else if (!isAllTime && monthFilter && t.date.length >= 7 && !t.date.startsWith(monthFilter)) {
+      continue;
+    }
     if (isTripQuarantinedExpense(t)) continue;
-    const cat = t.category || 'Other';
+    const cat = normalizeToCanonicalCategory(t.category || 'Other', 'Expense', t.description);
     const amt = getAmountInBaseCurrency(t.amount || 0, t.currency, t.baseAmount);
     if (amt > 0) {
       spentByCat.set(cat, (spentByCat.get(cat) || 0) + amt);
@@ -1702,14 +1923,15 @@ export function getAllBudgetCategoryRows(
   const allCategoryNames = Array.from(
     new Set([
       ...CANONICAL_EXPENSE_CATEGORIES,
-      ...Object.keys(savedCaps).map((c) => normalizeToCanonicalCategory(c)),
+      ...Object.keys(savedCaps).map((c) => normalizeToCanonicalCategory(c, 'Expense')),
       ...Array.from(spentByCat.keys()),
       ...Array.from(unpaidReserveByCategory.keys()),
     ])
   );
 
   const rows: BudgetCategoryRowItem[] = allCategoryNames.map((category) => {
-    const cap = resolveCategoryCapValue(category, savedCaps, DEFAULT_CATEGORY_CAPS[category] ?? (category === 'Parents' ? resolveCategoryCapValue('Family', savedCaps, 0) : 50)) || (category === 'Parents' ? resolveCategoryCapValue('Family', savedCaps, 0) : 0);
+    const baseCap = resolveCategoryCapValue(category, savedCaps, DEFAULT_CATEGORY_CAPS[category] ?? 50);
+    const cap = Number((baseCap * capMultiplier).toFixed(2));
     const spent = Number((spentByCat.get(category) || 0).toFixed(2));
     const unpaidBillReserve = Number((unpaidReserveByCategory.get(category) || 0).toFixed(2));
     const unreservedRemaining = Number(Math.max(0, cap - spent - unpaidBillReserve).toFixed(2));
@@ -1779,22 +2001,32 @@ export function fitCapsToLivingBudget(
   caps: Record<string, number>,
   maxLivingBudget: number,
   lockedCaps?: Record<string, boolean>,
-  currentMonthTransactions: GenericTransaction[] = []
+  currentMonthTransactions: GenericTransaction[] = [],
+  referenceDate?: Date
 ): Record<string, number> {
-  const locked = lockedCaps || getLockedCategoryCaps();
-  const mergedInput = Object.keys(caps).length > 0 ? { ...DEFAULT_CATEGORY_CAPS, ...caps } : { ...DEFAULT_CATEGORY_CAPS };
+  const rawLocked = lockedCaps || getLockedCategoryCaps();
+  const locked: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(rawLocked || {})) {
+    if (v === true) locked[normalizeToCanonicalCategory(k, 'Expense')] = true;
+  }
+
+  const mergedInput = normalizeCategoryCapsRecord(caps, true, false);
   const result: Record<string, number> = {};
   const keys = Object.keys(mergedInput);
 
   // Compute current month spent + unpaid bill reserves so Auto-Fit never cuts below what you already spent!
-  const currentMonthPrefix = getLocalDateString().slice(0, 7);
-  const { unpaidReserveByCategory } = getCategoryCommitmentBreakdown(currentMonthTransactions, currentMonthPrefix);
+  const currentMonthPrefix = getLocalDateString(referenceDate).slice(0, 7);
+  const { unpaidReserveByCategory } = getCategoryCommitmentBreakdown(
+    currentMonthTransactions,
+    currentMonthPrefix,
+    { referenceDate }
+  );
   const spentByCat = new Map<string, number>();
   for (const t of Array.isArray(currentMonthTransactions) ? currentMonthTransactions : []) {
     if (String(t?.type || '').toLowerCase() !== 'expense' || t?.id === 'tx_sample') continue;
     if (t?.date && t.date.length >= 7 && !t.date.startsWith(currentMonthPrefix)) continue;
     if (isTripQuarantinedExpense(t)) continue;
-    const cat = t.category || 'Other';
+    const cat = normalizeToCanonicalCategory(t.category || 'Other', 'Expense', t.description);
     const amt = getAmountInBaseCurrency(t.amount || 0, t.currency, t.baseAmount);
     if (amt > 0) spentByCat.set(cat, (spentByCat.get(cat) || 0) + amt);
   }
@@ -1909,19 +2141,17 @@ export function predictMonthlySavingsAndInvestments(
     referenceDate?: Date;
   }
 ): MonthlySavingsPrediction {
-  const profile = typeof window !== 'undefined' ? getUserMoneyProfile() : null;
+  const hasLocalStorage = typeof window !== 'undefined' || typeof localStorage !== 'undefined';
+  const profile = hasLocalStorage ? getUserMoneyProfile() : null;
 
-  const savedIncome =
-    typeof window !== 'undefined' ? parseFloat(localStorage.getItem('cashflow_baseline_income') || '0') : 0;
+  const savedIncome = hasLocalStorage ? parseFloat(localStorage.getItem('cashflow_baseline_income') || '0') : 0;
   const baselineIncome =
     options?.baselineIncome || (savedIncome > 0 ? savedIncome : profile?.baselineIncome ?? 3000);
 
-  const savedSavingsPct =
-    typeof window !== 'undefined' ? parseFloat(localStorage.getItem('cashflow_savings_target_pct') || '20') : 20;
+  const savedSavingsPct = hasLocalStorage ? parseFloat(localStorage.getItem('cashflow_savings_target_pct') || '20') : 20;
   const savingsTargetPct = options?.savingsTargetPct ?? (isNaN(savedSavingsPct) ? 20 : savedSavingsPct);
 
-  const savedInvestPct =
-    typeof window !== 'undefined' ? parseFloat(localStorage.getItem('cashflow_investment_target_pct') || '20') : 20;
+  const savedInvestPct = hasLocalStorage ? parseFloat(localStorage.getItem('cashflow_investment_target_pct') || '20') : 20;
   const investmentTargetPct = options?.investmentTargetPct ?? (isNaN(savedInvestPct) ? 20 : savedInvestPct);
 
   const totalSavingsTargetPct = Math.min(90, Math.max(0, savingsTargetPct + investmentTargetPct));
@@ -1930,15 +2160,21 @@ export function predictMonthlySavingsAndInvestments(
   const totalTargetSavings = targetSavingsAmount + targetInvestmentAmount;
   const targetLivingBudget = Math.max(0, baselineIncome - totalTargetSavings);
 
-  const daysInfo = getMonthDaysInfo(options?.selectedMonth, options?.referenceDate);
+  const refNow = options?.referenceDate || new Date();
+  const fallbackTodayMonth = getLocalDateString(refNow).slice(0, 7);
+  const explicitSingleMonth =
+    options?.selectedMonth && /^\d{4}-\d{2}$/.test(options.selectedMonth)
+      ? options.selectedMonth
+      : undefined;
+  const validTxs = Array.isArray(currentMonthTransactions) ? currentMonthTransactions : [];
+  const monthFilter = resolveEffectiveMonthFilter(validTxs, fallbackTodayMonth, explicitSingleMonth);
+  const effectiveMonth = explicitSingleMonth || monthFilter || fallbackTodayMonth;
+
+  const daysInfo = getMonthDaysInfo(effectiveMonth, options?.referenceDate);
   const totalDaysInMonth = daysInfo.totalDays || 30;
   const todayDate = options?.referenceDate ? options.referenceDate.getDate() : daysInfo.todayDate || 1;
   const daysPassed = Math.max(1, Math.min(totalDaysInMonth, todayDate));
   const daysRemaining = Math.max(0, totalDaysInMonth - daysPassed);
-  const defaultMonthPrefix = `${daysInfo.year}-${String(daysInfo.month || new Date().getMonth() + 1).padStart(2, '0')}`;
-
-  const validTxs = Array.isArray(currentMonthTransactions) ? currentMonthTransactions : [];
-  const monthFilter = resolveEffectiveMonthFilter(validTxs, defaultMonthPrefix, options?.selectedMonth);
 
   let lumpSumSpent = 0;
   let dailyVariableSpent = 0;
@@ -1957,7 +2193,7 @@ export function predictMonthlySavingsAndInvestments(
       return;
     }
 
-    const cat = t.category || 'Other';
+    const cat = normalizeToCanonicalCategory(t.category || 'Other', 'Expense', t.description);
     if (isLumpSumExpense(cat, amt, t)) {
       lumpSumSpent += amt;
     } else {
@@ -1970,7 +2206,9 @@ export function predictMonthlySavingsAndInvestments(
   tripQuarantinedSpent = Number(tripQuarantinedSpent.toFixed(2));
   const spentSoFar = Number((lumpSumSpent + dailyVariableSpent).toFixed(2));
 
-  const { unpaidReserveByCategory } = getCategoryCommitmentBreakdown(validTxs, monthFilter || defaultMonthPrefix);
+  const { unpaidReserveByCategory } = getCategoryCommitmentBreakdown(validTxs, effectiveMonth, {
+    referenceDate: options?.referenceDate,
+  });
   let unpaidCommittedReserve = 0;
   unpaidReserveByCategory.forEach((amt) => {
     unpaidCommittedReserve += amt;
@@ -2095,7 +2333,8 @@ export function computePaydaySettlementEnvelope(
   const validTxs = Array.isArray(currentMonthTransactions) ? currentMonthTransactions : [];
   const monthFilter = resolveEffectiveMonthFilter(validTxs, defaultMonthPrefix);
 
-  const profile = typeof window !== 'undefined' ? getUserMoneyProfile() : null;
+  const hasLocalStorage = typeof window !== 'undefined' || typeof localStorage !== 'undefined';
+  const profile = hasLocalStorage ? getUserMoneyProfile() : null;
   const rawPayday = options?.paydayDay ?? profile?.paydayDay ?? 25;
   const daysInfo = getMonthDaysInfo(undefined, now);
   const todayDate = now.getDate();
@@ -2110,17 +2349,14 @@ export function computePaydaySettlementEnvelope(
   const isPaydayWeek = daysSincePayday >= 0 && daysSincePayday <= 6;
   const cyclePhase: 'living_phase' | 'payday_settlement' = isPaydayWeek ? 'payday_settlement' : 'living_phase';
 
-  const savedIncome =
-    typeof window !== 'undefined' ? parseFloat(localStorage.getItem('cashflow_baseline_income') || '0') : 0;
+  const savedIncome = hasLocalStorage ? parseFloat(localStorage.getItem('cashflow_baseline_income') || '0') : 0;
   const baselineIncome =
     options?.baselineIncome || (savedIncome > 0 ? savedIncome : profile?.baselineIncome ?? 3000);
 
-  const savedSavingsPct =
-    typeof window !== 'undefined' ? parseFloat(localStorage.getItem('cashflow_savings_target_pct') || '20') : 20;
+  const savedSavingsPct = hasLocalStorage ? parseFloat(localStorage.getItem('cashflow_savings_target_pct') || '20') : 20;
   const savingsTargetPct = options?.savingsTargetPct ?? (isNaN(savedSavingsPct) ? 20 : savedSavingsPct);
 
-  const savedInvestPct =
-    typeof window !== 'undefined' ? parseFloat(localStorage.getItem('cashflow_investment_target_pct') || '20') : 20;
+  const savedInvestPct = hasLocalStorage ? parseFloat(localStorage.getItem('cashflow_investment_target_pct') || '20') : 20;
   const investmentTargetPct = options?.investmentTargetPct ?? (isNaN(savedInvestPct) ? 20 : savedInvestPct);
 
   let salaryRecordedThisMonth = 0;
@@ -2257,22 +2493,20 @@ export function getPaydayCycleIntelligence(
   const now = options?.referenceDate || new Date();
   const todayDate = now.getDate();
   const daysInfo = getMonthDaysInfo(undefined, now);
-  const profile = typeof window !== 'undefined' ? getUserMoneyProfile() : null;
+  const hasLocalStorage = typeof window !== 'undefined' || typeof localStorage !== 'undefined';
+  const profile = hasLocalStorage ? getUserMoneyProfile() : null;
 
   const rawPayday = options?.paydayDay ?? profile?.paydayDay ?? 25;
   const effectivePaydayInThisMonth = Math.min(Math.max(1, rawPayday), daysInfo.totalDays);
 
-  const savedIncome =
-    typeof window !== 'undefined' ? parseFloat(localStorage.getItem('cashflow_baseline_income') || '0') : 0;
+  const savedIncome = hasLocalStorage ? parseFloat(localStorage.getItem('cashflow_baseline_income') || '0') : 0;
   const baselineIncome =
     options?.baselineIncome || (savedIncome > 0 ? savedIncome : profile?.baselineIncome ?? 3000);
 
-  const savedSavingsPct =
-    typeof window !== 'undefined' ? parseFloat(localStorage.getItem('cashflow_savings_target_pct') || '20') : 20;
+  const savedSavingsPct = hasLocalStorage ? parseFloat(localStorage.getItem('cashflow_savings_target_pct') || '20') : 20;
   const savingsTargetPct = options?.savingsTargetPct ?? (isNaN(savedSavingsPct) ? 20 : savedSavingsPct);
 
-  const savedInvestPct =
-    typeof window !== 'undefined' ? parseFloat(localStorage.getItem('cashflow_investment_target_pct') || '20') : 20;
+  const savedInvestPct = hasLocalStorage ? parseFloat(localStorage.getItem('cashflow_investment_target_pct') || '20') : 20;
   const investmentTargetPct = options?.investmentTargetPct ?? (isNaN(savedInvestPct) ? 20 : savedInvestPct);
 
   const totalSavingsPct = Math.min(80, Math.max(0, savingsTargetPct + investmentTargetPct));
@@ -2400,8 +2634,9 @@ export function getCategoryRealtimeBudgetStatus(
     lockedCaps?: Record<string, boolean>;
   }
 ): CategoryRealtimeBudgetStatus {
-  const currentCaps = caps || getSavedCategoryCaps();
-  const cap = resolveCategoryCapValue(category, currentCaps, 500);
+  const canonicalCategory = normalizeToCanonicalCategory(category || 'Other', 'Expense');
+  const currentCaps = caps ? normalizeCategoryCapsRecord(caps, false, false) : getSavedCategoryCaps();
+  const cap = resolveCategoryCapValue(canonicalCategory, currentCaps, 500);
   const now = options?.referenceDate || new Date();
   const todayStr = getLocalDateString(now);
   const defaultMonthPrefix = options?.targetMonth || todayStr.slice(0, 7);
@@ -2420,7 +2655,8 @@ export function getCategoryRealtimeBudgetStatus(
     if (monthFilter && t.date.length >= 7 && !t.date.startsWith(monthFilter)) return;
     if (isTripQuarantinedExpense(t)) return;
 
-    if (t.category === category) {
+    const txCat = normalizeToCanonicalCategory(t.category || 'Other', 'Expense', t.description);
+    if (txCat === canonicalCategory) {
       const amt = getAmountInBaseCurrency(t.amount || 0, t.currency, t.baseAmount);
       spentSoFar += amt;
       if (t.date === todayStr) {
@@ -2429,9 +2665,11 @@ export function getCategoryRealtimeBudgetStatus(
     }
   });
 
-  const { unpaidReserveByCategory, unpaidItemsByCategory } = getCategoryCommitmentBreakdown(validTxs, effectiveMonth);
-  const committedReserve = Number((unpaidReserveByCategory.get(category) || 0).toFixed(2));
-  const unpaidItems = unpaidItemsByCategory.get(category) || [];
+  const { unpaidReserveByCategory, unpaidItemsByCategory } = getCategoryCommitmentBreakdown(validTxs, effectiveMonth, {
+    referenceDate: now,
+  });
+  const committedReserve = Number((unpaidReserveByCategory.get(canonicalCategory) || 0).toFixed(2));
+  const unpaidItems = unpaidItemsByCategory.get(canonicalCategory) || [];
 
   const remainingBefore = Math.max(0, cap - spentSoFar);
   const unreservedRemainingBefore = Math.max(0, cap - spentSoFar - committedReserve);
@@ -2445,7 +2683,7 @@ export function getCategoryRealtimeBudgetStatus(
   const isOverCapAfter = cap > 0 ? spentAfter > cap : spentAfter > 0;
   const spentPercentAfter = cap > 0 ? (spentAfter / cap) * 100 : spentAfter > 0 ? 100 : 0;
 
-  const dailyCat = isDailyCategory(category);
+  const dailyCat = isDailyCategory(canonicalCategory);
   const dailyAllowanceRemaining =
     daysInfo.daysRemaining > 0 ? Number((unreservedRemainingBefore / daysInfo.daysRemaining).toFixed(2)) : 0;
 
@@ -2489,7 +2727,7 @@ export function getCategoryRealtimeBudgetStatus(
   let billReserveNote: string | undefined;
   if (committedReserve > 0) {
     const names = unpaidItems.map((i) => `${i.name} RM ${i.amount.toFixed(0)}`).join(', ');
-    billReserveNote = `📌 Bill Reserve in ${category}: RM ${committedReserve.toFixed(2)} reserved for upcoming bills (${names}) · Free unreserved balance: RM ${Math.max(0, unreservedRemainingAfter).toFixed(2)}.`;
+    billReserveNote = `📌 Bill Reserve in ${canonicalCategory}: RM ${committedReserve.toFixed(2)} reserved for upcoming bills (${names}) · Free unreserved balance: RM ${Math.max(0, unreservedRemainingAfter).toFixed(2)}.`;
   }
 
   let rebalanceSuggestion: CategoryRebalanceSuggestion | undefined;
@@ -2499,7 +2737,7 @@ export function getCategoryRealtimeBudgetStatus(
       currentCaps,
       lockedCaps: options?.lockedCaps,
       maxLivingBudget: options?.maxLivingBudget,
-      targetCategory: category,
+      targetCategory: canonicalCategory,
       proposedAmount: validProposed,
       targetMonth: effectiveMonth,
       referenceDate: now,
@@ -2507,7 +2745,7 @@ export function getCategoryRealtimeBudgetStatus(
   }
 
   return {
-    category,
+    category: canonicalCategory,
     cap,
     spentSoFar: Number(spentSoFar.toFixed(2)),
     committedReserve,
@@ -2601,7 +2839,8 @@ export function getUnifiedIncomeAllocation(
     referenceDate?: Date;
   }
 ): UnifiedIncomeAllocation {
-  const profile = typeof window !== 'undefined' ? getUserMoneyProfile() : null;
+  const hasLocalStorage = typeof window !== 'undefined' || typeof localStorage !== 'undefined';
+  const profile = hasLocalStorage ? getUserMoneyProfile() : null;
   const now = options?.referenceDate || new Date();
   const currentMonthPrefix =
     options?.selectedMonth && /^\d{4}-\d{2}$/.test(options.selectedMonth)
@@ -2609,8 +2848,7 @@ export function getUnifiedIncomeAllocation(
       : getLocalDateString(now).slice(0, 7);
   const currentYearPrefix = currentMonthPrefix.slice(0, 4);
 
-  const savedIncome =
-    typeof window !== 'undefined' ? parseFloat(localStorage.getItem('cashflow_baseline_income') || '0') : 0;
+  const savedIncome = hasLocalStorage ? parseFloat(localStorage.getItem('cashflow_baseline_income') || '0') : 0;
 
   const validTxs = Array.isArray(allTransactions) ? allTransactions : [];
   const salaryByMonth = new Map<string, number>();
@@ -2758,6 +2996,11 @@ export function saveUnifiedIncomeAllocation(params: {
 
   if (typeof window !== 'undefined' || typeof localStorage !== 'undefined') {
     try {
+      const prevIncome = localStorage.getItem('cashflow_baseline_income');
+      const prevSav = localStorage.getItem('cashflow_savings_target_pct');
+      const prevInv = localStorage.getItem('cashflow_investment_target_pct');
+      const prevBudget = localStorage.getItem('cashflow_monthly_budget');
+
       localStorage.setItem('cashflow_baseline_income', String(income));
       localStorage.setItem('cashflow_savings_target_pct', String(savPct));
       localStorage.setItem('cashflow_investment_target_pct', String(invPct));
@@ -2765,10 +3008,10 @@ export function saveUnifiedIncomeAllocation(params: {
       import('./cloud-settings-sync.ts')
         .then((mod) => {
           if (mod?.saveSettingWithCloudSync) {
-            mod.saveSettingWithCloudSync('cashflow_baseline_income', String(income));
-            mod.saveSettingWithCloudSync('cashflow_savings_target_pct', String(savPct));
-            mod.saveSettingWithCloudSync('cashflow_investment_target_pct', String(invPct));
-            mod.saveSettingWithCloudSync('cashflow_monthly_budget', String(targetLivingBudget));
+            if (prevIncome !== String(income)) mod.saveSettingWithCloudSync('cashflow_baseline_income', String(income), { forceSync: true });
+            if (prevSav !== String(savPct)) mod.saveSettingWithCloudSync('cashflow_savings_target_pct', String(savPct), { forceSync: true });
+            if (prevInv !== String(invPct)) mod.saveSettingWithCloudSync('cashflow_investment_target_pct', String(invPct), { forceSync: true });
+            if (prevBudget !== String(targetLivingBudget)) mod.saveSettingWithCloudSync('cashflow_monthly_budget', String(targetLivingBudget), { forceSync: true });
           }
         })
         .catch(() => {});

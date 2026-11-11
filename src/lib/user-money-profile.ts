@@ -29,17 +29,22 @@ export const CLOUD_SYNC_KEYS = {
 
 function saveProfileSetting(key: string, value: string): void {
   if (typeof window === 'undefined') return;
+  let changed = true;
   try {
+    changed = localStorage.getItem(key) !== value;
     localStorage.setItem(key, value);
     window.dispatchEvent(new CustomEvent('cashflow_cloud_settings_synced', { detail: { key, value } }));
   } catch (err) {
     console.error(`[UserProfile] Storage error for ${key}:`, err);
   }
 
-  // Trigger cloud sync in browser
+  if (!changed) return;
+
+  // Trigger cloud sync in browser; forceSync ensures writing localStorage first
+  // does not short-circuit saveSettingWithCloudSync's diff check.
   try {
     import('./cloud-settings-sync.ts').then((mod) => {
-      mod.saveSettingWithCloudSync(key, value);
+      mod.saveSettingWithCloudSync(key, value, { forceSync: true });
     }).catch(() => {});
   } catch {}
 }
@@ -163,7 +168,7 @@ export function detectSuggestedPayday(
 export function getUserMoneyProfile(
   transactions?: Array<{ type?: string; date?: string; amount?: number }>
 ): UserMoneyProfile {
-  if (typeof window === 'undefined') {
+  if (typeof window === 'undefined' && typeof localStorage === 'undefined') {
     return {
       language: 'auto',
       paydayDay: null,

@@ -20,6 +20,8 @@ import { RecurringCommitments } from '@/components/dashboard/recurring-commitmen
 import { InstallmentDashboard } from '@/components/dashboard/installment-dashboard';
 import {
   getSavedCategoryCaps,
+  getLockedCategoryCaps,
+  saveLockedCategoryCaps,
   getAllBudgetCategoryRows,
   type BudgetCategoryRowItem,
   getTripEnvelopeSummaries,
@@ -27,6 +29,10 @@ import {
   type TripEnvelopeStatus,
   saveCategoryCaps,
   calculateDailySafeSpend,
+  getMonthDaysInfo,
+  isTripQuarantinedExpense,
+  countActiveBudgetMonths,
+  resolveCategoryCapValue,
   DEFAULT_CATEGORY_CAPS,
   generateIntelligentCategoryCaps,
   getPaydayCycleIntelligence,
@@ -42,6 +48,7 @@ import {
   type MonthlySavingsPrediction,
   type CategoryRebalanceSuggestion,
 } from '@/lib/category-budget-helper';
+import { CANONICAL_EXPENSE_CATEGORIES, normalizeToCanonicalCategory } from '@/lib/canonical-categories';
 import { LAYOUT_TOKENS } from '@/lib/design-tokens';
 import { saveSettingWithCloudSync, SETTINGS_UPDATED_EVENT } from '@/lib/cloud-settings-sync';
 import { useMonthList } from '@/hooks/useSheets';
@@ -186,24 +193,34 @@ export default function BudgetPage() {
   }, [transactions, selectedMonth]);
 
   const monthlyExpenses = useMemo(() => {
-    return monthlyTransactions.filter(t => t.type === 'expense');
+    return monthlyTransactions.filter(t => String(t.type || '').toLowerCase() === 'expense');
   }, [monthlyTransactions]);
 
-  const totalSpent = useMemo(() => {
-    return monthlyExpenses.reduce((sum, t) => sum + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount), 0);
+  const monthlyLivingExpenses = useMemo(() => {
+    return monthlyExpenses.filter(t => !isTripQuarantinedExpense(t));
   }, [monthlyExpenses]);
 
-  // Scoped category breakdown for selected month
+  const tripQuarantinedSpent = useMemo(() => {
+    return monthlyExpenses
+      .filter(t => isTripQuarantinedExpense(t))
+      .reduce((sum, t) => sum + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount), 0);
+  }, [monthlyExpenses]);
+
+  const totalSpent = useMemo(() => {
+    return monthlyLivingExpenses.reduce((sum, t) => sum + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount), 0);
+  }, [monthlyLivingExpenses]);
+
+  // Scoped canonical category breakdown for selected month (excluding quarantined trip expenses)
   const breakdown = useMemo(() => {
     const catMap: Record<string, number> = {};
-    monthlyExpenses.forEach(t => {
-      const cat = t.category || 'Other';
+    monthlyLivingExpenses.forEach(t => {
+      const cat = normalizeToCanonicalCategory(t.category || 'Other', 'Expense', t.description);
       catMap[cat] = (catMap[cat] || 0) + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount);
     });
     return Object.entries(catMap)
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value);
-  }, [monthlyExpenses]);
+  }, [monthlyLivingExpenses]);
 
   const [monthlyBudget, setMonthlyBudget] = useState(3000);
   const [isEditingBudget, setIsEditingBudget] = useState(false);
@@ -227,20 +244,12 @@ export default function BudgetPage() {
     });
   }, [allTransactions, transactions, categoryCaps, lockedCategories, selectedMonth]);
 
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem('cashflow_locked_category_caps');
-      if (raw) setLockedCategories(JSON.parse(raw));
-    } catch {}
-  }, []);
-
   const toggleLockCategory = (categoryName: string) => {
     setLockedCategories((prev) => {
-      const next = { ...prev, [categoryName]: !prev[categoryName] };
-      try {
-        localStorage.setItem('cashflow_locked_category_caps', JSON.stringify(next));
-      } catch {}
-      toast.info(next[categoryName] ? `Locked cap for ${categoryName}` : `Unlocked cap for ${categoryName}`);
+      const canonical = normalizeToCanonicalCategory(categoryName, 'Expense');
+      const next = { ...prev, [canonical]: !prev[canonical] };
+      saveLockedCategoryCaps(next);
+      toast.info(next[canonical] ? `Locked cap for ${canonical}` : `Unlocked cap for ${canonical}`);
       return next;
     });
   };
@@ -256,6 +265,7 @@ export default function BudgetPage() {
         }
       }
       setCategoryCaps(getSavedCategoryCaps());
+      setLockedCategories(getLockedCategoryCaps());
     };
 
     loadBudgetSettings();
@@ -276,7 +286,8 @@ export default function BudgetPage() {
   const handleSaveCategoryCap = (categoryName: string) => {
     const parsed = parseFloat(categoryCapInput);
     if (!isNaN(parsed) && parsed >= 0) {
-      const updated = { ...categoryCaps, [categoryName]: parsed };
+      const canonical = normalizeToCanonicalCategory(categoryName, 'Expense');
+      const updated = { ...categoryCaps, [canonical]: parsed };
       setCategoryCaps(updated);
       saveCategoryCaps(updated);
     }
@@ -284,20 +295,63 @@ export default function BudgetPage() {
     setCategoryCapInput('');
   };
 
+  const fullLedgerTransactions = useMemo(
+    () => (allTransactions.length > 0 ? allTransactions : transactions),
+    [allTransactions, transactions]
+  );
+
   const isYearMode = selectedMonth.startsWith('year-');
-  const effectiveBudget = isYearMode ? monthlyBudget * 12 : monthlyBudget;
+  const isAllTimeMode = selectedMonth === 'all';
+  const allTimeActiveMonths = useMemo(
+    () => countActiveBudgetMonths(fullLedgerTransactions),
+    [fullLedgerTransactions]
+  );
+  const effectiveBudget = isYearMode
+    ? monthlyBudget * 12
+    : isAllTimeMode
+    ? monthlyBudget * allTimeActiveMonths
+    : monthlyBudget;
   const progressPercent = effectiveBudget > 0 ? Math.min((totalSpent / effectiveBudget) * 100, 100) : 0;
   const circumference = 2 * Math.PI * 45; // ~282.7
   const strokeDashoffset = circumference - (circumference * progressPercent) / 100;
   const isOverBudget = totalSpent > effectiveBudget;
 
+  // AI Dynamic Category Caps calculation
+  const intelligentPlan = useMemo(() => {
+    return generateIntelligentCategoryCaps(
+      fullLedgerTransactions,
+      { configuredCaps: categoryCaps, lockedCaps: lockedCategories }
+    );
+  }, [fullLedgerTransactions, categoryCaps, lockedCategories]);
+
+  // Real-time Month-End Savings & Investments Prediction based on daily spend
+  const savingsPrediction = useMemo(() => {
+    return predictMonthlySavingsAndInvestments(fullLedgerTransactions, {
+      selectedMonth: isYearMode || isAllTimeMode ? currentMonthStr : selectedMonth,
+      baselineIncome: intelligentPlan.baselineIncome,
+      savingsTargetPct: intelligentPlan.savingsTargetPct,
+      investmentTargetPct: intelligentPlan.investmentTargetPct,
+    });
+  }, [fullLedgerTransactions, selectedMonth, isYearMode, isAllTimeMode, currentMonthStr, intelligentPlan]);
+
+  const heroDaysInfo = useMemo(
+    () => (isAllTimeMode ? null : getMonthDaysInfo(selectedMonth)),
+    [isAllTimeMode, selectedMonth]
+  );
+
+  const heroUnpaidReserve =
+    isAllTimeMode || isYearMode || heroDaysInfo?.isPastMonth
+      ? 0
+      : savingsPrediction?.unpaidCommittedReserve || 0;
+
   // Daily Safe-to-Spend calculations scoped to selected month
   const dailyInfo = useMemo(() => {
-    if (selectedMonth === 'all') {
+    if (isAllTimeMode) {
       return {
         totalBudget: effectiveBudget,
         totalSpent,
         remainingBudget: Math.max(0, effectiveBudget - totalSpent),
+        safeRemainingBudget: Math.max(0, effectiveBudget - totalSpent),
         dailyAllowance: 0,
         daysRemaining: 0,
         todayDate: 0,
@@ -310,46 +364,50 @@ export default function BudgetPage() {
         isAllTime: true,
       };
     }
-    return { ...calculateDailySafeSpend(effectiveBudget, totalSpent, selectedMonth), isAllTime: false };
-  }, [effectiveBudget, totalSpent, selectedMonth, isOverBudget]);
-
-  // AI Dynamic Category Caps calculation
-  const intelligentPlan = useMemo(() => {
-    return generateIntelligentCategoryCaps(
-      allTransactions.length > 0 ? allTransactions : transactions,
-      { configuredCaps: categoryCaps, lockedCaps: lockedCategories }
-    );
-  }, [allTransactions, transactions, categoryCaps, lockedCategories]);
+    return {
+      ...calculateDailySafeSpend(effectiveBudget, totalSpent, selectedMonth, undefined, {
+        unpaidReserve: heroUnpaidReserve,
+      }),
+      isAllTime: false,
+    };
+  }, [isAllTimeMode, effectiveBudget, totalSpent, selectedMonth, isOverBudget, heroUnpaidReserve]);
 
   // Trip Budget Envelopes (Pillar 2.1)
   const tripSummaries = useMemo(() => {
-    return getTripEnvelopeSummaries(allTransactions.length > 0 ? allTransactions : transactions);
-  }, [allTransactions, transactions]);
+    return getTripEnvelopeSummaries(fullLedgerTransactions);
+  }, [fullLedgerTransactions]);
 
   // Payday Cycle & Savings Shield intelligence
   const paydayInfo = useMemo(() => {
-    const curMonthTxs = (allTransactions.length > 0 ? allTransactions : transactions).filter(
+    const curMonthTxs = fullLedgerTransactions.filter(
       (t) => t.date && t.date.startsWith(currentMonthStr)
     );
     return getPaydayCycleIntelligence(curMonthTxs);
-  }, [allTransactions, transactions, currentMonthStr]);
+  }, [fullLedgerTransactions, currentMonthStr]);
 
-  // Food & Dining burn rate & daily allowance
+  // Food & Dining burn rate & daily allowance (aligned with Food & Dining category row)
   const foodInfo = useMemo(() => {
-    const foodCap = categoryCaps['Food & Dining'] || DEFAULT_CATEGORY_CAPS['Food & Dining'] || 1200;
+    const foodRow = budgetCategoryRows.find((r) => r.category === 'Food & Dining');
+    const foodCap = foodRow ? foodRow.cap : resolveCategoryCapValue('Food & Dining', categoryCaps, DEFAULT_CATEGORY_CAPS['Food & Dining'] || 1200);
+    const foodSpent = foodRow
+      ? foodRow.spent
+      : monthlyLivingExpenses
+          .filter((t) => normalizeToCanonicalCategory(t.category || 'Other', 'Expense', t.description) === 'Food & Dining')
+          .reduce((sum, t) => sum + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount), 0);
+    const foodReserve = foodRow ? foodRow.unpaidBillReserve : 0;
+    const remainingFood = foodRow
+      ? Math.max(0, foodRow.unreservedRemaining)
+      : Math.max(0, foodCap - foodSpent - foodReserve);
+    const isOver = foodRow ? foodRow.isOverCap : foodSpent + foodReserve > foodCap;
+
     const now = new Date();
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-
-    const foodTxs = monthlyExpenses.filter((t) => t.category === 'Food & Dining');
-    const foodSpent = foodTxs.reduce(
-      (sum, t) => sum + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount),
-      0
-    );
-    const remainingFood = Math.max(0, foodCap - foodSpent);
-    const isOver = foodSpent > foodCap;
-
-    const todayFoodTxs = (allTransactions.length > 0 ? allTransactions : transactions).filter(
-      (t) => t.type === 'expense' && t.category === 'Food & Dining' && t.date === todayStr
+    const todayFoodTxs = fullLedgerTransactions.filter(
+      (t) =>
+        String(t.type || '').toLowerCase() === 'expense' &&
+        t.date === todayStr &&
+        !isTripQuarantinedExpense(t) &&
+        normalizeToCanonicalCategory(t.category || 'Other', 'Expense', t.description) === 'Food & Dining'
     );
     const todayFoodSpent = todayFoodTxs.reduce(
       (sum, t) => sum + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount),
@@ -357,13 +415,14 @@ export default function BudgetPage() {
     );
 
     const daysRemaining = dailyInfo.daysRemaining;
-    const safeDailyFoodAllowance = daysRemaining > 0 ? remainingFood / daysRemaining : 0;
-    const percentUsed = foodCap > 0 ? (foodSpent / foodCap) * 100 : 0;
+    const safeDailyFoodAllowance = foodRow ? foodRow.dailyAllowance : daysRemaining > 0 ? remainingFood / daysRemaining : 0;
+    const percentUsed = foodRow ? foodRow.spentPercent : foodCap > 0 ? (foodSpent / foodCap) * 100 : 0;
     const isTodayOverDaily = todayFoodSpent > safeDailyFoodAllowance && safeDailyFoodAllowance > 0;
 
     return {
       foodCap,
       foodSpent,
+      foodReserve,
       remainingFood,
       isOver,
       todayFoodSpent,
@@ -372,28 +431,21 @@ export default function BudgetPage() {
       percentUsed,
       isTodayOverDaily,
     };
-  }, [categoryCaps, monthlyExpenses, allTransactions, transactions, dailyInfo.daysRemaining]);
+  }, [budgetCategoryRows, categoryCaps, monthlyLivingExpenses, fullLedgerTransactions, dailyInfo.daysRemaining]);
 
-  // Real-time Month-End Savings & Investments Prediction based on daily spend
-  const savingsPrediction = useMemo(() => {
-    return predictMonthlySavingsAndInvestments(monthlyTransactions, {
-      selectedMonth,
-      baselineIncome: intelligentPlan.baselineIncome,
-      savingsTargetPct: intelligentPlan.savingsTargetPct,
-      investmentTargetPct: intelligentPlan.investmentTargetPct,
-    });
-  }, [monthlyTransactions, selectedMonth, intelligentPlan]);
-
-  // Cap Sum strictly lower than or equal to Income - Savings
+  // Cap Sum strictly lower than or equal to Income - Savings (over canonical expense categories only)
   const configuredCapsSum = useMemo(() => {
-    return Object.values(categoryCaps).reduce((sum, v) => sum + (Number(v) || 0), 0);
+    return CANONICAL_EXPENSE_CATEGORIES.reduce(
+      (sum, cat) => sum + resolveCategoryCapValue(cat, categoryCaps, 0),
+      0
+    );
   }, [categoryCaps]);
 
   const maxLivingBudget = intelligentPlan.targetLivingBudget;
   const isCapsSumExceeded = configuredCapsSum > maxLivingBudget;
 
   const handleAutoFitCaps = () => {
-    const fitted = fitCapsToLivingBudget(categoryCaps, maxLivingBudget, lockedCategories);
+    const fitted = fitCapsToLivingBudget(categoryCaps, maxLivingBudget, lockedCategories, fullLedgerTransactions);
     setCategoryCaps(fitted);
     saveCategoryCaps(fitted);
     toast.success(`Caps scaled down to RM ${maxLivingBudget.toLocaleString()} to strictly protect your savings target!`);
@@ -401,10 +453,9 @@ export default function BudgetPage() {
 
   // Cross-category smart rebalance suggestion if any category exceeds cap or touches reserved bills
   const topRebalanceSuggestion = useMemo<CategoryRebalanceSuggestion | null>(() => {
-    const txs = allTransactions.length > 0 ? allTransactions : transactions;
     for (const row of budgetCategoryRows) {
       if (row.isOverCap || row.unreservedRemaining < 0) {
-        const status = getCategoryRealtimeBudgetStatus(row.category, txs, categoryCaps, 0, {
+        const status = getCategoryRealtimeBudgetStatus(row.category, fullLedgerTransactions, categoryCaps, 0, {
           targetMonth: selectedMonth,
           lockedCaps: lockedCategories,
           maxLivingBudget,
@@ -415,7 +466,7 @@ export default function BudgetPage() {
       }
     }
     return null;
-  }, [budgetCategoryRows, allTransactions, transactions, categoryCaps, selectedMonth, lockedCategories, maxLivingBudget]);
+  }, [budgetCategoryRows, fullLedgerTransactions, categoryCaps, selectedMonth, lockedCategories, maxLivingBudget]);
 
   const [isAutoTuneOpen, setIsAutoTuneOpen] = useState(false);
   const [customCapsDraft, setCustomCapsDraft] = useState<Record<string, number>>({});
@@ -427,7 +478,7 @@ export default function BudgetPage() {
   const isDraftSumExceeded = draftSum > maxLivingBudget;
 
   const handleAutoFitDraft = () => {
-    const fitted = fitCapsToLivingBudget(customCapsDraft, maxLivingBudget, lockedCategories);
+    const fitted = fitCapsToLivingBudget(customCapsDraft, maxLivingBudget, lockedCategories, fullLedgerTransactions);
     setCustomCapsDraft(fitted);
     toast.info(`Adjusted caps to RM ${maxLivingBudget.toLocaleString()} (Income - Savings target)`);
   };
@@ -639,7 +690,8 @@ export default function BudgetPage() {
                 <AnimatedNumber value={totalSpent} animateOnMount />
               </span>
               <span className="text-slate-600 dark:text-zinc-400 text-xs mt-0.5 font-medium font-mono tabular-nums">
-                of <AnimatedNumber value={effectiveBudget} animateOnMount />{isYearMode ? ' (Annual)' : ''}
+                of <AnimatedNumber value={effectiveBudget} animateOnMount />
+                {isYearMode ? ' (Annual)' : isAllTimeMode ? ` (${allTimeActiveMonths} mos)` : ''}
               </span>
             </div>
           </div>
@@ -676,18 +728,18 @@ export default function BudgetPage() {
                 title={`Spent So Far: RM ${totalSpent.toFixed(2)}`}
               />
               {/* Segment 2: Unpaid Committed Bills Reserve (Hatched / Amber) */}
-              {(savingsPrediction?.unpaidCommittedReserve || 0) > 0 && (
+              {heroUnpaidReserve > 0 && (
                 <div
                   className="h-full bg-amber-500/80 bg-[repeating-linear-gradient(45deg,transparent,transparent_4px,rgba(0,0,0,0.15)_4px,rgba(0,0,0,0.15)_8px)] transition-all duration-500"
-                  style={{ width: `${Math.min(100 - (totalSpent / (effectiveBudget || 1)) * 100, ((savingsPrediction?.unpaidCommittedReserve || 0) / (effectiveBudget || 1)) * 100)}%` }}
-                  title={`Upcoming Bills Reserve: RM ${(savingsPrediction?.unpaidCommittedReserve || 0).toFixed(2)}`}
+                  style={{ width: `${Math.min(Math.max(0, 100 - (totalSpent / (effectiveBudget || 1)) * 100), (heroUnpaidReserve / (effectiveBudget || 1)) * 100)}%` }}
+                  title={`Upcoming Bills Reserve: RM ${heroUnpaidReserve.toFixed(2)}`}
                 />
               )}
               {/* Segment 3: Safe Discretionary */}
               <div
                 className="h-full bg-emerald-500/40"
-                style={{ width: `${Math.max(0, 100 - ((totalSpent + (savingsPrediction?.unpaidCommittedReserve || 0)) / (effectiveBudget || 1)) * 100)}%` }}
-                title={`Safe Discretionary Left: RM ${Math.max(0, effectiveBudget - totalSpent - (savingsPrediction?.unpaidCommittedReserve || 0)).toFixed(2)}`}
+                style={{ width: `${Math.max(0, 100 - ((totalSpent + heroUnpaidReserve) / (effectiveBudget || 1)) * 100)}%` }}
+                title={`Safe Discretionary Left: RM ${Math.max(0, effectiveBudget - totalSpent - heroUnpaidReserve).toFixed(2)}`}
               />
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500 dark:text-zinc-400">
@@ -695,17 +747,22 @@ export default function BudgetPage() {
                 <span className="h-2 w-2 rounded-full bg-indigo-500" />
                 <span>Spent: <strong>RM {totalSpent.toFixed(0)}</strong></span>
               </span>
-              {(savingsPrediction?.unpaidCommittedReserve || 0) > 0 && (
+              {heroUnpaidReserve > 0 && (
                 <span className="flex items-center gap-1 text-amber-700 dark:text-amber-400 font-medium">
                   <span className="h-2 w-2 rounded-full bg-amber-500" />
-                  <span>Bills Reserved: <strong>RM {(savingsPrediction?.unpaidCommittedReserve || 0).toFixed(0)}</strong></span>
+                  <span>Bills Reserved: <strong>RM {heroUnpaidReserve.toFixed(0)}</strong></span>
                 </span>
               )}
               <span className="flex items-center gap-1 text-emerald-700 dark:text-emerald-400 font-medium">
                 <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                <span>Safe to Spend: <strong>RM {Math.max(0, effectiveBudget - totalSpent - (savingsPrediction?.unpaidCommittedReserve || 0)).toFixed(0)}</strong></span>
+                <span>Safe to Spend: <strong>RM {Math.max(0, effectiveBudget - totalSpent - heroUnpaidReserve).toFixed(0)}</strong></span>
               </span>
             </div>
+            {tripQuarantinedSpent > 0 && (
+              <div className="text-[10px] text-slate-500 dark:text-zinc-400 text-left">
+                ✈️ Trip spend <span className="font-mono font-semibold">RM {tripQuarantinedSpent.toFixed(0)}</span> quarantined in Trip Envelopes (excluded above)
+              </div>
+            )}
           </div>
         </motion.div>
 
@@ -723,7 +780,13 @@ export default function BudgetPage() {
               <div>
                 <span className="text-xs font-bold text-slate-950 dark:text-white uppercase tracking-wider block">Daily Safe-to-Spend Limit</span>
                 <span className="text-[11px] text-slate-600 dark:text-zinc-400">
-                  {dailyInfo.isAllTime ? 'Daily allowance is unavailable for all-time totals' : dailyInfo.isPastMonth ? 'Month concluded' : `${dailyInfo.daysRemaining} days remaining in this month`}
+                  {dailyInfo.isAllTime
+                    ? 'Daily allowance is unavailable for all-time totals'
+                    : dailyInfo.isPastMonth
+                    ? isYearMode
+                      ? 'Year concluded'
+                      : 'Month concluded'
+                    : `${dailyInfo.daysRemaining} days remaining in this ${isYearMode ? 'year' : 'month'}`}
                 </span>
               </div>
             </div>
@@ -757,20 +820,34 @@ export default function BudgetPage() {
                 ? 'Choose a month or year to see a time-based daily allowance.'
                 : dailyInfo.isPastMonth
                 ? dailyInfo.isOverBudget
-                  ? `⚠️ This month concluded over budget by RM ${dailyInfo.overAmount.toFixed(2)} (${dailyInfo.spentPercent}% used).`
-                  : `🎉 This month concluded successfully with RM ${dailyInfo.remainingBudget.toFixed(2)} remaining under budget (${dailyInfo.spentPercent}% used).`
+                  ? `⚠️ This ${isYearMode ? 'year' : 'month'} concluded over budget by RM ${dailyInfo.overAmount.toFixed(2)} (${dailyInfo.spentPercent}% used).`
+                  : `🎉 This ${isYearMode ? 'year' : 'month'} concluded successfully with RM ${dailyInfo.remainingBudget.toFixed(2)} remaining under budget (${dailyInfo.spentPercent}% used).`
                 : dailyInfo.isOverBudget
-                ? `⚠️ You have exceeded your monthly limit by RM ${dailyInfo.overAmount.toFixed(2)}. Avoid non-essential expenses for the next ${dailyInfo.daysRemaining} days.`
+                ? `⚠️ You have exceeded your ${isYearMode ? 'annual' : 'monthly'} limit by RM ${dailyInfo.overAmount.toFixed(2)}. Avoid non-essential expenses for the next ${dailyInfo.daysRemaining} days.`
+                : heroUnpaidReserve > 0 && dailyInfo.safeRemainingBudget <= 0
+                ? `📌 RM ${heroUnpaidReserve.toFixed(2)} is reserved for upcoming unpaid commitments/installments, leaving RM 0.00 in free discretionary allowance.`
                 : dailyInfo.spentPercent > 80
                 ? `⚠️ Approaching budget cap (${dailyInfo.spentPercent}% used). Keep daily expenses under RM ${dailyInfo.dailyAllowance.toFixed(2)} to stay within your goal.`
-                : `🎉 You are well on track! You can safely spend up to RM ${dailyInfo.dailyAllowance.toFixed(2)} each day until month end.`}
+                : `🎉 You are well on track! You can safely spend up to RM ${dailyInfo.dailyAllowance.toFixed(2)} each day until ${isYearMode ? 'year' : 'month'} end.`}
             </p>
           </div>
 
           <div className="pt-3 border-t border-slate-200 dark:border-zinc-800/80 flex items-center justify-between text-xs text-slate-600 dark:text-zinc-400">
-            <span>{dailyInfo.isAllTime ? 'Remaining Period Budget:' : dailyInfo.isPastMonth ? 'Final Unused Cashflow:' : 'Remaining Month Cashflow:'}</span>
+            <span>
+              {dailyInfo.isAllTime
+                ? 'Remaining Period Budget:'
+                : dailyInfo.isPastMonth
+                ? 'Final Unused Cashflow:'
+                : heroUnpaidReserve > 0
+                ? 'Safe After Bills:'
+                : isYearMode
+                ? 'Remaining Year Cashflow:'
+                : 'Remaining Month Cashflow:'}
+            </span>
             <span className="font-mono font-bold text-slate-950 dark:text-white">
-              RM {dailyInfo.remainingBudget.toFixed(2)}
+              RM {(heroUnpaidReserve > 0 && !dailyInfo.isAllTime && !dailyInfo.isPastMonth
+                ? dailyInfo.safeRemainingBudget
+                : dailyInfo.remainingBudget).toFixed(2)}
             </span>
           </div>
         </motion.div>
@@ -790,7 +867,9 @@ export default function BudgetPage() {
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs font-bold text-slate-950 dark:text-white uppercase tracking-wider block">
-                  Month-End Savings & Investment Predictor
+                  {isYearMode || isAllTimeMode
+                    ? `Month-End Savings & Investment Predictor (${formatMonthLabel(currentMonthStr)})`
+                    : 'Month-End Savings & Investment Predictor'}
                 </span>
                 <span
                   className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider border ${
@@ -1172,7 +1251,7 @@ export default function BudgetPage() {
           <div className="text-right text-xs">
             <span className="text-slate-500 dark:text-zinc-400 block text-[11px]">Category Cap</span>
             <span className="font-mono font-bold text-slate-900 dark:text-white">
-              RM {foodInfo.foodCap.toFixed(0)} / mo
+              RM {foodInfo.foodCap.toFixed(0)} / {isYearMode ? 'yr' : isAllTimeMode ? `${allTimeActiveMonths}m` : 'mo'}
             </span>
           </div>
         </div>
@@ -1188,6 +1267,7 @@ export default function BudgetPage() {
             </div>
             <span className="text-[10px] text-slate-500 dark:text-zinc-400 block">
               RM {foodInfo.foodSpent.toFixed(2)} used ({foodInfo.percentUsed.toFixed(0)}%)
+              {foodInfo.foodReserve > 0 ? ` + RM ${foodInfo.foodReserve.toFixed(0)} reserved` : ''}
             </span>
           </div>
 
@@ -1200,7 +1280,9 @@ export default function BudgetPage() {
               <span className="text-xs font-normal text-slate-500 dark:text-zinc-400 ml-1">/ day</span>
             </div>
             <span className="text-[10px] text-slate-500 dark:text-zinc-400 block">
-              {foodInfo.daysRemaining} days remaining in month
+              {isAllTimeMode
+                ? 'Daily pace N/A for all-time totals'
+                : `${foodInfo.daysRemaining} days remaining in ${isYearMode ? 'year' : 'month'}`}
             </span>
           </div>
 

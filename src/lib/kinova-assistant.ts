@@ -41,6 +41,33 @@ import {
   computeDeterministicLedgerFacts as computeCopilotFacts,
 } from './copilot-ledger-facts.ts';
 import { mineUserHabitSuggestions } from './habit-suggestions.ts';
+import { getHabitMemories, type HabitMemoryItem } from './habit-memory-engine.ts';
+
+export interface CompactHabitMemoryPromptItem {
+  rawPattern: string;
+  preferredAlias: string;
+  category: string;
+  keywords?: string[];
+  timeSlot?: string;
+}
+
+export function serializeHabitMemoriesForPrompt(
+  memories: HabitMemoryItem[],
+  limit: number = 30
+): CompactHabitMemoryPromptItem[] {
+  if (!Array.isArray(memories) || memories.length === 0) return [];
+  return memories
+    .slice()
+    .sort((a, b) => (b.frequency || 1) * (b.confidence || 0.5) - (a.frequency || 1) * (a.confidence || 0.5))
+    .slice(0, Math.max(1, limit))
+    .map((m) => ({
+      rawPattern: m.rawPattern,
+      preferredAlias: m.preferredAlias,
+      category: m.category,
+      ...(Array.isArray(m.keywords) && m.keywords.length > 0 ? { keywords: m.keywords.slice(0, 8) } : {}),
+      ...(m.timeSlot && m.timeSlot !== 'any' ? { timeSlot: m.timeSlot } : {}),
+    }));
+}
 
 export interface AssistantTurnMessage {
   role: 'user' | 'assistant';
@@ -270,7 +297,7 @@ export function buildRebalanceCapsProposedAction(
   // Determine target category to rebalance: explicit mentioned category, or first over-cap category
   let targetCategory = inferredCategory && inferredCategory !== 'Other' ? inferredCategory : '';
   if (!targetCategory) {
-    const { unpaidReserveByCategory } = getCategoryCommitmentBreakdown(transactions, currentYearMonth);
+    const { unpaidReserveByCategory } = getCategoryCommitmentBreakdown(transactions, currentYearMonth, { referenceDate: safeRefDate });
     for (const cat of CANONICAL_EXPENSE_CATEGORIES) {
       const cap = resolveCategoryCapValue(cat, categoryCaps, 0);
       const spent = transactions
@@ -278,7 +305,7 @@ export function buildRebalanceCapsProposedAction(
           (t) =>
             String(t?.type || '').toLowerCase() === 'expense' &&
             String(t?.date || '').startsWith(currentYearMonth) &&
-            t?.category === cat &&
+            normalizeToCanonicalCategory(t?.category || 'Other', 'Expense', t?.description) === cat &&
             !isTripQuarantinedExpense(t)
         )
         .reduce((s, t) => s + getAmountInBaseCurrency(Number(t.amount) || 0, t.currency, t.baseAmount), 0);
@@ -368,7 +395,7 @@ export function computeDeterministicLedgerFacts(
     const rawAmount = Number(t.amount) || 0;
     const baseAmount = getAmountInBaseCurrency(rawAmount, t.currency, t.baseAmount);
     const dateStr = String(t.date || '');
-    const category = String(t.category || 'Other');
+    const category = typeLower === 'expense' ? normalizeToCanonicalCategory(String(t.category || 'Other'), 'Expense', String(t.description || '')) : String(t.category || 'Other');
     const description = String(t.description || '');
 
     if (typeLower === 'income' && baseAmount > 0 && dateStr.startsWith(currentYearMonth)) {
@@ -376,15 +403,15 @@ export function computeDeterministicLedgerFacts(
     }
 
     if (typeLower === 'expense' && baseAmount > 0) {
-      if (dateStr.startsWith(currentYearMonth)) {
+      if (dateStr.startsWith(currentYearMonth) && !isTripQuarantinedExpense(t)) {
         currentMonthTotalSpent += baseAmount;
         if (!isTripQuarantinedExpense(t)) {
           categorySpending[category] = Number(((categorySpending[category] || 0) + baseAmount).toFixed(2));
         }
       }
 
-      if (!categoryValues[category]) categoryValues[category] = [];
-      categoryValues[category].push(baseAmount);
+      if (!isTripQuarantinedExpense(t)) { if (!categoryValues[category]) categoryValues[category] = [];
+      categoryValues[category].push(baseAmount); }
 
       if (pendingReceipt && pendingReceipt.amount > 0) {
         if (Math.abs(rawAmount - pendingReceipt.amount) < 0.05 || Math.abs(baseAmount - pendingReceipt.amount) < 0.05) {
@@ -414,7 +441,7 @@ export function computeDeterministicLedgerFacts(
 
   const categoryCaps = getSavedCategoryCaps();
   const lockedCaps = getLockedCategoryCaps();
-  const sumOfCategoryCaps = Object.values(categoryCaps).reduce((s, v) => s + (Number(v) || 0), 0);
+  const sumOfCategoryCaps = CANONICAL_EXPENSE_CATEGORIES.reduce((s, cat) => s + resolveCategoryCapValue(cat, categoryCaps, 0), 0);
 
   const savingsPred = predictMonthlySavingsAndInvestments(transactions, {
     baselineIncome: profile.baselineIncome || (actualIncomeThisMonth > 0 ? actualIncomeThisMonth : undefined),
@@ -432,7 +459,7 @@ export function computeDeterministicLedgerFacts(
     referenceDate: safeRefDate,
   });
 
-  const { unpaidReserveByCategory } = getCategoryCommitmentBreakdown(transactions, currentYearMonth);
+  const { unpaidReserveByCategory } = getCategoryCommitmentBreakdown(transactions, currentYearMonth, { referenceDate: safeRefDate });
 
   const categorySnapshots: CategoryCashflowSnapshot[] = [];
   const overCapCategories: string[] = [];
@@ -556,13 +583,13 @@ export function computeDeterministicLedgerFacts(
       const lowerQ = cleanQuery.toLowerCase();
       for (const t of transactions) {
         if (!t || typeof t !== 'object') continue;
-        const isExpense = String(t.type || '').toLowerCase() === 'expense';
+        const typeLower = String(t.type || '').toLowerCase(); const isExpense = typeLower === 'expense'; const rawCatFallback = String(t.category || 'Other');
         const baseAmt = getAmountInBaseCurrency(Number(t.amount) || 0, t.currency, t.baseAmount);
-        const category = String(t.category || 'Other');
+        const category = typeLower === 'expense' ? normalizeToCanonicalCategory(String(t.category || 'Other'), 'Expense', String(t.description || '')) : String(t.category || 'Other');
         const description = String(t.description || '');
 
         if (isExpense && baseAmt > 0) {
-          if (description.toLowerCase().includes(lowerQ) || category.toLowerCase().includes(lowerQ)) {
+          if (description.toLowerCase().includes(lowerQ) || category.toLowerCase().includes(lowerQ) || rawCatFallback.toLowerCase().includes(lowerQ)) {
             matchedRecordCount += 1;
             matchedExactSpent += baseAmt;
             queryItemFoundInLedger = true;
@@ -606,6 +633,7 @@ export interface RunKinovaTurnOptions {
   forceAssistant?: boolean;
   factQuery?: string;
   pendingReceipt?: { amount: number; merchant?: string; date?: string };
+  habitMemories?: HabitMemoryItem[];
   signal?: AbortSignal;
 }
 
@@ -657,6 +685,7 @@ export async function runKinovaTurn(
   const habits = includeLedgerContext
     ? mineUserHabitSuggestions(allTx as any, undefined, undefined, profile.rejectedChips).slice(0, 5)
     : [];
+  const habitMemories = serializeHabitMemoriesForPrompt(options.habitMemories ?? getHabitMemories(), 30);
 
   const res = await fetch('/api/ai/assistant', {
     method: 'POST',
@@ -677,6 +706,7 @@ export async function runKinovaTurn(
         emergencyReserve: profile.emergencyReserve,
         goals: profile.goals,
         rejectedChips: profile.rejectedChips,
+        habitMemories,
         habits: habits.map((h) => ({
           text: h.text,
           amount: h.actionPayload?.amount,

@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { Transaction } from '@/hooks/useTransactions';
 import { useQueryClient } from '@tanstack/react-query';
-import { useAddRow, updateUnifiedRow } from '@/hooks/useSheets';
+import { useAddRow, updateUnifiedRow, applyOptimisticUpdateToQueryCache } from '@/hooks/useSheets';
 import { driveApi } from '@/lib/sheets-api';
 import { compressImageFile } from '@/lib/image-compressor';
 import { formatClaimFileName } from '@/lib/claim-helper';
@@ -164,27 +164,15 @@ export function AttachReceiptModal({
         }
 
         const targetSheet = selectedTx._month || (selectedTx.date ? selectedTx.date.substring(0, 7) : 'Transactions');
-        await updateUnifiedRow(targetSheet, selectedTx._rowIndex || 2, {
+        const receiptPatch = {
           Id: selectedTx.id,
           id: selectedTx.id,
-          Date: selectedTx.date,
-          date: selectedTx.date,
-          Category: selectedTx.category,
-          category: selectedTx.category,
-          SubCategory: selectedTx.subCategory || '',
-          subCategory: selectedTx.subCategory || '',
-          Description: selectedTx.description,
-          description: selectedTx.description,
-          Amount: selectedTx.amount,
-          amount: selectedTx.amount,
-          Currency: selectedTx.currency || 'MYR',
-          currency: selectedTx.currency || 'MYR',
           ReceiptUrl: fileUrl,
           receiptUrl: fileUrl,
-          Notes: selectedTx.notes || '',
-          notes: selectedTx.notes || '',
           _month: selectedTx._month,
-        });
+        };
+        applyOptimisticUpdateToQueryCache(queryClient, targetSheet, selectedTx._rowIndex || 2, receiptPatch);
+        await updateUnifiedRow(targetSheet, selectedTx._rowIndex || 2, receiptPatch);
 
         queryClient.invalidateQueries({ queryKey: ['sheet'] });
         queryClient.invalidateQueries({ queryKey: ['months'] });

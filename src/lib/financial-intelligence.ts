@@ -1,10 +1,12 @@
 import { getLocalDateString, getDaysInMonth, parseLocalDate, getTransactionRecordedInfo } from './date-helper.ts';
 import { getAmountInBaseCurrency } from './currency.ts';
+import { CANONICAL_EXPENSE_CATEGORIES } from './canonical-categories.ts';
 import {
   isLumpSumExpense,
   isTripQuarantinedExpense,
   isDividendOrDistributionTransaction,
   getSavedCategoryCaps,
+  resolveCategoryCapValue,
 } from './category-budget-helper.ts';
 
 export interface RecurringCommitmentItem {
@@ -15,15 +17,57 @@ export interface RecurringCommitmentItem {
   dayOfMonth: number;
   amount: number;
   effectiveFrom?: string;
+  history?: Array<{ effectiveFrom?: string; amount?: number }>;
   notes?: string;
 }
 
 export interface SavedInstallmentItem {
   id: string;
   name: string;
+  currency?: string;
+  startDate?: string;
+  endDate?: string;
+  tripTag?: string;
   monthlyPayment?: number;
   monthlyAmount?: number;
   remainingMonths?: number;
+}
+
+function isRecurringActiveInMonth(comm: RecurringCommitmentItem, monthStr: string): boolean {
+  if (!/^\d{4}-\d{2}$/.test(monthStr)) return true;
+  const validHistory = Array.isArray(comm?.history)
+    ? comm.history
+        .map((h) => (typeof h?.effectiveFrom === 'string' ? h.effectiveFrom.slice(0, 7) : ''))
+        .filter((m) => /^\d{4}-\d{2}$/.test(m))
+    : [];
+  const fallback = typeof comm?.effectiveFrom === 'string' ? comm.effectiveFrom.slice(0, 7) : '';
+  const earliest = validHistory.length > 0 ? validHistory.sort()[0] : (/^\d{4}-\d{2}$/.test(fallback) ? fallback : '');
+  return !earliest || monthStr >= earliest;
+}
+
+function getRecurringAmountForMonth(comm: RecurringCommitmentItem, monthStr: string): number {
+  if (Array.isArray(comm?.history) && comm.history.length > 0) {
+    const valid = comm.history.filter((h) => typeof h?.effectiveFrom === 'string' && h.effectiveFrom.length >= 7);
+    if (valid.length > 0) {
+      const sorted = [...valid].sort((a, b) => String(b.effectiveFrom).localeCompare(String(a.effectiveFrom)));
+      const matched = sorted.find((h) => String(h.effectiveFrom).slice(0, 7) <= monthStr);
+      const chosen = matched || sorted[sorted.length - 1];
+      return Number(chosen?.amount) || 0;
+    }
+  }
+  return Number(comm?.amount) || 0;
+}
+
+function getActiveInstallmentMonthlyMyr(inst: SavedInstallmentItem, monthStr: string): number {
+  if (inst?.tripTag && isTripQuarantinedExpense({ tripTag: inst.tripTag })) return 0;
+  if (typeof inst?.remainingMonths === 'number' && inst.remainingMonths <= 0) return 0;
+  if (monthStr && /^\d{4}-\d{2}$/.test(monthStr)) {
+    if (inst?.startDate && inst.startDate.slice(0, 7) > monthStr) return 0;
+    if (inst?.endDate && inst.endDate.slice(0, 7) < monthStr) return 0;
+  }
+  const raw = Number(inst?.monthlyPayment ?? inst?.monthlyAmount ?? 0) || 0;
+  if (raw <= 0) return 0;
+  return getAmountInBaseCurrency(raw, inst?.currency || 'MYR');
 }
 
 function getStoredCommitments(): RecurringCommitmentItem[] {
@@ -252,7 +296,10 @@ export function calculateFinancialHealthScore(params: {
   const daysRemaining = Math.max(0, totalDays - dayOfMonth);
 
   const savedCaps = getSavedCategoryCaps();
-  const categoryCapsSum = Object.values(savedCaps).reduce((s, v) => s + (Number(v) || 0), 0);
+  const categoryCapsSum = CANONICAL_EXPENSE_CATEGORIES.reduce(
+    (s, cat) => s + resolveCategoryCapValue(cat, savedCaps, 0),
+    0
+  );
   const effectiveBudgetCap =
     monthlyBudgetCap && monthlyBudgetCap > 0 ? monthlyBudgetCap : categoryCapsSum > 0 ? categoryCapsSum : 0;
 
@@ -305,8 +352,11 @@ export function calculateFinancialHealthScore(params: {
   const installments = getStoredInstallments();
 
   const fixedMonthlyBurn =
-    commitments.reduce((s, c) => s + (c.amount || 0), 0) +
-    installments.reduce((s, i) => s + (i.monthlyPayment ?? i.monthlyAmount ?? 0), 0);
+    commitments.reduce(
+      (s, c) => s + (isRecurringActiveInMonth(c, currentMonthStr) ? getRecurringAmountForMonth(c, currentMonthStr) : 0),
+      0
+    ) +
+    installments.reduce((s, i) => s + getActiveInstallmentMonthlyMyr(i, currentMonthStr), 0);
 
   let fixedScore = 22;
   let fixedStatus: HealthDimension['status'] = 'good';
@@ -650,10 +700,14 @@ export function predictCashflowTrajectory(params: {
 
   const commitments: RecurringCommitmentItem[] = commitmentsOverride || getStoredCommitments();
   const installments: SavedInstallmentItem[] = installmentsOverride || getStoredInstallments();
+  const currentMonthStr = todayStr.slice(0, 7);
 
   const totalMonthlyFixed =
-    commitments.reduce((s, c) => s + (c.amount || 0), 0) +
-    installments.reduce((s, i) => s + (i.monthlyPayment ?? i.monthlyAmount ?? 0), 0);
+    commitments.reduce(
+      (s, c) => s + (isRecurringActiveInMonth(c, currentMonthStr) ? getRecurringAmountForMonth(c, currentMonthStr) : 0),
+      0
+    ) +
+    installments.reduce((s, i) => s + getActiveInstallmentMonthlyMyr(i, currentMonthStr), 0);
 
   let runningBalance = startingCash;
   const forecastPoints: CashflowForecastPoint[] = [];
@@ -670,6 +724,7 @@ export function predictCashflowTrajectory(params: {
     const curDate = new Date(today);
     curDate.setDate(curDate.getDate() + offset);
     const curDateStr = getLocalDateString(curDate);
+    const curMonthStr = curDateStr.slice(0, 7);
     const dayOfMonth = curDate.getDate();
 
     let dayInflow = 0;
@@ -688,16 +743,20 @@ export function predictCashflowTrajectory(params: {
     }
 
     for (const comm of commitments) {
-      if (comm.dayOfMonth === dayOfMonth && comm.amount > 0) {
-        dayOutflow += comm.amount;
-        noteItems.push(`${comm.name}: -${comm.amount}`);
+      if (!isRecurringActiveInMonth(comm, curMonthStr)) continue;
+      const commAmt = getRecurringAmountForMonth(comm, curMonthStr);
+      if (comm.dayOfMonth === dayOfMonth && commAmt > 0) {
+        dayOutflow += commAmt;
+        noteItems.push(`${comm.name}: -${commAmt.toFixed(2)}`);
       }
     }
 
     if (dayOfMonth === 1 && installments.length > 0) {
-      const instSum = installments.reduce((s, i) => s + (i.monthlyPayment ?? i.monthlyAmount ?? 0), 0);
-      dayOutflow += instSum;
-      noteItems.push(`分期还款合集: -${instSum}`);
+      const instSum = installments.reduce((s, i) => s + getActiveInstallmentMonthlyMyr(i, curMonthStr), 0);
+      if (instSum > 0) {
+        dayOutflow += instSum;
+        noteItems.push(`分期还款合集: -${instSum.toFixed(2)}`);
+      }
     }
 
     runningBalance = Number((runningBalance + dayInflow - dayOutflow).toFixed(2));
@@ -1141,7 +1200,10 @@ export function generateAiFinancialBriefing(
   }
 
   const commitments = getStoredCommitments();
-  const upcomingCommitmentsTotal = commitments.reduce((s, c) => s + (c.amount || 0), 0);
+  const upcomingCommitmentsTotal = commitments.reduce(
+    (s, c) => s + (isRecurringActiveInMonth(c, currentMonth) ? getRecurringAmountForMonth(c, currentMonth) : 0),
+    0
+  );
 
   const remainingBudgetText =
     budgetCap && budgetCap > 0

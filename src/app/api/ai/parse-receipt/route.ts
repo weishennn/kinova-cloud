@@ -5,6 +5,7 @@ import { getValidGoogleSession } from '@/lib/google-auth';
 import { recordUserAiCall } from '@/lib/admin-registry';
 import { generateGeminiContent } from '@/lib/gemini-key-pool';
 import { getReceiptReasoningReasons } from '@/lib/receipt-reasoning';
+import { reconcileKinovaReceiptItems, type RawReconcilableReceiptItem } from '@/lib/receipt-item-reconciler';
 
 const VALID_CURRENCIES = new Set(['MYR', 'USD', 'SGD', 'EUR', 'GBP', 'JPY', 'AUD', 'IDR', 'THB', 'CNY', 'HKD']);
 
@@ -18,131 +19,6 @@ function sanitizeDate(value: unknown, maxDateStr?: string): string | null {
     return maxDateStr;
   }
   return normalized;
-}
-
-interface RawKinovaReceiptItem {
-  name: string;
-  quantity: number;
-  unitPrice: number;
-  amount: number;
-  brand?: string;
-  productType?: string;
-  qtyReconciled?: string;
-  category?: string;
-}
-
-function reconcileKinovaReceiptItems(
-  rawItems: RawKinovaReceiptItem[],
-  expectedSubtotal: number | null,
-): RawKinovaReceiptItem[] {
-  if (!rawItems.length) return [];
-
-  const prepared = rawItems.map((raw) => {
-    let name = raw.name.trim();
-    let qty = Number.isFinite(raw.quantity) && raw.quantity > 0
-      ? Number(raw.quantity.toFixed(3))
-      : 1;
-    const prefixMatch = name.match(/^(\d{1,2})\s*[xX×]\s+(.+)$/) || name.match(/^[Qq]ty\s*:?\s*(\d{1,2})\s+(.+)$/);
-    if (prefixMatch) {
-      const parsedQty = Number(prefixMatch[1]);
-      if (qty === 1 && parsedQty > 1 && parsedQty <= 50) {
-        qty = parsedQty;
-      }
-      name = prefixMatch[2].trim();
-    }
-    const rawUnit = raw.unitPrice > 0 ? Number(raw.unitPrice.toFixed(2)) : 0;
-    let rawAmt = raw.amount > 0 ? Number(raw.amount.toFixed(2)) : 0;
-    if (rawAmt <= 0 && rawUnit > 0) {
-      rawAmt = Number((rawUnit * qty).toFixed(2));
-    }
-    return {
-      ...raw,
-      name,
-      quantity: qty,
-      amount: rawAmt,
-      unitPrice: rawUnit > 0 ? rawUnit : (qty > 1 ? Number((rawAmt / qty).toFixed(2)) : rawAmt),
-      qtyReconciled: 'as_is',
-    };
-  });
-
-  if (expectedSubtotal == null || expectedSubtotal <= 0) {
-    return prepared;
-  }
-
-  const expectedMinor = Math.round(expectedSubtotal * 100);
-  const multiIndices = prepared
-    .map((it, idx) => (it.quantity > 1 && it.amount > 0 ? idx : -1))
-    .filter((idx) => idx >= 0);
-
-  if (multiIndices.length === 0 || multiIndices.length > 10) {
-    return prepared;
-  }
-
-  const fixedMinor = prepared.reduce(
-    (sum, it, idx) => (multiIndices.includes(idx) ? sum : sum + Math.round(it.amount * 100)),
-    0,
-  );
-
-  const candidatesPerMulti = multiIndices.map((idx) => {
-    const it = prepared[idx];
-    const asIsMinor = Math.round(it.amount * 100);
-    const multMinor = Math.round(it.amount * it.quantity * 100);
-    const divMinor = Math.round((it.amount / it.quantity) * 100);
-    return [
-      { mode: 'as_is', minor: asIsMinor },
-      { mode: 'multiplied_unit_price', minor: multMinor },
-      { mode: 'divided_overmultiplied_total', minor: divMinor },
-    ];
-  });
-
-  const defaultSumMinor = fixedMinor + candidatesPerMulti.reduce((s, c) => s + c[0].minor, 0);
-  const defaultDiff = Math.abs(defaultSumMinor - expectedMinor);
-
-  if (defaultDiff <= 15) {
-    return prepared;
-  }
-
-  let bestDiff = defaultDiff;
-  let bestCombo = candidatesPerMulti.map(() => 'as_is');
-  let bestChanges = 0;
-
-  const search = (pos: number, runningMinor: number, combo: string[], changes: number) => {
-    if (pos === multiIndices.length) {
-      const diff = Math.abs(runningMinor - expectedMinor);
-      if (diff < bestDiff - 5 || (Math.abs(diff - bestDiff) <= 5 && changes < bestChanges)) {
-        bestDiff = diff;
-        bestCombo = [...combo];
-        bestChanges = changes;
-      }
-      return;
-    }
-    for (const cand of candidatesPerMulti[pos]) {
-      combo.push(cand.mode);
-      search(pos + 1, runningMinor + cand.minor, combo, changes + (cand.mode === 'as_is' ? 0 : 1));
-      combo.pop();
-    }
-  };
-
-  search(0, fixedMinor, [], 0);
-
-  const toleranceMinor = Math.max(25, Math.round(expectedMinor * 0.02));
-  if (bestDiff <= toleranceMinor && bestDiff < defaultDiff * 0.5) {
-    multiIndices.forEach((itemIdx, mPos) => {
-      const mode = bestCombo[mPos];
-      const it = prepared[itemIdx];
-      if (mode === 'multiplied_unit_price') {
-        it.unitPrice = it.amount;
-        it.amount = Number((it.amount * it.quantity).toFixed(2));
-        it.qtyReconciled = mode;
-      } else if (mode === 'divided_overmultiplied_total') {
-        it.amount = Number((it.amount / it.quantity).toFixed(2));
-        it.unitPrice = Number((it.amount / it.quantity).toFixed(2));
-        it.qtyReconciled = mode;
-      }
-    });
-  }
-
-  return prepared;
 }
 
 function parseReceiptJson(text: string): Record<string, unknown> | null {
@@ -218,8 +94,14 @@ CRITICAL INSTRUCTIONS:
    - Calculate or extract net subtotal, SST, and service charges.
    - Do not mistake cash rounding adjustments (e.g. 1-5 cents) for tax.
    - Distinguish tax already included in item prices from tax added after the subtotal. If tax is printed separately, capture each tax/service-charge amount and whether it is included in the total.
-5. CONFIDENCE AND ITEM AUDIT:
-   - Extract the merchant/store name, each visible item name, quantity, unit price, and extended line amount. Check whether quantity × unit price matches the printed line amount.
+5. MULTI-QUANTITY & LINE TOTAL ACCURACY (CRITICAL):
+   - Extract the merchant/store name, each visible item name, quantity, unit price, and EXTENDED LINE AMOUNT.
+   - For any item with quantity > 1 (e.g. "3x Salmon Sushi @ 6.00", "3  Sushi  6.00  18.00", or 3 plates):
+     * "quantity" MUST be the count (e.g. 3).
+     * "unitPrice" MUST be the per-unit price (e.g. 6.00).
+     * "amount" MUST ALWAYS BE THE EXTENDED LINE TOTAL (quantity * unitPrice, e.g. 18.00), NEVER the single-unit price!
+     * Verify sum(items[].amount) matches the receipt Subtotal (or Net Paid + Discounts - Taxes) before returning JSON.
+6. CONFIDENCE AND ITEM AUDIT:
    - Check that item totals, subtotal, discounts, separate taxes/service charges, and final amount paid reconcile. Do not force totals to match by changing a printed value.
    - Set "needsReasoning" to true only when visual evidence or conflicting receipt arithmetic leaves a material field uncertain (merchant, item name, quantity, line amount, tax inclusion/separation, or amount paid). Multiple clearly printed tax lines alone do not require reasoning.
    - When needsReasoning is true, list concise uncertainty types in "ambiguities". Otherwise return an empty array. Do not guess; preserve the best candidate values for the review pass.
@@ -267,7 +149,7 @@ Return ONLY this JSON shape:
       fastPassError = err;
     }
 
-    let initialReasoningReasons = parsed ? getReceiptReasoningReasons(parsed) : ['fast_ocr_unavailable'];
+    const initialReasoningReasons = parsed ? getReceiptReasoningReasons(parsed) : ['fast_ocr_unavailable'];
     let finalReasoningReasons = initialReasoningReasons;
     const reasoningAttempted = !parsed || initialReasoningReasons.length > 0;
     let reasoningUsed = false;
@@ -328,7 +210,7 @@ Return ONLY this JSON shape:
       const reasoningPrompt = !reasoningUsed && parsed && fastResult
         ? `Review the attached receipt image against this first-pass candidate. Re-read the merchant name, each item name and quantity, unit price versus extended line amount, subtotal, discount, tax/service-charge lines, and final paid amount. The first pass flagged: ${initialReasoningReasons.join(', ')}.
 
-Treat the candidate as unverified. Correct a field only when the image supports it. Reconcile quantity × unit price and the printed totals. Decide from the receipt whether tax is included in the listed prices or added after the subtotal. If a detail remains unreadable, retain the best candidate and list the uncertainty; do not invent a value. Do not provide chain-of-thought.
+Treat the candidate as unverified. Correct a field only when the image supports it. Ensure each item's "amount" is its EXTENDED LINE TOTAL (quantity * unitPrice, e.g. 3 plates * 6.00 = 18.00, NEVER 6.00) and reconciles with printed Subtotal and final paid totals. Decide from the receipt whether tax is included in the listed prices or added after the subtotal. If a detail remains unreadable, retain the best candidate and list the uncertainty; do not invent a value. Do not provide chain-of-thought.
 
 Return only valid JSON with this exact structure:
 {"merchant":string,"date":"YYYY-MM-DD","amount":number,"currency":string,"category":string,"description":string,"subtotal":number|null,"taxAmount":number|null,"taxRate":number|null,"taxIncluded":boolean,"taxLabel":string,"items":[{"name":string,"quantity":number,"unitPrice":number,"amount":number,"brand":string|null,"productType":string|null,"category":string}],"needsReasoning":boolean,"ambiguities":string[],"notes":string}
@@ -373,7 +255,7 @@ ${JSON.stringify(parsed)}`
     }
 
       try {
-        const rawParsedItems: RawKinovaReceiptItem[] = Array.isArray(parsed.items)
+        const rawParsedItems: RawReconcilableReceiptItem[] = Array.isArray(parsed.items)
           ? parsed.items
             .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
             .map((item) => {
@@ -383,8 +265,11 @@ ${JSON.stringify(parsed)}`
               const unitPrice = typeof item.unitPrice === 'number' && Number.isFinite(item.unitPrice) && item.unitPrice > 0
                 ? Number(item.unitPrice.toFixed(2))
                 : 0;
-              const amt = typeof item.amount === 'number' && Number.isFinite(item.amount) && item.amount > 0
+              const explicitAmt = typeof item.amount === 'number' && Number.isFinite(item.amount) && item.amount > 0
                 ? Number(item.amount.toFixed(2))
+                : 0;
+              const amt = explicitAmt > 0
+                ? explicitAmt
                 : (unitPrice > 0 ? Number((unitPrice * qty).toFixed(2)) : 0);
               return {
                 name: typeof item.name === 'string' ? item.name.trim() : '',
@@ -409,33 +294,6 @@ ${JSON.stringify(parsed)}`
         let subtotal = typeof parsed.subtotal === 'number' && Number.isFinite(parsed.subtotal) && parsed.subtotal > 0
           ? Number(parsed.subtotal.toFixed(2))
           : null;
-        const rawTaxAmtForReconcile = typeof parsed.taxAmount === 'number' && Number.isFinite(parsed.taxAmount) && parsed.taxAmount > 0
-          ? Number(parsed.taxAmount.toFixed(2))
-          : 0;
-
-        // Mathematical Tax Regime Invariant:
-        // Test whether raw items sum matches the total paid (Inclusive) or needs tax added on top (Exclusive)
-        const rawItemsSum = Number(rawParsedItems.reduce((sum, it) => sum + it.amount, 0).toFixed(2));
-        const targetGross = amount ?? subtotal ?? rawItemsSum;
-        if (targetGross > 0 && rawItemsSum > 0) {
-          const diffInclusive = Math.abs(rawItemsSum - targetGross);
-          const diffExclusive = Math.abs((rawItemsSum + rawTaxAmtForReconcile) - targetGross);
-
-          if (diffInclusive <= 0.15) {
-            // Proven tax-inclusive: items already sum to final total
-            isTaxIncluded = true;
-          } else if (diffExclusive <= 0.15 && diffInclusive > 0.15) {
-            // Proven tax-exclusive: items sum to base and tax is added on top
-            isTaxIncluded = false;
-          }
-        }
-
-        const expectedItemsSubtotal = isTaxIncluded
-          ? (amount ?? subtotal ?? rawItemsSum)
-          : (subtotal ?? (amount != null && amount > rawTaxAmtForReconcile ? Number((amount - rawTaxAmtForReconcile).toFixed(2)) : null));
-
-        const items = reconcileKinovaReceiptItems(rawParsedItems, expectedItemsSubtotal);
-        const itemsSum = Number(items.reduce((sum, it) => sum + it.amount, 0).toFixed(2));
 
         const discountAmount =
           typeof parsed.discountAmount === 'number' && Number.isFinite(parsed.discountAmount) && parsed.discountAmount > 0
@@ -449,6 +307,107 @@ ${JSON.stringify(parsed)}`
           typeof parsed.dealsDescription === 'string' && parsed.dealsDescription.trim()
             ? parsed.dealsDescription.trim()
             : null;
+
+        // Parse multi-tax array if returned by Gemini (e.g. Service Charge 10% + SST 6%)
+        // Strictly exclude Rounding / Pelarasan Genapan lines BEFORE item qty reconciliation so totals align cleanly.
+        const ROUNDING_LABEL_REGEX = /rounding|round|pelarasan|genap/i;
+        const rawTaxes = Array.isArray(parsed.taxes)
+          ? parsed.taxes
+              .filter((t): t is Record<string, unknown> => Boolean(t) && typeof t === 'object')
+              .map((t) => {
+                let r = typeof t.rate === 'number' && Number.isFinite(t.rate) && t.rate >= 0 ? t.rate : null;
+                if (r !== null && r > 0 && r <= 1) r = Number((r * 100).toFixed(1));
+                const amt = typeof t.amount === 'number' && Number.isFinite(t.amount) && t.amount >= 0 ? Number(t.amount.toFixed(2)) : null;
+                const lbl = typeof t.label === 'string' ? t.label.trim() : '';
+                return { label: lbl, rate: r, amount: amt };
+              })
+              .filter((t) => !ROUNDING_LABEL_REGEX.test(t.label))
+              .filter((t) => t.label || (t.rate != null && t.rate > 0) || (t.amount != null && t.amount > 0))
+          : [];
+
+        let taxAmount = typeof parsed.taxAmount === 'number' && Number.isFinite(parsed.taxAmount) && parsed.taxAmount >= 0 ? Number(parsed.taxAmount.toFixed(2)) : null;
+        let taxRate = typeof parsed.taxRate === 'number' && Number.isFinite(parsed.taxRate) && parsed.taxRate >= 0 ? parsed.taxRate : null;
+        if (taxRate !== null && taxRate > 0 && taxRate <= 1) {
+          taxRate = Number((taxRate * 100).toFixed(1));
+        }
+        let taxLabel = typeof parsed.taxLabel === 'string' && parsed.taxLabel.trim() ? parsed.taxLabel.trim() : undefined;
+
+        if (taxLabel && ROUNDING_LABEL_REGEX.test(taxLabel)) {
+          taxLabel = undefined;
+          taxAmount = null;
+          taxRate = null;
+        }
+
+        if (rawTaxes.length > 0) {
+          const sumRates = Number(rawTaxes.reduce((s, t) => s + (t.rate || 0), 0).toFixed(2));
+          const sumAmts = Number(rawTaxes.reduce((s, t) => s + (t.amount || 0), 0).toFixed(2));
+          const combinedLabels = rawTaxes
+            .map((t) => {
+              if (t.label && t.rate != null && !t.label.includes('%')) return `${t.label} ${t.rate}%`;
+              if (t.label) return t.label;
+              if (t.rate != null) return `${t.rate}%`;
+              return '';
+            })
+            .filter(Boolean)
+            .join(' + ');
+
+          if (sumRates > 0 && (taxRate == null || taxRate < sumRates)) {
+            taxRate = sumRates;
+          }
+          if (sumAmts > 0 && (taxAmount == null || taxAmount < sumAmts)) {
+            taxAmount = sumAmts;
+          }
+          if (combinedLabels && (rawTaxes.length > 1 || !taxLabel)) {
+            taxLabel = combinedLabels;
+          }
+        }
+
+        const rawTaxAmtForReconcile = taxAmount != null && taxAmount > 0 ? taxAmount : 0;
+        const rawItemsSum = Number(rawParsedItems.reduce((sum, it) => sum + it.amount, 0).toFixed(2));
+
+        const items = reconcileKinovaReceiptItems(rawParsedItems, {
+          amount,
+          subtotal,
+          billAmount,
+          discountAmount,
+          taxAmount: rawTaxAmtForReconcile,
+          taxRate,
+          taxIncluded: isTaxIncluded,
+        });
+        const itemsSum = Number(items.reduce((sum, it) => sum + it.amount, 0).toFixed(2));
+
+        // If Gemini mistakenly returned unmultiplied `rawItemsSum` as `amount` despite a printed larger subtotal, align `amount`.
+        if (
+          amount != null &&
+          subtotal != null &&
+          (!discountAmount || discountAmount <= 0) &&
+          Math.abs(amount - rawItemsSum) <= 0.05 &&
+          itemsSum > rawItemsSum + 0.05 &&
+          Math.abs(itemsSum - subtotal) <= 0.15
+        ) {
+          amount = isTaxIncluded
+            ? itemsSum
+            : Number((itemsSum + rawTaxAmtForReconcile).toFixed(2));
+        }
+
+        // Mathematical Tax Regime Invariant (runs AFTER multi-qty item reconciliation):
+        // Test whether reconciled items sum matches the gross paid total (Inclusive) or needs tax added on top (Exclusive)
+        const grossPaidForTaxCheck =
+          amount != null && discountAmount != null && discountAmount > 0
+            ? Number((amount + discountAmount).toFixed(2))
+            : (amount ?? subtotal ?? itemsSum);
+        if (grossPaidForTaxCheck > 0 && itemsSum > 0) {
+          const diffInclusive = Math.abs(itemsSum - grossPaidForTaxCheck);
+          const diffExclusive = Math.abs((itemsSum + rawTaxAmtForReconcile) - grossPaidForTaxCheck);
+
+          if (diffInclusive <= 0.15) {
+            // Proven tax-inclusive: items already sum to gross total
+            isTaxIncluded = true;
+          } else if (diffExclusive <= 0.15 && diffInclusive > 0.15) {
+            // Proven tax-exclusive: items sum to base and tax is added on top
+            isTaxIncluded = false;
+          }
+        }
 
         // If amount was not extracted, fallback to itemsSum or billAmount
         if (amount == null) {
@@ -548,60 +507,6 @@ ${JSON.stringify(parsed)}`
 
         if (subtotal == null && itemsSum > 0 && amount != null && amount >= itemsSum) {
           subtotal = itemsSum;
-        }
-
-        // Parse multi-tax array if returned by Gemini (e.g. Service Charge 10% + SST 6%)
-        // Strictly exclude Rounding / Pelarasan Genapan lines
-        const ROUNDING_LABEL_REGEX = /rounding|round|pelarasan|genap/i;
-        const rawTaxes = Array.isArray(parsed.taxes)
-          ? parsed.taxes
-              .filter((t): t is Record<string, unknown> => Boolean(t) && typeof t === 'object')
-              .map((t) => {
-                let r = typeof t.rate === 'number' && Number.isFinite(t.rate) && t.rate >= 0 ? t.rate : null;
-                if (r !== null && r > 0 && r <= 1) r = Number((r * 100).toFixed(1));
-                const amt = typeof t.amount === 'number' && Number.isFinite(t.amount) && t.amount >= 0 ? Number(t.amount.toFixed(2)) : null;
-                const lbl = typeof t.label === 'string' ? t.label.trim() : '';
-                return { label: lbl, rate: r, amount: amt };
-              })
-              .filter((t) => !ROUNDING_LABEL_REGEX.test(t.label))
-              .filter((t) => t.label || (t.rate != null && t.rate > 0) || (t.amount != null && t.amount > 0))
-          : [];
-
-        let taxAmount = typeof parsed.taxAmount === 'number' && Number.isFinite(parsed.taxAmount) && parsed.taxAmount >= 0 ? Number(parsed.taxAmount.toFixed(2)) : null;
-        let taxRate = typeof parsed.taxRate === 'number' && Number.isFinite(parsed.taxRate) && parsed.taxRate >= 0 ? parsed.taxRate : null;
-        if (taxRate !== null && taxRate > 0 && taxRate <= 1) {
-          taxRate = Number((taxRate * 100).toFixed(1));
-        }
-        let taxLabel = typeof parsed.taxLabel === 'string' && parsed.taxLabel.trim() ? parsed.taxLabel.trim() : undefined;
-
-        if (taxLabel && ROUNDING_LABEL_REGEX.test(taxLabel)) {
-          taxLabel = undefined;
-          taxAmount = null;
-          taxRate = null;
-        }
-
-        if (rawTaxes.length > 0) {
-          const sumRates = Number(rawTaxes.reduce((s, t) => s + (t.rate || 0), 0).toFixed(2));
-          const sumAmts = Number(rawTaxes.reduce((s, t) => s + (t.amount || 0), 0).toFixed(2));
-          const combinedLabels = rawTaxes
-            .map((t) => {
-              if (t.label && t.rate != null && !t.label.includes('%')) return `${t.label} ${t.rate}%`;
-              if (t.label) return t.label;
-              if (t.rate != null) return `${t.rate}%`;
-              return '';
-            })
-            .filter(Boolean)
-            .join(' + ');
-
-          if (sumRates > 0 && (taxRate == null || taxRate < sumRates)) {
-            taxRate = sumRates;
-          }
-          if (sumAmts > 0 && (taxAmount == null || taxAmount < sumAmts)) {
-            taxAmount = sumAmts;
-          }
-          if (combinedLabels && (rawTaxes.length > 1 || !taxLabel)) {
-            taxLabel = combinedLabels;
-          }
         }
 
         // Mathematical cross-check: if tax is NOT inclusive, and receipt has a subtotal (or itemsSum) and a larger final amount,

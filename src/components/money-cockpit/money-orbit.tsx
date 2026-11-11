@@ -4,6 +4,7 @@ import { AnimatedNumber } from '@/components/shared/animated-number';
 interface MoneySummaryProps {
   income: number;
   spending: number;
+  budgetSpending?: number;
   invested: number;
   netCashflow: number;
   formatMoney: (amount: number) => string;
@@ -14,12 +15,14 @@ interface MoneySummaryProps {
 export function MoneyOrbit({
   income,
   spending,
+  budgetSpending,
   invested,
   netCashflow,
   formatMoney,
   unpaidCommittedReserve = 0,
   userBudgetCap,
 }: MoneySummaryProps) {
+  const budgetSpent = budgetSpending ?? spending;
   return (
     <section className="cockpit-orbit-section" aria-labelledby="orbit-title">
       <div className="cockpit-summary-primary">
@@ -57,38 +60,38 @@ export function MoneyOrbit({
           <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-zinc-400">
             <span>Budget: <strong className="font-mono text-slate-900 dark:text-white">RM {userBudgetCap.toLocaleString()}</strong></span>
             <span className="font-mono font-medium">
-              {spending > userBudgetCap ? (
+              {budgetSpent > userBudgetCap ? (
                 <span className="text-rose-600 dark:text-rose-400 font-bold">Over Budget</span>
               ) : (
-                <span className="text-emerald-600 dark:text-emerald-400">RM {Math.max(0, userBudgetCap - spending - unpaidCommittedReserve).toFixed(0)} safe to spend</span>
+                <span className="text-emerald-600 dark:text-emerald-400">RM {Math.max(0, userBudgetCap - budgetSpent - unpaidCommittedReserve).toFixed(0)} safe to spend</span>
               )}
             </span>
           </div>
           <div className="h-2 w-full rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden flex">
             <div
               className="h-full bg-indigo-500 transition-all duration-500"
-              style={{ width: `${Math.min(100, (spending / userBudgetCap) * 100)}%` }}
-              title={`Spent: RM ${spending.toFixed(2)}`}
+              style={{ width: `${Math.min(100, (budgetSpent / userBudgetCap) * 100)}%` }}
+              title={`Spent: RM ${budgetSpent.toFixed(2)}`}
             />
             {unpaidCommittedReserve > 0 && (
               <div
                 className="h-full bg-amber-500/80 bg-[repeating-linear-gradient(45deg,transparent,transparent_4px,rgba(0,0,0,0.15)_4px,rgba(0,0,0,0.15)_8px)] transition-all duration-500"
-                style={{ width: `${Math.min(100 - (spending / userBudgetCap) * 100, (unpaidCommittedReserve / userBudgetCap) * 100)}%` }}
+                style={{ width: `${Math.min(Math.max(0, 100 - (budgetSpent / userBudgetCap) * 100), (unpaidCommittedReserve / userBudgetCap) * 100)}%` }}
                 title={`Upcoming Bills: RM ${unpaidCommittedReserve.toFixed(2)}`}
               />
             )}
             <div
               className="h-full bg-emerald-500/40"
-              style={{ width: `${Math.max(0, 100 - ((spending + unpaidCommittedReserve) / userBudgetCap) * 100)}%` }}
-              title={`Safe Discretionary: RM ${Math.max(0, userBudgetCap - spending - unpaidCommittedReserve).toFixed(2)}`}
+              style={{ width: `${Math.max(0, 100 - ((budgetSpent + unpaidCommittedReserve) / userBudgetCap) * 100)}%` }}
+              title={`Safe Discretionary: RM ${Math.max(0, userBudgetCap - budgetSpent - unpaidCommittedReserve).toFixed(2)}`}
             />
           </div>
           <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-zinc-400">
-            <span>Spent: RM {spending.toFixed(0)}</span>
+            <span>Spent: RM {budgetSpent.toFixed(0)}</span>
             {unpaidCommittedReserve > 0 && (
               <span className="text-amber-700 dark:text-amber-400 font-medium">Bills: RM {unpaidCommittedReserve.toFixed(0)}</span>
             )}
-            <span className="text-emerald-700 dark:text-emerald-400 font-medium">Safe: RM {Math.max(0, userBudgetCap - spending - unpaidCommittedReserve).toFixed(0)}</span>
+            <span className="text-emerald-700 dark:text-emerald-400 font-medium">Safe: RM {Math.max(0, userBudgetCap - budgetSpent - unpaidCommittedReserve).toFixed(0)}</span>
           </div>
         </div>
       )}

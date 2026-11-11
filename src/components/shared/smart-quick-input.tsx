@@ -37,6 +37,7 @@ import type { HabitSuggestionItem } from '@/lib/habit-suggestions';
 import { useTransactions } from '@/hooks/useTransactions';
 import { useQueryClient } from '@tanstack/react-query';
 import { getLocalDateString, normalizeDateString } from '@/lib/date-helper';
+import { ACCOUNTING_BASE_CURRENCY, getAmountInBaseCurrency, getCachedRatesToMyr } from '@/lib/currency';
 import { isSafeTransactionAmount } from '@/lib/money-validation';
 import { useAppStore } from '@/stores/app-store';
 import type { AiCommand, AiReceiptItem, AiTransactionData } from '@/types/ai-command';
@@ -58,7 +59,12 @@ import { withReceiptItemsInNotes } from '@/lib/receipt-items';
 import { confirmAction } from '@/stores/confirm-dialog-store';
 import { findSuspectedDuplicates } from '@/lib/duplicate-detector';
 import { mineUserHabitSuggestions } from '@/lib/habit-suggestions';
-import { learnOrStrengthenHabit } from '@/lib/habit-memory-engine';
+import {
+  learnOrStrengthenHabit,
+  matchHabitMemory,
+  observeHabitCandidate,
+} from '@/lib/habit-memory-engine';
+import { normalizeToCanonicalCategory } from '@/lib/canonical-categories';
 
 const CATEGORY_EMOJIS: Record<string, string> = {
   'Food & Dining': '🍔',
@@ -125,6 +131,7 @@ export function SmartQuickInput() {
     taxAmount: number;
     taxRate: number | null;
     description: string;
+    hasExplicitSubtotal?: boolean;
   } | null>(null);
   const [receiptRawText, setReceiptRawText] = useState('');
   const [receiptAssistantNote, setReceiptAssistantNote] = useState<string | null>(null);
@@ -366,61 +373,6 @@ export function SmartQuickInput() {
     toast.success('✂️ Split multi-quantity item into individual plates — tap any plate to unselect!');
   };
 
-  const multiplyReceiptItemByQty = (index: number) => {
-    const target = receiptItems[index];
-    if (!target) return;
-    const qty = Math.round(Number(target.quantity) || 1);
-    if (qty <= 1) return;
-
-    const currentAmt = Number(target.amount) || 0;
-    const nextLineTotal = Number((currentAmt * qty).toFixed(2));
-    const delta = Number((nextLineTotal - currentAmt).toFixed(2));
-
-    const nextItems = receiptItems.map((it, i) =>
-      i === index
-        ? {
-            ...it,
-            unitPrice: currentAmt,
-            amount: nextLineTotal,
-            qtyReconciled: 'multiplied_unit_price' as const,
-          }
-        : it
-    );
-    setReceiptItems(nextItems);
-
-    if (originalReceiptData) {
-      const nextOrigSubtotal = Number((originalReceiptData.subtotal + delta).toFixed(2));
-      const activeTaxRate = (aiParsed?.data as AiTransactionData | undefined)?.taxRate ?? originalReceiptData.taxRate;
-      const nextOrigTax =
-        activeTaxRate != null && activeTaxRate > 0
-          ? Number(((nextOrigSubtotal * activeTaxRate) / 100).toFixed(2))
-          : originalReceiptData.taxAmount;
-      const nextOrigTotal = Number((nextOrigSubtotal + (nextOrigTax || 0)).toFixed(2));
-
-      setOriginalReceiptData({
-        ...originalReceiptData,
-        subtotal: nextOrigSubtotal,
-        taxAmount: nextOrigTax,
-        totalAmount: nextOrigTotal,
-      });
-
-      const selectedSubtotal = Number(
-        selectedReceiptItems.reduce((sum, idx) => sum + (nextItems[idx]?.amount || 0), 0).toFixed(2)
-      );
-      const allocatedTax =
-        activeTaxRate != null && activeTaxRate > 0
-          ? Number(((selectedSubtotal * activeTaxRate) / 100).toFixed(2))
-          : nextOrigTax || 0;
-      const currentTx = aiParsed?.data as AiTransactionData | undefined;
-      const discount = currentTx?.discountAmount && currentTx.discountAmount > 0 ? currentTx.discountAmount : 0;
-      updateTransactionData({
-        subtotal: selectedSubtotal,
-        taxAmount: allocatedTax,
-        amount: Math.max(0, Number((selectedSubtotal + allocatedTax - discount).toFixed(2))),
-      });
-    }
-  };
-
   // Voice Recognition setup
   const recognitionRef = useRef<any>(null);
 
@@ -454,13 +406,15 @@ export function SmartQuickInput() {
 
 
   const triggerAssistantTurn = useCallback(
-    async (textToRun: string) => {
+    async (textToRun: string, options?: { silentOnError?: boolean }) => {
       const trimmed = textToRun.trim();
-      if (!trimmed || assistantRequestInFlightRef.current) return;
+      if (!trimmed || assistantRequestInFlightRef.current) return null;
 
       assistantRequestInFlightRef.current = true;
       setIsAssistantThinking(true);
-      setAssistantError(null);
+      if (!options?.silentOnError) {
+        setAssistantError(null);
+      }
       try {
         const turnResult = await runKinovaTurn({
           text: trimmed,
@@ -482,17 +436,21 @@ export function SmartQuickInput() {
           if (result.command && !['clarify', 'unknown'].includes(result.mode)) {
             setAiParsed(result.command);
             setIsAiEnhanced(true);
-            return result.command;
+            return { command: result.command, mode: result.mode, hadError: false };
           }
+          return { command: null, mode: result.mode, hadError: false };
         }
-        return null;
+        return { command: null, mode: 'unknown', hadError: false };
       } catch (err) {
         const msg = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
           ? 'Kinova took too long to respond. Please try again.'
           : err instanceof Error
             ? err.message
             : 'Kinova Assistant request failed';
-        setAssistantError(msg);
+        if (!options?.silentOnError) {
+          setAssistantError(msg);
+        }
+        return { command: null, mode: 'error', hadError: true };
       } finally {
         assistantRequestInFlightRef.current = false;
         setIsAssistantThinking(false);
@@ -648,24 +606,49 @@ export function SmartQuickInput() {
     const description = String(baseAction.payload.description || existingTx?.description || '');
     const date = String(baseAction.payload.date || existingTx?.date || getLocalDateString());
     const currency = String(baseAction.payload.currency || existingTx?.currency || 'MYR');
+    const txType = String(existingTx?.type || 'expense');
+    const subCategory = String(existingTx?.subCategory || '');
+    const tripTag = String(existingTx?.tripTag || '');
+    const receiptUrl = String(existingTx?.receiptUrl || '');
+    const notes = String(existingTx?.notes || '');
+    const amountChanged =
+      typeof patch.amount === 'number' &&
+      Math.abs(patch.amount - Number(existingTx?.amount ?? baseAction.payload.amount ?? 0)) > 1e-6;
+    const preservedBaseAmount =
+      !amountChanged && Number.isFinite(existingTx?.baseAmount)
+        ? Number(existingTx!.baseAmount)
+        : undefined;
+    const baseAmount = getAmountInBaseCurrency(newAmount, currency, preservedBaseAmount, getCachedRatesToMyr());
+    const baseRate = newAmount > 0 ? baseAmount / newAmount : 1;
 
     const updatedRow = {
       Id: targetId,
       id: targetId,
       Date: date,
       date: date,
-      Type: 'expense',
-      type: 'expense',
+      Type: txType,
+      type: txType.toLowerCase(),
       Category: newCategory,
       category: newCategory,
+      SubCategory: subCategory,
+      subCategory: subCategory,
       Description: description,
       description: description,
       Amount: newAmount,
       amount: newAmount,
       Currency: currency,
       currency: currency,
-      Notes: (existingTx as any)?.notes || '',
-      notes: (existingTx as any)?.notes || '',
+      BaseAmount: Number(baseAmount.toFixed(2)),
+      baseAmount: Number(baseAmount.toFixed(2)),
+      BaseCurrency: ACCOUNTING_BASE_CURRENCY,
+      baseCurrency: ACCOUNTING_BASE_CURRENCY,
+      FxRateToBase: Number(baseRate.toFixed(8)),
+      TripTag: tripTag,
+      tripTag: tripTag,
+      ReceiptUrl: receiptUrl,
+      receiptUrl: receiptUrl,
+      Notes: notes,
+      notes: notes,
       _month: monthStr,
       _rowIndex: rowIndex,
     };
@@ -677,12 +660,18 @@ export function SmartQuickInput() {
         Id: targetId,
         id: targetId,
         Date: date,
-        Type: 'expense',
+        Type: txType,
         Category: newCategory,
+        SubCategory: subCategory,
         Description: description,
         Amount: newAmount,
         Currency: currency,
-        Notes: (existingTx as any)?.notes || '',
+        BaseAmount: Number(baseAmount.toFixed(2)),
+        BaseCurrency: ACCOUNTING_BASE_CURRENCY,
+        FxRateToBase: Number(baseRate.toFixed(8)),
+        TripTag: tripTag,
+        ReceiptUrl: receiptUrl,
+        Notes: notes,
       });
 
       recordRecentAction({
@@ -1032,6 +1021,7 @@ export function SmartQuickInput() {
       }
 
       const itemsSum = Number(safeItems.reduce((sum, item) => sum + item.amount, 0).toFixed(2));
+      const hasExplicitSubtotal = Boolean(tx.subtotal && tx.subtotal > 0);
       const origSubtotal = hasDiscount && tx.subtotal && tx.subtotal > tx.amount
         ? (itemsSum > 0 && itemsSum <= tx.amount ? itemsSum : tx.amount)
         : (tx.subtotal && tx.subtotal > 0 ? tx.subtotal : itemsSum);
@@ -1091,12 +1081,22 @@ export function SmartQuickInput() {
       tx.taxAmount = effectiveTaxAmount > 0 ? effectiveTaxAmount : null;
       tx.taxRate = effectiveTaxAmount > 0 ? effectiveTaxRate : null;
 
+      const rawOcrMerchantDesc = tx.description;
+      const receiptHabitMatch = matchHabitMemory(rawOcrMerchantDesc);
+      if (receiptHabitMatch) {
+        tx.description = receiptHabitMatch.resolvedDescription;
+        if (receiptHabitMatch.resolvedCategory && receiptHabitMatch.resolvedCategory !== 'Other') {
+          tx.category = receiptHabitMatch.resolvedCategory;
+        }
+      }
+
       setOriginalReceiptData({
         totalAmount: origTotal,
         subtotal: origSubtotal,
         taxAmount: effectiveTaxAmount,
         taxRate: effectiveTaxRate,
-        description: tx.description,
+        description: rawOcrMerchantDesc,
+        hasExplicitSubtotal,
       });
 
       setReceiptAttachment({ dataUrl, base64, fileName: file.name, mimeType });
@@ -1169,33 +1169,80 @@ export function SmartQuickInput() {
     }
   };
 
+  const applyLocalPreference = (pref: { key: string; value: unknown; label: string }) => {
+    if (pref.key === 'categoryBudgetCap') {
+      const { category, amount } = pref.value as { category: string; amount: number };
+      saveCategoryCaps({ ...getSavedCategoryCaps(), [category]: amount });
+    } else if (pref.key === 'paydayDay') {
+      updateUserMoneyProfile({ paydayDay: pref.value as number });
+    } else if (pref.key === 'monthlyBudgetCap') {
+      updateUserMoneyProfile({ monthlyBudgetCap: pref.value as number });
+    } else if (pref.key === 'language') {
+      updateUserMoneyProfile({ language: pref.value as 'zh' | 'en' | 'ms' | 'auto' });
+    } else if (pref.key === 'alias') {
+      const { rawPattern, alias } = (pref.value || {}) as { rawPattern?: string; alias?: string };
+      if (rawPattern && alias) {
+        const existing = matchHabitMemory(rawPattern);
+        const parsedAliasCat = parseNaturalExpense(`${alias} 1`)?.category;
+        const builtInAliasCat = normalizeToCanonicalCategory('', 'Expense', alias);
+        const category =
+          existing?.resolvedCategory ||
+          (parsedAliasCat && parsedAliasCat !== 'Other' ? parsedAliasCat : '') ||
+          (builtInAliasCat && builtInAliasCat !== 'Other' ? builtInAliasCat : '') ||
+          'Other';
+        learnOrStrengthenHabit({
+          rawInputOrMerchant: rawPattern,
+          aliasOrDescription: alias,
+          category,
+          source: 'manual',
+        });
+      }
+    }
+  };
+
   const handleQuickSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (isSubmitting || isAssistantThinking) return;
 
     if (localRoute && localRoute.mode === 'set_preference') {
       const pref = localRoute.preference;
-      if (pref.key === 'categoryBudgetCap') {
-        const { category, amount } = pref.value as { category: string; amount: number };
-        saveCategoryCaps({ ...getSavedCategoryCaps(), [category]: amount });
-      } else if (pref.key === 'paydayDay') {
-        updateUserMoneyProfile({ paydayDay: pref.value as number });
-      } else if (pref.key === 'monthlyBudgetCap') {
-        updateUserMoneyProfile({ monthlyBudgetCap: pref.value as number });
-      } else if (pref.key === 'language') {
-        updateUserMoneyProfile({ language: pref.value as any });
-      }
+      applyLocalPreference(pref);
       toast.success(`Saved preference: ${pref.label}`);
       setInput('');
       return;
     }
 
     let commandToProcess = activeCommand;
+    // If local parse returned 'Other' on a typed phrase while online, let Gemini resolve partial wording / habit keywords before saving
+    if (
+      !aiParsed &&
+      !receiptAttachment &&
+      !isEditingDetails &&
+      commandToProcess?.intent === 'transaction' &&
+      (commandToProcess.data as AiTransactionData).category === 'Other' &&
+      (typeof navigator === 'undefined' || navigator.onLine !== false)
+    ) {
+      const trimmed = input.trim();
+      if (trimmed) {
+        const outcome = await triggerAssistantTurn(trimmed, { silentOnError: true });
+        if (outcome && !outcome.hadError) {
+          if (outcome.command && outcome.command.intent === 'transaction' && outcome.command.data) {
+            commandToProcess = outcome.command;
+          } else if (outcome.command) {
+            commandToProcess = outcome.command;
+          } else {
+            return;
+          }
+        }
+      }
+    }
+
     // If no local transaction command is resolved, send to Kinova Assistant
     if (!commandToProcess) {
       const trimmed = input.trim();
       if (!trimmed) return;
-      const assistantCmd = await triggerAssistantTurn(trimmed);
+      const outcome = await triggerAssistantTurn(trimmed);
+      const assistantCmd = outcome?.command;
       if (assistantCmd && assistantCmd.intent === 'transaction' && assistantCmd.data) {
         commandToProcess = assistantCmd;
       } else {
@@ -1228,6 +1275,7 @@ export function SmartQuickInput() {
 
       setInput('');
       setAiParsed(null);
+      setAssistantResult(null);
       setIsAiEnhanced(false);
       clearReceiptState();
       return;
@@ -1300,8 +1348,19 @@ export function SmartQuickInput() {
       }
 
       let finalNotes = activeParsed.notes || '';
-      if (localParsed?.habitMatch?.isAlias) {
-        const habitTag = `[习惯匹配: 转给 ${localParsed.habitMatch.rawPattern}]`;
+      if (
+        localParsed?.habitMatch &&
+        (localParsed.habitMatch.isAlias ||
+          localParsed.habitMatch.matchedVia === 'keyword' ||
+          localParsed.habitMatch.matchedVia === 'compact' ||
+          localParsed.habitMatch.matchedVia === 'stem')
+      ) {
+        const habitTag =
+          localParsed.habitMatch.matchedVia === 'keyword' ||
+          localParsed.habitMatch.matchedVia === 'compact' ||
+          localParsed.habitMatch.matchedVia === 'stem'
+            ? `[习惯匹配: 字眼 ${localParsed.habitMatch.matchedToken || localParsed.habitMatch.rawPattern} → ${localParsed.habitMatch.rawPattern}]`
+            : `[习惯匹配: 转给 ${localParsed.habitMatch.rawPattern}]`;
         if (!finalNotes.includes(habitTag)) {
           finalNotes = finalNotes ? `${finalNotes} ${habitTag}` : habitTag;
         }
@@ -1420,13 +1479,42 @@ export function SmartQuickInput() {
 
       const recordedText = `${activeParsed.currency || 'MYR'} ${activeParsed.amount.toFixed(2)} for ${activeParsed.description}`;
       const savedTaxCat = taxPreviewInfo?.isEligible ? taxPreviewInfo.category : null;
-      if (activeParsed.description) {
-        learnOrStrengthenHabit({
-          rawInputOrMerchant: localParsed?.habitMatch ? localParsed.habitMatch.rawPattern : activeParsed.description,
-          aliasOrDescription: activeParsed.description,
+      const trimmedDesc = activeParsed.description?.trim() || '';
+      const rawOcrMerchant = originalReceiptData?.description
+        ? originalReceiptData.description.split(' (')[0].trim()
+        : '';
+      const rawTypedToken = localParsed?.description?.trim() || '';
+      const userEditedTypedCommand =
+        !rawOcrMerchant &&
+        Boolean(localParsed) &&
+        (trimmedDesc.toLowerCase() !== rawTypedToken.toLowerCase() ||
+          activeParsed.category.toLowerCase() !== (localParsed?.category || '').toLowerCase());
+      if (localParsed?.habitMatch && trimmedDesc) {
+        observeHabitCandidate({
+          rawInputOrMerchant: localParsed.habitMatch.rawPattern,
+          aliasOrDescription: trimmedDesc,
           category: activeParsed.category,
           amount: activeParsed.amount,
-          source: 'auto_learned',
+        });
+      } else if (
+        rawOcrMerchant &&
+        trimmedDesc &&
+        rawOcrMerchant.toLowerCase() !== trimmedDesc.toLowerCase() &&
+        trimmedDesc.toLowerCase() !== (originalReceiptData?.description || '').trim().toLowerCase() &&
+        !trimmedDesc.toLowerCase().startsWith(`${rawOcrMerchant.toLowerCase()} (`)
+      ) {
+        observeHabitCandidate({
+          rawInputOrMerchant: rawOcrMerchant,
+          aliasOrDescription: trimmedDesc,
+          category: activeParsed.category,
+          amount: activeParsed.amount,
+        });
+      } else if (userEditedTypedCommand && rawTypedToken.length >= 2 && trimmedDesc) {
+        observeHabitCandidate({
+          rawInputOrMerchant: rawTypedToken,
+          aliasOrDescription: trimmedDesc,
+          category: activeParsed.category,
+          amount: activeParsed.amount,
         });
       }
 
@@ -1446,6 +1534,7 @@ export function SmartQuickInput() {
 
       setInput('');
       setAiParsed(null);
+      setAssistantResult(null);
       setIsAiEnhanced(false);
       clearReceiptState();
 
@@ -1770,12 +1859,7 @@ export function SmartQuickInput() {
               type="button"
               onClick={() => {
                 const pref = localRoute.preference;
-                if (pref.key === 'categoryBudgetCap') {
-                  const { category, amount } = pref.value as { category: string; amount: number };
-                  saveCategoryCaps({ ...getSavedCategoryCaps(), [category]: amount });
-                } else if (pref.key === 'paydayDay') updateUserMoneyProfile({ paydayDay: pref.value as number });
-                else if (pref.key === 'monthlyBudgetCap') updateUserMoneyProfile({ monthlyBudgetCap: pref.value as number });
-                else if (pref.key === 'language') updateUserMoneyProfile({ language: pref.value as any });
+                applyLocalPreference(pref);
                 toast.success(`Saved preference: ${pref.label}`);
                 setInput('');
               }}
@@ -2164,41 +2248,30 @@ export function SmartQuickInput() {
                         const qty = Math.round(Number(item.quantity) || 1);
                         const unitPrice = Number((item.unitPrice && item.unitPrice > 0 ? item.unitPrice : item.amount / qty).toFixed(2));
                         return (
-                          <div key={`${item.name}-${idx}`} className="inline-flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => toggleReceiptItem(idx)}
-                              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all cursor-pointer ${
-                                isSelected
-                                  ? 'bg-indigo-600/30 border border-indigo-500/50 text-slate-950 dark:text-white shadow-sm'
-                                  : 'bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-500 dark:text-zinc-400 line-through opacity-60'
-                              }`}
-                            >
-                              <span>{isSelected ? '✓' : '✗'}</span>
-                              {qty > 1 && (
-                                <span className="rounded bg-indigo-500/20 px-1 py-0.2 font-mono text-[10px] font-bold text-indigo-900 dark:text-indigo-200">
-                                  {qty}×
-                                </span>
-                              )}
-                              <span>{item.name}</span>
-                              {qty > 1 && (
-                                <span className="text-[10px] opacity-75 font-mono">
-                                  (@{unitPrice.toFixed(2)})
-                                </span>
-                              )}
-                              <span className="font-mono text-[11px] opacity-90">{activeCommand.data.currency} {item.amount.toFixed(2)}</span>
-                            </button>
+                          <button
+                            key={`${item.name}-${idx}`}
+                            type="button"
+                            onClick={() => toggleReceiptItem(idx)}
+                            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all cursor-pointer ${
+                              isSelected
+                                ? 'bg-indigo-600/30 border border-indigo-500/50 text-slate-950 dark:text-white shadow-sm'
+                                : 'bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-500 dark:text-zinc-400 line-through opacity-60'
+                            }`}
+                          >
+                            <span>{isSelected ? '✓' : '✗'}</span>
                             {qty > 1 && (
-                              <button
-                                type="button"
-                                onClick={() => multiplyReceiptItemByQty(idx)}
-                                title={`If ${item.amount.toFixed(2)} is a single-plate price, click to multiply ×${qty}`}
-                                className="rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-1 text-[10px] font-semibold text-amber-800 dark:text-amber-300 hover:bg-amber-500/20 cursor-pointer"
-                              >
-                                ×{qty}
-                              </button>
+                              <span className="rounded bg-indigo-500/20 px-1 py-0.2 font-mono text-[10px] font-bold text-indigo-900 dark:text-indigo-200">
+                                {qty}×
+                              </span>
                             )}
-                          </div>
+                            <span>{item.name}</span>
+                            {qty > 1 && (
+                              <span className="text-[10px] opacity-75 font-mono">
+                                (@{unitPrice.toFixed(2)})
+                              </span>
+                            )}
+                            <span className="font-mono text-[11px] opacity-90">{activeCommand.data.currency} {item.amount.toFixed(2)}</span>
+                          </button>
                         );
                       })}
                     </div>
@@ -2460,8 +2533,14 @@ export function SmartQuickInput() {
                             🎉 优惠 -{activeCommand.data.currency} {activeCommand.data.discountAmount.toFixed(2)}
                           </span>
                         )}
-                        <span className="text-slate-800 dark:text-zinc-200 font-semibold truncate max-w-[160px]">
-                          &ldquo;{activeCommand.data.description}&rdquo;{localParsed?.habitMatch && <span className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-semibold text-purple-800 dark:text-purple-300">✨ (习惯: 转给 {localParsed.habitMatch.rawPattern})</span>}
+                        <span className="text-slate-800 dark:text-zinc-200 font-semibold truncate max-w-[200px]">
+                          &ldquo;{activeCommand.data.description}&rdquo;{localParsed?.habitMatch && (
+                            <span className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-semibold text-purple-800 dark:text-purple-300">
+                              ✨ ({localParsed.habitMatch.matchedVia === 'keyword' || localParsed.habitMatch.matchedVia === 'compact' || localParsed.habitMatch.matchedVia === 'stem'
+                                ? `字眼: ${localParsed.habitMatch.matchedToken || localParsed.habitMatch.rawPattern}`
+                                : `习惯: 转给 ${localParsed.habitMatch.rawPattern}`})
+                            </span>
+                          )}
                         </span>
                         <button
                           type="button"

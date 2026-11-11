@@ -1,4 +1,4 @@
-import { sheetsApi, getSwrCachedEntry, setSwrCachedData, getActiveUserCacheScope } from './sheets-api';
+import { sheetsApi, getSwrCachedEntry, setSwrCachedData, getActiveUserCacheScope, markLocalMutationActivity, getLastMutationActivityAt } from './sheets-api';
 import { 
   getRollingWindowMonths, 
   clearDisposableReadCaches,
@@ -365,8 +365,10 @@ function scheduleBackgroundWarmRecentMonths(): void {
 
   setTimeout(async () => {
     try {
+      const warmStartedAt = Date.now();
       const res = await sheetsApi.getAllTransactions({ limitMonths: 12 });
       if (!res?.success || !res?.data) return;
+      if (getLastMutationActivityAt() > warmStartedAt) return;
       const headers = res.data.headers || [];
       const rowsByMonth = new Map<string, SheetRow[]>();
 
@@ -869,202 +871,244 @@ export const sheetsData = {
    */
   async getAllTransactions(selectedPeriod?: string): Promise<{ headers: string[]; rows: SheetRow[] }> {
     const rollingMonths = getRollingWindowMonths(3);
+    const runFetch = async (allowRetry: boolean): Promise<{ headers: string[]; rows: SheetRow[] }> => {
+      const fetchStartedAt = Date.now();
 
-    // Case 1: Targeted single-month request (e.g. '2026-10', '2025-04')
-    if (selectedPeriod && /^\d{4}-\d{2}$/.test(selectedPeriod)) {
-      const res = await sheetsApi.getSheetData(selectedPeriod);
-      if (!res.success || !res.data) {
-        throw new Error(`Google Sheets did not return ${selectedPeriod}.`);
+      // Case 1: Targeted single-month request (e.g. '2026-10', '2025-04')
+      if (selectedPeriod && /^\d{4}-\d{2}$/.test(selectedPeriod)) {
+        const res = await sheetsApi.getSheetData(selectedPeriod);
+        if (!res.success || !res.data) {
+          throw new Error(`Google Sheets did not return ${selectedPeriod}.`);
+        }
+        if (allowRetry && getLastMutationActivityAt() > fetchStartedAt) {
+          if (activeWritePromises.size > 0) {
+            await Promise.allSettled(Array.from(activeWritePromises));
+          }
+          return runFetch(false);
+        }
+        const rawRows = (res.data.rows || []).map((r: SheetRow) => ({ ...r, _month: selectedPeriod }));
+        const mergedRows = applyPendingMutations(rawRows, selectedPeriod);
+        if (mergedRows.length > rawRows.length && getLastMutationActivityAt() <= fetchStartedAt) {
+          setSwrCachedData('getSheetData', { sheetName: selectedPeriod }, {
+            success: true,
+            data: {
+              headers: res.data.headers || [],
+              rows: mergedRows,
+            },
+          });
+        }
+        return {
+          headers: res.data.headers || [],
+          rows: mergedRows,
+        };
       }
-      const rawRows = (res.data.rows || []).map((r: SheetRow) => ({ ...r, _month: selectedPeriod }));
-      const mergedRows = applyPendingMutations(rawRows, selectedPeriod);
-      if (mergedRows.length > rawRows.length) {
-        setSwrCachedData('getSheetData', { sheetName: selectedPeriod }, {
-          success: true,
-          data: {
-            headers: res.data.headers || [],
-            rows: mergedRows,
-          },
-        });
+
+      // Case 2: Targeted year request (e.g. 'year-2026')
+      if (selectedPeriod && selectedPeriod.startsWith('year-')) {
+        const year = selectedPeriod.replace('year-', '');
+        const allMonths = await this.getMonthList();
+        const localMonths = collectLocallyKnownMonths();
+        const existingYearMonths = Array.from(new Set([...allMonths, ...localMonths]))
+          .filter(m => m.startsWith(`${year}-`))
+          .sort((a, b) => b.localeCompare(a));
+        const targetMonths = existingYearMonths.length > 0
+          ? existingYearMonths
+          : Array.from({ length: 12 }, (_, idx) => `${year}-${String(12 - idx).padStart(2, '0')}`);
+
+        const results = await Promise.all(
+          targetMonths.map(async (m) => {
+            const res = await sheetsApi.getSheetData(m);
+            if (!res.success || !res.data) {
+              throw new Error(`Google Sheets did not return ${m}.`);
+            }
+            const monthRows = applyPendingMutations(
+              (res.data.rows || []).map((r: SheetRow) => ({ ...r, _month: m })),
+              m
+            );
+            return { month: m, headers: res.data.headers || [], rows: monthRows };
+          })
+        );
+        if (allowRetry && getLastMutationActivityAt() > fetchStartedAt) {
+          if (activeWritePromises.size > 0) {
+            await Promise.allSettled(Array.from(activeWritePromises));
+          }
+          return runFetch(false);
+        }
+
+        let headers: string[] = [];
+        const combinedRows: SheetRow[] = [];
+        for (const r of results) {
+          if (headers.length === 0 && r.headers.length > 0) headers = r.headers;
+          r.rows.forEach((row: SheetRow) => {
+            combinedRows.push({ ...row, _month: r.month });
+          });
+        }
+
+        return {
+          headers,
+          rows: applyPendingMutations(combinedRows, selectedPeriod),
+        };
       }
-      return {
-        headers: res.data.headers || [],
-        rows: mergedRows,
-      };
-    }
 
-    // Case 2: Targeted year request (e.g. 'year-2026')
-    if (selectedPeriod && selectedPeriod.startsWith('year-')) {
-      const year = selectedPeriod.replace('year-', '');
-      const allMonths = await this.getMonthList();
-      const localMonths = collectLocallyKnownMonths();
-      const existingYearMonths = Array.from(new Set([...allMonths, ...localMonths]))
-        .filter(m => m.startsWith(`${year}-`))
-        .sort((a, b) => b.localeCompare(a));
-      const targetMonths = existingYearMonths.length > 0
-        ? existingYearMonths
-        : Array.from({ length: 12 }, (_, idx) => `${year}-${String(12 - idx).padStart(2, '0')}`);
+      // Case 3: Explicit 'all' requested (full archive)
+      if (selectedPeriod === 'all') {
+        const res = await sheetsApi.getAllTransactions(true);
+        if (!res.success || !res.data) {
+          throw new Error('Google Sheets did not return the full transaction history.');
+        }
+        if (allowRetry && getLastMutationActivityAt() > fetchStartedAt) {
+          if (activeWritePromises.size > 0) {
+            await Promise.allSettled(Array.from(activeWritePromises));
+          }
+          return runFetch(false);
+        }
+        return {
+          headers: res.data.headers || [],
+          rows: applyPendingMutations(res.data.rows || [], selectedPeriod),
+        };
+      }
 
+      // Case 4: Default Active Dashboard — Fetch the exact 3 rolling calendar months by tab name
+      // (e.g. ['2026-10', '2026-09', '2026-08']) so future empty tabs (2026-11, 2026-12) never push out September/August.
       const results = await Promise.all(
-        targetMonths.map(async (m) => {
+        rollingMonths.map(async (m) => {
           const res = await sheetsApi.getSheetData(m);
           if (!res.success || !res.data) {
             throw new Error(`Google Sheets did not return ${m}.`);
           }
-          const monthRows = applyPendingMutations(
-            (res.data.rows || []).map((r: SheetRow) => ({ ...r, _month: m })),
-            m
-          );
-          return { month: m, headers: res.data.headers || [], rows: monthRows };
+          return {
+            month: m,
+            headers: res.data.headers || [],
+            rows: res.data.rows || [],
+          };
         })
       );
+      if (allowRetry && getLastMutationActivityAt() > fetchStartedAt) {
+        if (activeWritePromises.size > 0) {
+          await Promise.allSettled(Array.from(activeWritePromises));
+        }
+        return runFetch(false);
+      }
 
       let headers: string[] = [];
       const combinedRows: SheetRow[] = [];
+      const fetchedSet = new Set<string>();
       for (const r of results) {
-        if (headers.length === 0 && r.headers.length > 0) headers = r.headers;
+        fetchedSet.add(r.month);
+        if (headers.length === 0 && r.headers.length > 0) {
+          headers = r.headers;
+        }
         r.rows.forEach((row: SheetRow) => {
           combinedRows.push({ ...row, _month: r.month });
         });
       }
 
+      // Also include any already-warmed months from the 12-month window so yearly trend charts stay complete
+      for (const m of getRollingWindowMonths(12)) {
+        if (fetchedSet.has(m)) continue;
+        const entry = getSwrCachedEntry<{ success: boolean; data: SheetDataPayload }>('getSheetData', { sheetName: m });
+        if (entry?.data?.data?.rows) {
+          if (headers.length === 0 && entry.data.data.headers?.length) {
+            headers = entry.data.data.headers;
+          }
+          entry.data.data.rows.forEach((row: SheetRow) => {
+            combinedRows.push({ ...row, _month: m });
+          });
+        }
+      }
+
+      // Warm recent months in background so switching to earlier months in the year is 0ms instant
+      scheduleBackgroundWarmRecentMonths();
+
       return {
         headers,
         rows: applyPendingMutations(combinedRows, selectedPeriod),
       };
-    }
-
-    // Case 3: Explicit 'all' requested (full archive)
-    if (selectedPeriod === 'all') {
-      const res = await sheetsApi.getAllTransactions(true);
-      if (!res.success || !res.data) {
-        throw new Error('Google Sheets did not return the full transaction history.');
-      }
-      return {
-        headers: res.data.headers || [],
-        rows: applyPendingMutations(res.data.rows || [], selectedPeriod),
-      };
-    }
-
-    // Case 4: Default Active Dashboard — Fetch the exact 3 rolling calendar months by tab name
-    // (e.g. ['2026-10', '2026-09', '2026-08']) so future empty tabs (2026-11, 2026-12) never push out September/August.
-    const results = await Promise.all(
-      rollingMonths.map(async (m) => {
-        const res = await sheetsApi.getSheetData(m);
-        if (!res.success || !res.data) {
-          throw new Error(`Google Sheets did not return ${m}.`);
-        }
-        return {
-          month: m,
-          headers: res.data.headers || [],
-          rows: res.data.rows || [],
-        };
-      })
-    );
-
-    let headers: string[] = [];
-    const combinedRows: SheetRow[] = [];
-    const fetchedSet = new Set<string>();
-    for (const r of results) {
-      fetchedSet.add(r.month);
-      if (headers.length === 0 && r.headers.length > 0) {
-        headers = r.headers;
-      }
-      r.rows.forEach((row: SheetRow) => {
-        combinedRows.push({ ...row, _month: r.month });
-      });
-    }
-
-    // Also include any already-warmed months from the 12-month window so yearly trend charts stay complete
-    for (const m of getRollingWindowMonths(12)) {
-      if (fetchedSet.has(m)) continue;
-      const entry = getSwrCachedEntry<{ success: boolean; data: SheetDataPayload }>('getSheetData', { sheetName: m });
-      if (entry?.data?.data?.rows) {
-        if (headers.length === 0 && entry.data.data.headers?.length) {
-          headers = entry.data.data.headers;
-        }
-        entry.data.data.rows.forEach((row: SheetRow) => {
-          combinedRows.push({ ...row, _month: m });
-        });
-      }
-    }
-
-    // Warm recent months in background so switching to earlier months in the year is 0ms instant
-    scheduleBackgroundWarmRecentMonths();
-
-    return {
-      headers,
-      rows: applyPendingMutations(combinedRows, selectedPeriod),
     };
+
+    return runFetch(true);
   },
 
   /**
    * Read data for a specific sheet tab (Trades, Trips, Invoices, Overview, or a Month)
    */
   async getSheetData(sheetName: string): Promise<{ headers: string[]; rows: SheetRow[] }> {
-    try {
-      const res = await sheetsApi.getSheetData(sheetName);
-      if (res.success && res.data) {
-        let rawRows = res.data.rows || [];
-        // Guard against empty Trades eviction if persistent trades or local cache already has valid trades
-        if (sheetName === 'Trades' && rawRows.length === 0) {
-          if (typeof window !== 'undefined') {
-            try {
-              const stored = localStorage.getItem('cashflow_persistent_trades');
-              if (stored) {
-                const parsed = JSON.parse(stored);
-                if (Array.isArray(parsed) && parsed.length > 0) {
-                  rawRows = parsed.filter((t: any) => {
-                    const tId = String(t.Id || t.id || '');
-                    const sym = String(t.Ticker || t.ticker || '').trim().toUpperCase();
-                    return !isRecordTombstoned(tId) && !isRecordTombstoned(sym);
-                  });
+    const runSheetFetch = async (allowRetry: boolean): Promise<{ headers: string[]; rows: SheetRow[] }> => {
+      const fetchStartedAt = Date.now();
+      try {
+        const res = await sheetsApi.getSheetData(sheetName);
+        if (res.success && res.data) {
+          if (allowRetry && getLastMutationActivityAt() > fetchStartedAt) {
+            if (activeWritePromises.size > 0) {
+              await Promise.allSettled(Array.from(activeWritePromises));
+            }
+            return runSheetFetch(false);
+          }
+          let rawRows = res.data.rows || [];
+          // Guard against empty Trades eviction if persistent trades or local cache already has valid trades
+          if (sheetName === 'Trades' && rawRows.length === 0) {
+            if (typeof window !== 'undefined') {
+              try {
+                const stored = localStorage.getItem('cashflow_persistent_trades');
+                if (stored) {
+                  const parsed = JSON.parse(stored);
+                  if (Array.isArray(parsed) && parsed.length > 0) {
+                    rawRows = parsed.filter((t: any) => {
+                      const tId = String(t.Id || t.id || '');
+                      const sym = String(t.Ticker || t.ticker || '').trim().toUpperCase();
+                      return !isRecordTombstoned(tId) && !isRecordTombstoned(sym);
+                    });
+                  }
                 }
+              } catch {
+                // ignore
               }
-            } catch {
-              // ignore
+            }
+            if (rawRows.length === 0) {
+              const cached = this.getInitialSheetData('Trades');
+              if (cached?.data?.rows && cached.data.rows.length > 0) {
+                rawRows = cached.data.rows.filter((t: any) => {
+                  const tId = String(t.Id || t.id || '');
+                  const sym = String(t.Ticker || t.ticker || '').trim().toUpperCase();
+                  return !isRecordTombstoned(tId) && !isRecordTombstoned(sym);
+                });
+              }
             }
           }
-          if (rawRows.length === 0) {
-            const cached = this.getInitialSheetData('Trades');
-            if (cached?.data?.rows && cached.data.rows.length > 0) {
-              rawRows = cached.data.rows.filter((t: any) => {
-                const tId = String(t.Id || t.id || '');
-                const sym = String(t.Ticker || t.ticker || '').trim().toUpperCase();
-                return !isRecordTombstoned(tId) && !isRecordTombstoned(sym);
-              });
+          // Strict category sanitation: all food and grocery expenses must be Food & Dining
+          rawRows.forEach((r) => {
+            const cat = r.Category || r.category;
+            if (cat && isLegacyFoodOrGrocery(String(cat))) {
+              if (r.Category !== undefined) r.Category = 'Food & Dining';
+              if (r.category !== undefined) r.category = 'Food & Dining';
+              if (r.Category === undefined && r.category === undefined) r.Category = 'Food & Dining';
             }
+          });
+          const mergedRows = applyPendingMutations(rawRows, sheetName);
+          if (getLastMutationActivityAt() <= fetchStartedAt) {
+            setSwrCachedData('getSheetData', { sheetName }, {
+              success: true,
+              data: {
+                headers: res.data.headers || [],
+                rows: mergedRows,
+              },
+            });
           }
-        }
-        // Strict category sanitation: all food and grocery expenses must be Food & Dining
-        rawRows.forEach((r) => {
-          const cat = r.Category || r.category;
-          if (cat && isLegacyFoodOrGrocery(String(cat))) {
-            if (r.Category !== undefined) r.Category = 'Food & Dining';
-            if (r.category !== undefined) r.category = 'Food & Dining';
-            if (r.Category === undefined && r.category === undefined) r.Category = 'Food & Dining';
-          }
-        });
-        const mergedRows = applyPendingMutations(rawRows, sheetName);
-        setSwrCachedData('getSheetData', { sheetName }, {
-          success: true,
-          data: {
+          return {
             headers: res.data.headers || [],
             rows: mergedRows,
-          },
-        });
-        return {
-          headers: res.data.headers || [],
-          rows: mergedRows,
-        };
+          };
+        }
+      } catch (err) {
+        console.warn(`[SheetsData] Failed to fetch sheet ${sheetName}:`, err);
       }
-    } catch (err) {
-      console.warn(`[SheetsData] Failed to fetch sheet ${sheetName}:`, err);
-    }
 
-    const cached = this.getInitialSheetData(sheetName);
-    if (cached) return cached.data;
-    throw new Error(`Could not load ${sheetName} from Google Sheets and no cached copy is available.`);
+      const cached = this.getInitialSheetData(sheetName);
+      if (cached) return cached.data;
+      throw new Error(`Could not load ${sheetName} from Google Sheets and no cached copy is available.`);
+    };
+
+    return runSheetFetch(true);
   },
 
   /**
@@ -1095,6 +1139,7 @@ export const sheetsData = {
    * avoiding full-cache wipes and multi-second refetch delays.
    */
   optimisticAddRow(sheetName: string, rowData: SheetRow): SheetRow {
+    markLocalMutationActivity();
     const tempId = String(rowData.Id || rowData.id || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
     if (tempId) {
       clearDeletedTombstone(tempId);
@@ -1154,6 +1199,7 @@ export const sheetsData = {
    * Synchronously updates the localStorage SWR cache in-place (< 1ms) when updating a row.
    */
   optimisticUpdateRow(sheetName: string, rowIndex: number | undefined, rowData: SheetRow): SheetRow {
+    markLocalMutationActivity();
     const id = String(rowData.Id || rowData.id || '');
     const dateStr = String(rowData.Date || rowData.date || '');
     const targetMonth = /^\d{4}-\d{2}/.test(dateStr)
@@ -1226,6 +1272,7 @@ export const sheetsData = {
    * Synchronously removes a row from the localStorage SWR cache in-place (< 1ms) and records its tombstone.
    */
   optimisticDeleteRow(sheetName: string, rowIndex?: number, id?: string): void {
+    markLocalMutationActivity();
     if (id) {
       inFlightOptimisticRows.delete(id);
       recordDeletedTombstone(id, 'transaction', sheetName);
@@ -1283,6 +1330,7 @@ export const sheetsData = {
    * If offline or Google Sheets times out, queues the mutation so it is NEVER discarded.
    */
   async addRow(sheetName: string, rowData: Record<string, unknown>): Promise<{ success: boolean; id: string; pending?: boolean }> {
+    markLocalMutationActivity();
     const tempId = String(rowData.Id || rowData.id || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
     const wasPreviouslyTombstoned = isRecordTombstoned(tempId);
     const mutationId = `mut_add_${tempId}_${Date.now()}`;
@@ -1372,6 +1420,7 @@ export const sheetsData = {
    * Update a row with zero-drop offline queue safety, durable mutationId, and read-back verification.
    */
   async updateRow(sheetName: string, rowIndex: number, rowData: Record<string, unknown>): Promise<{ success: boolean; pending?: boolean; conflict?: boolean }> {
+    markLocalMutationActivity();
     const id = String(rowData.Id || rowData.id || '');
     const mutationId = `mut_upd_${id || rowIndex}_${Date.now()}`;
     const cacheRowData = { ...rowData };
@@ -1479,6 +1528,7 @@ export const sheetsData = {
    * Delete a row with zero-drop offline queue safety, explicit 90-day tombstone, and read-back verification.
    */
   async deleteRow(sheetName: string, rowIndex?: number, id?: string): Promise<{ success: boolean; pending?: boolean }> {
+    markLocalMutationActivity();
     const mutationId = `mut_del_${id || rowIndex}_${Date.now()}`;
     const normalizedId = String(id || '').trim();
     const deletedTrade = sheetName === 'Trades' && normalizedId

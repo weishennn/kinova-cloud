@@ -8,6 +8,8 @@ import {
   buildConflictResolutionUpdate,
   persistConflictBeforeTombstone,
 } from '../src/lib/conflict-policy.ts';
+import { coalescePendingMutations } from '../src/lib/cache-manager.ts';
+import { arePlanRecordsEquivalent } from '../src/lib/plan-equivalence.ts';
 
 test('resolveNotFoundUpdatePolicy discards and tombstones absent records to prevent resurrection', () => {
   // A row deleted on server (not tombstoned locally yet, not explicit force restore)
@@ -145,4 +147,111 @@ test('a deleted-row conflict retries after cache cleanup, then tombstones only a
 
   assert.equal(saved, true);
   assert.deepEqual(calls, ['persist', 'clear', 'persist', 'tombstone']);
+});
+
+test('detectConcurrentFieldConflict normalizes Type and Currency casing cleanly without false conflict', () => {
+  const base = { Id: 'tx-1', Type: 'expense', Currency: 'myr', BaseCurrency: 'myr', Amount: 12 };
+  const server = { Id: 'tx-1', Type: 'Expense', Currency: 'MYR', BaseCurrency: 'MYR', Amount: 12 };
+  const client = { Id: 'tx-1', Type: 'expense', Currency: 'MYR', Amount: 20 };
+
+  const conflict = detectConcurrentFieldConflict(base, server, client);
+  assert.equal(conflict.hasConflict, false);
+  assert.deepEqual(conflict.conflictingFields, []);
+});
+
+test('coalescePendingMutations preserves earliest V0 _baseData across consecutive updates and strips _baseData on add+update', () => {
+  const queue = [
+    {
+      id: 'm1',
+      type: 'update',
+      sheetName: '2026-10',
+      rowId: 'tx-1',
+      timestamp: 1000,
+      retryCount: 0,
+      rowData: {
+        Id: 'tx-1',
+        Amount: 60,
+        _baseData: { Amount: 50, Description: 'Lunch' },
+      },
+    },
+    {
+      id: 'm2',
+      type: 'update',
+      sheetName: '2026-10',
+      rowId: 'tx-1',
+      timestamp: 2000,
+      retryCount: 0,
+      rowData: {
+        Id: 'tx-1',
+        Amount: 75,
+        Category: 'Food & Dining',
+        _baseData: { Amount: 60, Category: 'Other', Description: 'Lunch' },
+      },
+    },
+    {
+      id: 'm3',
+      type: 'add',
+      sheetName: '2026-10',
+      rowId: 'tx-new',
+      timestamp: 1000,
+      retryCount: 0,
+      rowData: { Id: 'tx-new', Amount: 10 },
+    },
+    {
+      id: 'm4',
+      type: 'update',
+      sheetName: '2026-10',
+      rowId: 'tx-new',
+      timestamp: 2000,
+      retryCount: 0,
+      rowData: { Id: 'tx-new', Amount: 15, _baseData: { Amount: 10 } },
+    },
+  ];
+
+  const coalesced = coalescePendingMutations(queue);
+  assert.equal(coalesced.length, 2);
+
+  const updated = coalesced.find((m) => m.rowId === 'tx-1');
+  assert.ok(updated);
+  assert.equal(updated.rowData.Amount, 75);
+  assert.equal(updated.rowData.Category, 'Food & Dining');
+  // Must retain V0 Amount (50) for Amount AND keep Category base (Other) from m2
+  assert.deepEqual(updated.rowData._baseData, {
+    Amount: 50,
+    Category: 'Other',
+    Description: 'Lunch',
+  });
+
+  const added = coalesced.find((m) => m.rowId === 'tx-new');
+  assert.ok(added);
+  assert.equal(added.type, 'add');
+  assert.equal(added.rowData.Amount, 15);
+  assert.equal('_baseData' in added.rowData, false);
+});
+
+test('arePlanRecordsEquivalent ignores key order, undefined properties, and optionally lastAutoRecordedMonth', () => {
+  const localPlan = {
+    name: 'Netflix',
+    id: 'plan-1',
+    amount: 55,
+    lastAutoRecordedMonth: '2026-10',
+    notes: undefined,
+  };
+  const sheetPlan = {
+    id: 'plan-1',
+    amount: 55,
+    name: 'Netflix',
+    lastAutoRecordedMonth: '2026-11',
+  };
+
+  assert.equal(arePlanRecordsEquivalent(localPlan, sheetPlan, { ignoreVolatile: true }), true);
+  assert.equal(arePlanRecordsEquivalent(localPlan, sheetPlan, { ignoreVolatile: false }), false);
+  assert.equal(
+    arePlanRecordsEquivalent(
+      { id: 'p2', name: 'Gym', amount: 100, notes: undefined },
+      { amount: 100, name: 'Gym', id: 'p2' },
+      { ignoreVolatile: false }
+    ),
+    true
+  );
 });

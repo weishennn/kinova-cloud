@@ -1,7 +1,7 @@
 import { getLocalDateString, getRelativeDateString, getDaysInMonth } from './date-helper.ts';
 import { evaluateMoneyExpression } from './money-calculator-helper.ts';
 import { matchMerchantCategoryRule } from './merchant-rules.ts';
-import { matchHabitMemory } from './habit-memory-engine.ts';
+import { matchHabitMemory, type HabitMatchVia } from './habit-memory-engine.ts';
 
 export interface ParsedExpense {
   amount: number;
@@ -27,6 +27,8 @@ export interface ParsedExpense {
     alias: string;
     confidence: number;
     isAlias: boolean;
+    matchedVia?: HabitMatchVia;
+    matchedToken?: string;
   };
 }
 
@@ -401,7 +403,14 @@ export function parseNaturalExpense(input: string): ParsedExpense | null {
   let detectedCategory = 'Food & Dining';
   let detectedType: 'Expense' | 'Income' = 'Expense';
   let highestScore = 0;
-  let habitMatchMeta: { rawPattern: string; alias: string; confidence: number; isAlias: boolean } | undefined;
+  let habitMatchMeta: {
+    rawPattern: string;
+    alias: string;
+    confidence: number;
+    isAlias: boolean;
+    matchedVia?: HabitMatchVia;
+    matchedToken?: string;
+  } | undefined;
 
   const habitMatch = matchHabitMemory(text);
   if (habitMatch) {
@@ -413,6 +422,8 @@ export function parseNaturalExpense(input: string): ParsedExpense | null {
       alias: habitMatch.resolvedDescription,
       confidence: habitMatch.matchedItem.confidence,
       isAlias: habitMatch.isAlias,
+      matchedVia: habitMatch.matchedVia,
+      matchedToken: habitMatch.matchedToken,
     };
   } else {
     const userRule = matchMerchantCategoryRule(text);
@@ -459,7 +470,13 @@ export function parseNaturalExpense(input: string): ParsedExpense | null {
     .replace(/\s+/g, ' ')
     .trim();
 
-  if (habitMatchMeta && habitMatchMeta.isAlias) {
+  if (
+    habitMatchMeta &&
+    (habitMatchMeta.isAlias ||
+      habitMatchMeta.matchedVia === 'keyword' ||
+      habitMatchMeta.matchedVia === 'compact' ||
+      habitMatchMeta.matchedVia === 'stem')
+  ) {
     cleanedDesc = habitMatchMeta.alias;
   } else if (!cleanedDesc || cleanedDesc.length < 2) {
     cleanedDesc = detectedCategory;

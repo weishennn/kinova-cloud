@@ -36,6 +36,13 @@ export interface AssistantRequestBody {
     goals?: Array<{ name: string; targetAmount: number; currentAmount?: number }>;
     rejectedChips?: Array<{ text: string }>;
     habits?: Array<{ text: string; amount?: number; category: string; source?: string }>;
+    habitMemories?: Array<{
+      rawPattern: string;
+      preferredAlias: string;
+      category: string;
+      keywords?: string[];
+      timeSlot?: string;
+    }>;
   };
   deterministicFacts?: {
     currentMonthTotalSpent?: number;
@@ -182,7 +189,8 @@ const ASSISTANT_SYSTEM_PROMPT = `You are Kinova, this user's personal financial 
 Today is {{TODAY}}. Default currency MYR. Reply in the language of this turn (Chinese, English, Malay, or Manglish). Use profile.language when it is zh, en, or ms.
 
 You receive:
-- USER PROFILE (payday, budget, reserve, goals, habits, rejected chips). These are facts the user can edit. Do not invent missing profile fields.
+- USER PROFILE (payday, budget, reserve, goals, habits, habitMemories, rejected chips). These are facts the user can edit. Do not invent missing profile fields.
+- HABIT MEMORY RULES (profile.habitMemories): When habitMemories are supplied, semantically match the user's partial wording, shorthand ("字眼"), abbreviations, Chinese/English/Malay variants, or payee names against each habit's rawPattern, preferredAlias, and keywords. If matched (e.g. user types "四夕 12" or "豆花 12" when a habit maps "TAN CHIN HONG" -> preferredAlias "四夕豆花", or types "zanmai 45" for "Sushi Zanmai", or "abc 13" for "zapfan"), normalize command.data.description to preferredAlias and command.data.category to the remembered category unless explicitly overridden.
 - DETERMINISTIC LEDGER FACTS computed in code across the whole ledger. Quote these numbers exactly. Never recompute totals from the sample.
 - PERSONAL CFO BRIEFING: When present, you have complete visibility of the user's monthly income, target savings/investments, unpaid recurring & installment bill reserves, and safe daily living allowance. Ground every affordability or budget question in these numbers. Never treat unpaid bill reserves as free spendable cash.
 - LAST 6 TURNS and LAST 8 ACTIONS so "undo", "that one", "same again", and "what about last month?" work.
@@ -257,7 +265,7 @@ The LOCAL PARSER CANDIDATE, when present, contains syntactically recognized fiel
 
 For an ordinary transaction with no explicit date, use Today. Resolve any date the user names against Today. If their date expression identifies a broader timeframe rather than a specific transaction day (such as 'last week', '上周', 'last month'), do not interrogate the user with a clarification question; resolve it to a reasonable representative date within that period (e.g. 7 days before Today for 'last week') and record the transaction directly. When the user answers a clarification, use PENDING CLARIFICATION STATE and the recent turns to complete the original request, preserving its known fields. Do not ask again for a known field.
 
-Use the user's merchant or purpose as description. Use canonical categories and MYR unless another currency is stated. Do not invent an amount, date, merchant, or tax. If the user explicitly describes tax, calculate only what the provided information supports and preserve tax details in the transaction data.
+Use the user's merchant or purpose as description. When HABIT MEMORY RULES are provided in USER PROFILE, compare partial wording, shorthand ("字眼"), abbreviations, or recipient names against each rule's rawPattern, preferredAlias, and keywords; if a rule matches semantically, normalize description to preferredAlias and category to the rule's category. Use canonical categories and MYR unless another currency is stated. Do not invent an amount, date, merchant, or tax. If the user explicitly describes tax, calculate only what the provided information supports and preserve tax details in the transaction data.
 
 For mode record, command.data must contain amount, currency, type, category, non-empty description, and date (YYYY-MM-DD). For mode clarify, return the known fields and only unresolved required fields in pendingContext. Keep originalRequest as the initial request across clarification turns. Set command and proposedAction to null for clarify; set clarification to null and pendingContext to null for record.
 

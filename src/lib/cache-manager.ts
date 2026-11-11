@@ -513,18 +513,36 @@ export function coalescePendingMutations(list: PendingMutation[]): PendingMutati
       });
     } else if (normalized.type === 'update') {
       if (prior?.type === 'add') {
+        const mergedAddRowData: Record<string, unknown> = {
+          ...(prior.rowData || {}),
+          ...(normalized.rowData || {}),
+          Id: entityId,
+          id: entityId,
+        };
+        delete mergedAddRowData._baseData;
         byEntity.set(entityId, {
           ...prior,
           sheetName: normalized.sheetName || prior.sheetName,
-          rowData: {
-            ...(prior.rowData || {}),
-            ...(normalized.rowData || {}),
-            Id: entityId,
-            id: entityId,
-          },
+          rowData: mergedAddRowData,
           timestamp: normalized.timestamp || prior.timestamp,
         });
       } else if (prior?.type === 'update') {
+        const priorBase =
+          prior.rowData?._baseData &&
+          typeof prior.rowData._baseData === 'object' &&
+          !Array.isArray(prior.rowData._baseData)
+            ? (prior.rowData._baseData as Record<string, unknown>)
+            : null;
+        const nextBase =
+          normalized.rowData?._baseData &&
+          typeof normalized.rowData._baseData === 'object' &&
+          !Array.isArray(normalized.rowData._baseData)
+            ? (normalized.rowData._baseData as Record<string, unknown>)
+            : null;
+        const mergedBase =
+          priorBase || nextBase
+            ? { ...(nextBase || {}), ...(priorBase || {}) }
+            : undefined;
         byEntity.set(entityId, {
           ...prior,
           sheetName: normalized.sheetName || prior.sheetName,
@@ -534,6 +552,7 @@ export function coalescePendingMutations(list: PendingMutation[]): PendingMutati
             ...(normalized.rowData || {}),
             Id: entityId,
             id: entityId,
+            ...(mergedBase ? { _baseData: mergedBase } : {}),
           },
           timestamp: normalized.timestamp || prior.timestamp,
         });

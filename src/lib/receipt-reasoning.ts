@@ -64,6 +64,13 @@ export function getReceiptReasoningReasons(parsed: Record<string, unknown>): str
 
     const itemName = normalizedText(item.name);
     if (!itemName || itemName.includes('?')) reasons.add('item_name_unclear');
+    if (
+      quantity === 1 &&
+      itemName &&
+      (/(?:^(\d{1,2})\s*[xX×]\s+|^[Qq]ty\s*:?\s*(\d{1,2})\s+|\s+[xX×]\s*(\d{1,2})$|\(\s*(?:[xX×]\s*\d{1,2}|\d{1,2}\s*[xX×])\s*\)$)/.test(itemName))
+    ) {
+      reasons.add('quantity_unclear');
+    }
   }
 
   const amount = finiteNumber(parsed.amount);

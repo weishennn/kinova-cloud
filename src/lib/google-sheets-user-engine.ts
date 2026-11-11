@@ -1963,6 +1963,250 @@ export async function executeUserGoogleAction(
 
   const wrap = (result: unknown) => ({ result, sessionChanged: changed });
 
+  const addRowUnlocked = async (rowActionParams: Record<string, unknown>) => {
+    const rawSheetName = String(rowActionParams.sheetName || '');
+    const rowData = { ...((rowActionParams.rowData || {}) as Record<string, unknown>) };
+    let targetSheetName = rawSheetName;
+
+    if (!rawSheetName || rawSheetName === 'Transactions' || /^\d{4}-\d{2}$/.test(rawSheetName)) {
+      const dateStr = rowData.Date ? String(rowData.Date) : '';
+      targetSheetName = /^\d{4}-\d{2}/.test(dateStr) ? dateStr.substring(0, 7) : getCurrentYearMonth();
+    }
+
+    await ensureSheetExists(spreadsheetId, accessToken, meta, targetSheetName);
+    const values = await readSheetValues(spreadsheetId, accessToken, targetSheetName);
+    const defaultHeaders = getDefaultHeadersForSheet(targetSheetName);
+    const firstRow = values.length > 0 ? values[0].map((h) => String(h ?? '').trim()).filter(Boolean) : [];
+    const firstCellLower = (firstRow[0] || '').toLowerCase();
+    const hasValidHeader =
+      firstRow.length > 0 &&
+      (defaultHeaders.some((dh) => dh.toLowerCase() === firstCellLower) ||
+        firstCellLower === 'id' ||
+        firstCellLower === 'ticker' ||
+        firstCellLower === 'month' ||
+        firstCellLower === 'key');
+
+    const headers = hasValidHeader ? firstRow : defaultHeaders;
+
+    const idIndex = headers.findIndex((h) => h.toLowerCase() === 'id');
+    if (idIndex >= 0 && !rowData.Id && !rowData.id) {
+      rowData.Id = 'tx_' + Date.now().toString(36);
+    }
+    const requestedId = String(rowData.Id || rowData.id || '').trim();
+
+    if (requestedId && rowData._forceRestore) {
+      await removeDeletedTombstone(spreadsheetId, accessToken, meta, requestedId).catch(() => null);
+    } else if (requestedId && !rowData._forceRestore) {
+      const tombstoned = await hasDeletedTombstone(spreadsheetId, accessToken, meta, requestedId);
+      if (tombstoned) {
+        return {
+          added: false,
+          tombstoned: true,
+          verified: true,
+          verifiedId: requestedId,
+          id: requestedId,
+          sheet: targetSheetName,
+          sheetName: targetSheetName,
+        };
+      }
+    }
+
+    if (idIndex >= 0 && requestedId && values.length > (hasValidHeader ? 1 : 0)) {
+      for (let i = hasValidHeader ? 1 : 0; i < values.length; i++) {
+        if (String(values[i]?.[idIndex] ?? '').trim() === requestedId) {
+          const existingRowIndex = i + 1;
+          const updatedValues = headers.map((h, idx) =>
+            Object.prototype.hasOwnProperty.call(rowData, h) ? rowData[h] : (values[i]?.[idx] ?? '')
+          );
+          const putRes = await googleApiFetch(
+            `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${targetSheetName}'!A${existingRowIndex}`)}?valueInputOption=USER_ENTERED`,
+            accessToken,
+            {
+              method: 'PUT',
+              body: JSON.stringify({ values: [updatedValues] }),
+            }
+          );
+          if (!putRes.ok) {
+            const errText = await putRes.text();
+            throw new Error(`Google Sheets PUT failed: ${errText}`);
+          }
+          return {
+            added: true,
+            duplicatePrevented: true,
+            verified: true,
+            verifiedId: requestedId,
+            id: requestedId,
+            rowIndex: existingRowIndex,
+            sheet: targetSheetName,
+            sheetName: targetSheetName,
+          };
+        }
+      }
+    }
+
+    if (headers.includes('Currency') && !rowData.Currency && !rowData.currency) {
+      rowData.Currency = 'MYR';
+    }
+
+    // Strictly enforce canonical categories so "Groceries", "Food", etc. NEVER enter the Google Sheet
+    if (rowData.Category !== undefined || rowData.category !== undefined) {
+      const rawCat = String(rowData.Category || rowData.category || '').trim();
+      const rawType = String(rowData.Type || rowData.type || 'Expense').trim();
+      const rawDesc = String(rowData.Description || rowData.description || '').trim();
+      const normalizedCat = normalizeToCanonicalCategory(rawCat, rawType, rawDesc);
+      if (rowData.Category !== undefined) rowData.Category = normalizedCat;
+      if (rowData.category !== undefined) rowData.category = normalizedCat;
+      if (rowData.Category === undefined && rowData.category !== undefined) rowData.Category = normalizedCat;
+    }
+
+    const newRow = headers.map((h) => {
+      if (rowData[h] !== undefined && rowData[h] !== null) return rowData[h];
+      const lowerH = h.toLowerCase().replace(/[^a-z0-9]/g, '');
+      for (const [k, v] of Object.entries(rowData)) {
+        if (k.toLowerCase().replace(/[^a-z0-9]/g, '') === lowerH && v !== undefined && v !== null) {
+          return v;
+        }
+      }
+      return '';
+    });
+
+    if (!hasValidHeader) {
+      const rowsToWrite = values.length > 0 ? [headers, ...values, newRow] : [headers, newRow];
+      const initPutRes = await googleApiFetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${targetSheetName}'!A1`)}?valueInputOption=USER_ENTERED`,
+        accessToken,
+        {
+          method: 'PUT',
+          body: JSON.stringify({ values: rowsToWrite }),
+        }
+      );
+      if (!initPutRes.ok) {
+        const errText = await initPutRes.text();
+        throw new Error(`Google Sheets header+row write failed: ${errText}`);
+      }
+      return {
+        added: true,
+        verified: true,
+        verifiedId: requestedId,
+        rowIndex: rowsToWrite.length,
+        sheet: targetSheetName,
+        sheetName: targetSheetName,
+        id: requestedId,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    // Append is atomic at the Sheets API. Computing a row number from a read
+    // and then PUTting to it lets two fast writes overwrite each other.
+    const appendRes = await googleApiFetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${targetSheetName}'!A:Z`)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+      accessToken,
+      {
+        method: 'POST',
+        body: JSON.stringify({ values: [newRow], majorDimension: 'ROWS' }),
+      }
+    );
+    await ensureGoogleApiSuccess(appendRes, 'append row');
+    const appendData = await appendRes.json() as { updates?: { updatedRange?: string } };
+    const updatedRange = String(appendData.updates?.updatedRange || '');
+    const rowIndex = Number(updatedRange.match(/![A-Z]+(\d+):/i)?.[1] || 0);
+    if (!rowIndex) throw new Error('Google Sheets appended the row without returning its row number.');
+
+    if (idIndex >= 0 && requestedId) {
+      const verifyValues = await readSheetRange(
+        spreadsheetId,
+        accessToken,
+        `'${targetSheetName}'!A${rowIndex}:A${rowIndex}`
+      );
+      if (String(verifyValues[0]?.[0] || '').trim() !== requestedId) {
+        throw new Error(`Google Sheets append verification failed for ${requestedId}.`);
+      }
+    }
+
+    return {
+      added: true,
+      verified: true,
+      verifiedId: requestedId,
+      rowIndex,
+      sheet: targetSheetName,
+      sheetName: targetSheetName,
+      id: requestedId,
+      updatedAt: new Date().toISOString(),
+    };
+  };
+
+  const saveRecurringCommitmentsUnlocked = async (saveParams: Record<string, unknown>) => {
+    await ensureSheetExists(spreadsheetId, accessToken, meta, 'Recurring');
+    const raw = saveParams.commitments || saveParams.rowData || [];
+    const list = Array.isArray(raw) ? raw : typeof raw === 'string' ? JSON.parse(raw) : [];
+    await googleApiFetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'Recurring'!A1:L500`)}:clear`,
+      accessToken,
+      { method: 'POST', body: JSON.stringify({}) }
+    );
+    const rows = [
+      RECURRING_HEADERS,
+      ...list.map((item: Record<string, unknown>) => [
+        item.id || 'commitment_' + Date.now().toString(36),
+        item.name || '',
+        item.category || '',
+        item.subCategory || '',
+        item.dayOfMonth || 1,
+        item.amount || 0,
+        item.currency || 'MYR',
+        item.effectiveFrom || '',
+        item.autoRecord === true ? 'TRUE' : 'FALSE',
+        item.lastAutoRecordedMonth || '',
+        item.notes || '',
+        JSON.stringify(item.history || [{ effectiveFrom: item.effectiveFrom || '2026-01', amount: item.amount || 0 }]),
+      ]),
+    ];
+    await googleApiFetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'Recurring'!A1`)}?valueInputOption=USER_ENTERED`,
+      accessToken,
+      { method: 'PUT', body: JSON.stringify({ values: rows }) }
+    );
+    await updateSettingValue(spreadsheetId, accessToken, meta, 'cashflow_recurring_commitments', JSON.stringify(list));
+    return { saved: list.length };
+  };
+
+  const saveInstallmentPlansUnlocked = async (saveParams: Record<string, unknown>) => {
+    await ensureSheetExists(spreadsheetId, accessToken, meta, 'Installments');
+    const raw = saveParams.plans || saveParams.rowData || [];
+    const list = Array.isArray(raw) ? raw : typeof raw === 'string' ? JSON.parse(raw) : [];
+    await googleApiFetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'Installments'!A1:N500`)}:clear`,
+      accessToken,
+      { method: 'POST', body: JSON.stringify({}) }
+    );
+    const rows = [
+      INSTALLMENTS_HEADERS,
+      ...list.map((item: Record<string, unknown>) => [
+        item.id || 'plan_' + Date.now().toString(36),
+        item.name || '',
+        item.category || '',
+        item.currency || 'MYR',
+        item.totalPrincipal || 0,
+        item.tenureMonths || 1,
+        item.annualInterestRate || 0,
+        item.monthlyAmount || 0,
+        item.totalPayable || 0,
+        item.startDate || '',
+        item.endDate || '',
+        item.autoRecord === true ? 'TRUE' : 'FALSE',
+        item.tripTag || '',
+        item.notes || '',
+      ]),
+    ];
+    await googleApiFetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'Installments'!A1`)}?valueInputOption=USER_ENTERED`,
+      accessToken,
+      { method: 'PUT', body: JSON.stringify({ values: rows }) }
+    );
+    await updateSettingValue(spreadsheetId, accessToken, meta, 'cashflow_installment_plans', JSON.stringify(list));
+    return { saved: list.length };
+  };
+
   switch (action) {
     case 'ping':
       return wrap({
@@ -2158,180 +2402,13 @@ export async function executeUserGoogleAction(
     }
 
     case 'addRow': {
-      return withUserDriveMutationLock(spreadsheetId, async () => {
-      const rawSheetName = String(params.sheetName || '');
-      const rowData = (params.rowData || {}) as Record<string, unknown>;
-      let targetSheetName = rawSheetName;
-
-      if (!rawSheetName || rawSheetName === 'Transactions' || /^\d{4}-\d{2}$/.test(rawSheetName)) {
-        const dateStr = rowData.Date ? String(rowData.Date) : '';
-        targetSheetName = /^\d{4}-\d{2}/.test(dateStr) ? dateStr.substring(0, 7) : getCurrentYearMonth();
-      }
-
-      await ensureSheetExists(spreadsheetId, accessToken, meta, targetSheetName);
-      const values = await readSheetValues(spreadsheetId, accessToken, targetSheetName);
-      const defaultHeaders = getDefaultHeadersForSheet(targetSheetName);
-      const firstRow = values.length > 0 ? values[0].map((h) => String(h ?? '').trim()).filter(Boolean) : [];
-      const firstCellLower = (firstRow[0] || '').toLowerCase();
-      const hasValidHeader =
-        firstRow.length > 0 &&
-        (defaultHeaders.some((dh) => dh.toLowerCase() === firstCellLower) ||
-          firstCellLower === 'id' ||
-          firstCellLower === 'ticker' ||
-          firstCellLower === 'month' ||
-          firstCellLower === 'key');
-
-      const headers = hasValidHeader ? firstRow : defaultHeaders;
-
-      const idIndex = headers.findIndex((h) => h.toLowerCase() === 'id');
-      if (idIndex >= 0 && !rowData.Id && !rowData.id) {
-        rowData.Id = 'tx_' + Date.now().toString(36);
-      }
-      const requestedId = String(rowData.Id || rowData.id || '').trim();
-
-      if (requestedId && rowData._forceRestore) {
-        await removeDeletedTombstone(spreadsheetId, accessToken, meta, requestedId).catch(() => null);
-      } else if (requestedId && !rowData._forceRestore) {
-        const tombstoned = await hasDeletedTombstone(spreadsheetId, accessToken, meta, requestedId);
-        if (tombstoned) {
-          return wrap({
-            added: false,
-            tombstoned: true,
-            verified: true,
-            verifiedId: requestedId,
-            id: requestedId,
-            sheet: targetSheetName,
-            sheetName: targetSheetName,
-          });
-        }
-      }
-
-      if (idIndex >= 0 && requestedId && values.length > (hasValidHeader ? 1 : 0)) {
-        for (let i = hasValidHeader ? 1 : 0; i < values.length; i++) {
-          if (String(values[i]?.[idIndex] ?? '').trim() === requestedId) {
-            const existingRowIndex = i + 1;
-            const updatedValues = headers.map((h, idx) =>
-              Object.prototype.hasOwnProperty.call(rowData, h) ? rowData[h] : (values[i]?.[idx] ?? '')
-            );
-            const putRes = await googleApiFetch(
-              `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${targetSheetName}'!A${existingRowIndex}`)}?valueInputOption=USER_ENTERED`,
-              accessToken,
-              {
-                method: 'PUT',
-                body: JSON.stringify({ values: [updatedValues] }),
-              }
-            );
-            if (!putRes.ok) {
-              const errText = await putRes.text();
-              throw new Error(`Google Sheets PUT failed: ${errText}`);
-            }
-            return wrap({
-              added: true,
-              duplicatePrevented: true,
-              verified: true,
-              verifiedId: requestedId,
-              id: requestedId,
-              rowIndex: existingRowIndex,
-              sheet: targetSheetName,
-              sheetName: targetSheetName,
-            });
-          }
-        }
-      }
-
-      if (headers.includes('Currency') && !rowData.Currency && !rowData.currency) {
-        rowData.Currency = 'MYR';
-      }
-
-      // Strictly enforce canonical categories so "Groceries", "Food", etc. NEVER enter the Google Sheet
-      if (rowData.Category !== undefined || rowData.category !== undefined) {
-        const rawCat = String(rowData.Category || rowData.category || '').trim();
-        const rawType = String(rowData.Type || rowData.type || 'Expense').trim();
-        const rawDesc = String(rowData.Description || rowData.description || '').trim();
-        const normalizedCat = normalizeToCanonicalCategory(rawCat, rawType, rawDesc);
-        if (rowData.Category !== undefined) rowData.Category = normalizedCat;
-        if (rowData.category !== undefined) rowData.category = normalizedCat;
-        if (rowData.Category === undefined && rowData.category !== undefined) rowData.Category = normalizedCat;
-      }
-
-      const newRow = headers.map((h) => {
-        if (rowData[h] !== undefined && rowData[h] !== null) return rowData[h];
-        const lowerH = h.toLowerCase().replace(/[^a-z0-9]/g, '');
-        for (const [k, v] of Object.entries(rowData)) {
-          if (k.toLowerCase().replace(/[^a-z0-9]/g, '') === lowerH && v !== undefined && v !== null) {
-            return v;
-          }
-        }
-        return '';
-      });
-
-      if (!hasValidHeader) {
-        const rowsToWrite = values.length > 0 ? [headers, ...values, newRow] : [headers, newRow];
-        const initPutRes = await googleApiFetch(
-          `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${targetSheetName}'!A1`)}?valueInputOption=USER_ENTERED`,
-          accessToken,
-          {
-            method: 'PUT',
-            body: JSON.stringify({ values: rowsToWrite }),
-          }
-        );
-        if (!initPutRes.ok) {
-          const errText = await initPutRes.text();
-          throw new Error(`Google Sheets header+row write failed: ${errText}`);
-        }
-        return wrap({
-          added: true,
-          verified: true,
-          verifiedId: requestedId,
-          rowIndex: rowsToWrite.length,
-          sheet: targetSheetName,
-          sheetName: targetSheetName,
-          id: requestedId,
-          updatedAt: new Date().toISOString(),
-        });
-      }
-
-      // Append is atomic at the Sheets API. Computing a row number from a read
-      // and then PUTting to it lets two fast writes overwrite each other.
-      const appendRes = await googleApiFetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'${targetSheetName}'!A:Z`)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
-        accessToken,
-        {
-          method: 'POST',
-          body: JSON.stringify({ values: [newRow], majorDimension: 'ROWS' }),
-        }
+      return withUserDriveMutationLock(spreadsheetId, async () =>
+        wrap(await addRowUnlocked(params))
       );
-      await ensureGoogleApiSuccess(appendRes, 'append row');
-      const appendData = await appendRes.json() as { updates?: { updatedRange?: string } };
-      const updatedRange = String(appendData.updates?.updatedRange || '');
-      const rowIndex = Number(updatedRange.match(/![A-Z]+(\d+):/i)?.[1] || 0);
-      if (!rowIndex) throw new Error('Google Sheets appended the row without returning its row number.');
-
-      if (idIndex >= 0 && requestedId) {
-        const verifyValues = await readSheetRange(
-          spreadsheetId,
-          accessToken,
-          `'${targetSheetName}'!A${rowIndex}:A${rowIndex}`
-        );
-        if (String(verifyValues[0]?.[0] || '').trim() !== requestedId) {
-          throw new Error(`Google Sheets append verification failed for ${requestedId}.`);
-        }
-      }
-
-      return wrap({
-        added: true,
-        verified: true,
-        verifiedId: requestedId,
-        rowIndex,
-        sheet: targetSheetName,
-        sheetName: targetSheetName,
-        id: requestedId,
-        updatedAt: new Date().toISOString(),
-      });
-      });
     }
 
     case 'updateRow': {
+      return withUserDriveMutationLock(spreadsheetId, async () => {
       const rawSheetName = String(params.sheetName || '');
       const rowIndex = Number(params.rowIndex) || 0;
       const rowData = (params.rowData || {}) as Record<string, unknown>;
@@ -2438,7 +2515,7 @@ export async function executeUserGoogleAction(
         });
         mergedObj.Date = newDateStr;
 
-        await executeUserGoogleAction(session, 'addRow', {
+        await addRowUnlocked({
           sheetName: newMonthStr,
           rowData: mergedObj,
         });
@@ -2513,6 +2590,7 @@ export async function executeUserGoogleAction(
         sheet: targetSheetName,
         sheetName: targetSheetName,
         updatedAt: new Date().toISOString(),
+      });
       });
     }
 
@@ -3032,38 +3110,9 @@ export async function executeUserGoogleAction(
     }
 
     case 'saveRecurringCommitments': {
-      await ensureSheetExists(spreadsheetId, accessToken, meta, 'Recurring');
-      const raw = params.commitments || params.rowData || [];
-      const list = Array.isArray(raw) ? raw : typeof raw === 'string' ? JSON.parse(raw) : [];
-      await googleApiFetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'Recurring'!A1:L500`)}:clear`,
-        accessToken,
-        { method: 'POST', body: JSON.stringify({}) }
+      return withUserDriveMutationLock(spreadsheetId, async () =>
+        wrap(await saveRecurringCommitmentsUnlocked(params))
       );
-      const rows = [
-        RECURRING_HEADERS,
-        ...list.map((item: Record<string, unknown>) => [
-          item.id || 'commitment_' + Date.now().toString(36),
-          item.name || '',
-          item.category || '',
-          item.subCategory || '',
-          item.dayOfMonth || 1,
-          item.amount || 0,
-          item.currency || 'MYR',
-          item.effectiveFrom || '',
-          item.autoRecord === true ? 'TRUE' : 'FALSE',
-          item.lastAutoRecordedMonth || '',
-          item.notes || '',
-          JSON.stringify(item.history || [{ effectiveFrom: item.effectiveFrom || '2026-01', amount: item.amount || 0 }]),
-        ]),
-      ];
-      await googleApiFetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'Recurring'!A1`)}?valueInputOption=USER_ENTERED`,
-        accessToken,
-        { method: 'PUT', body: JSON.stringify({ values: rows }) }
-      );
-      await updateSettingValue(spreadsheetId, accessToken, meta, 'cashflow_recurring_commitments', JSON.stringify(list));
-      return wrap({ saved: list.length });
     }
 
     case 'getInstallmentPlans': {
@@ -3110,43 +3159,13 @@ export async function executeUserGoogleAction(
     }
 
     case 'saveInstallmentPlans': {
-      await ensureSheetExists(spreadsheetId, accessToken, meta, 'Installments');
-      const raw = params.plans || params.rowData || [];
-      const list = Array.isArray(raw) ? raw : typeof raw === 'string' ? JSON.parse(raw) : [];
-      await googleApiFetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'Installments'!A1:N500`)}:clear`,
-        accessToken,
-        { method: 'POST', body: JSON.stringify({}) }
+      return withUserDriveMutationLock(spreadsheetId, async () =>
+        wrap(await saveInstallmentPlansUnlocked(params))
       );
-      const rows = [
-        INSTALLMENTS_HEADERS,
-        ...list.map((item: Record<string, unknown>) => [
-          item.id || 'plan_' + Date.now().toString(36),
-          item.name || '',
-          item.category || '',
-          item.currency || 'MYR',
-          item.totalPrincipal || 0,
-          item.tenureMonths || 1,
-          item.annualInterestRate || 0,
-          item.monthlyAmount || 0,
-          item.totalPayable || 0,
-          item.startDate || '',
-          item.endDate || '',
-          item.autoRecord === true ? 'TRUE' : 'FALSE',
-          item.tripTag || '',
-          item.notes || '',
-        ]),
-      ];
-      await googleApiFetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`'Installments'!A1`)}?valueInputOption=USER_ENTERED`,
-        accessToken,
-        { method: 'PUT', body: JSON.stringify({ values: rows }) }
-      );
-      await updateSettingValue(spreadsheetId, accessToken, meta, 'cashflow_installment_plans', JSON.stringify(list));
-      return wrap({ saved: list.length });
     }
 
     case 'reconcilePlans': {
+      return withUserDriveMutationLock(spreadsheetId, async () => {
       const kind = String(params.kind || 'recurring');
       const isRecurring = kind === 'recurring';
       const cloudKey = isRecurring
@@ -3240,11 +3259,11 @@ export async function executeUserGoogleAction(
         else if (e.record) activeRecords.push(e.record);
       });
 
-      await executeUserGoogleAction(
-        session,
-        isRecurring ? 'saveRecurringCommitments' : 'saveInstallmentPlans',
-        isRecurring ? { commitments: activeRecords } : { plans: activeRecords }
-      );
+      if (isRecurring) {
+        await saveRecurringCommitmentsUnlocked({ commitments: activeRecords });
+      } else {
+        await saveInstallmentPlansUnlocked({ plans: activeRecords });
+      }
 
       return wrap({
         success: true,
@@ -3254,6 +3273,7 @@ export async function executeUserGoogleAction(
         activeRecords,
         tombstoneCount,
         conflicts: [],
+      });
       });
     }
 

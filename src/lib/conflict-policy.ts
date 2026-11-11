@@ -165,7 +165,8 @@ export function buildTransactionBaseRecord(transaction: Record<string, unknown>)
 function normalizeConflictValue(field: string, value: unknown): string {
   if (value === undefined || value === null) return '';
 
-  if (field.toLowerCase() === 'date') {
+  const fieldLower = field.toLowerCase();
+  if (fieldLower === 'date') {
     if (value instanceof Date && Number.isFinite(value.getTime())) {
       return value.toISOString().slice(0, 10);
     }
@@ -177,8 +178,16 @@ function normalizeConflictValue(field: string, value: unknown): string {
     return text;
   }
 
+  if (fieldLower === 'type') {
+    return String(value).trim().toLowerCase();
+  }
+
+  if (fieldLower === 'currency' || fieldLower === 'basecurrency') {
+    return String(value).trim().toUpperCase();
+  }
+
   const numericFields = new Set(['amount', 'baseamount', 'fxratetobase']);
-  if (numericFields.has(field.toLowerCase()) && (typeof value === 'number' || (typeof value === 'string' && value.trim() !== ''))) {
+  if (numericFields.has(fieldLower) && (typeof value === 'number' || (typeof value === 'string' && value.trim() !== ''))) {
     const numeric = Number(value);
     if (Number.isFinite(numeric)) return `number:${numeric}`;
   }

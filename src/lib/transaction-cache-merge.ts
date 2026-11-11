@@ -60,7 +60,13 @@ export function applyPendingTransactionUpdate(
   });
 
   // A moved row is no longer present in the destination sheet snapshot. Keep
-  // its edited version visible there until the queued update reaches Sheets.
-  if (!found) updatedRows.unshift(updatedRow);
+  // its edited version visible there until the queued update reaches Sheets,
+  // but avoid inserting incomplete field-level patches (e.g. ReceiptUrl only).
+  const hasCoreTransactionFields =
+    updatedRow.Date !== undefined ||
+    updatedRow.date !== undefined ||
+    updatedRow.Amount !== undefined ||
+    updatedRow.amount !== undefined;
+  if (!found && hasCoreTransactionFields) updatedRows.unshift(updatedRow);
   return updatedRows;
 }

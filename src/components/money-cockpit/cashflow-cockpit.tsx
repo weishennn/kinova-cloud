@@ -13,7 +13,12 @@ import { getAmountInBaseCurrency, ACCOUNTING_BASE_CURRENCY } from '@/lib/currenc
 import { getLocalDateString, getTransactionRecordedInfo, parseLocalDate } from '@/lib/date-helper';
 import { generateProactiveAlerts, type ProactiveAlert } from '@/lib/proactive-alerts';
 import { SETTINGS_UPDATED_EVENT } from '@/lib/cloud-settings-sync';
-import { predictMonthlySavingsAndInvestments } from '@/lib/category-budget-helper';
+import {
+  countActiveBudgetMonths,
+  getMonthDaysInfo,
+  isTripQuarantinedExpense,
+  predictMonthlySavingsAndInvestments,
+} from '@/lib/category-budget-helper';
 import { MoneyOrbit } from './money-orbit';
 import { SmartQuickInput } from '@/components/shared/smart-quick-input';
 import { TransactionDetailModal } from '@/components/shared/transaction-detail-modal';
@@ -231,6 +236,9 @@ export function CashflowCockpit() {
       }
     } else if (transaction.type === 'expense') {
       result.spending += amount;
+      if (!isTripQuarantinedExpense(transaction)) {
+        result.livingSpending += amount;
+      }
     } else if (transaction.type === 'investment' || isTrade) {
       const isCashSavings = transaction.category === 'Emergency Savings' ||
         transaction.category === 'Fixed Deposit' ||
@@ -247,18 +255,33 @@ export function CashflowCockpit() {
       }
     }
     return result;
-  }, { income: 0, spending: 0, invested: 0 }), [visibleTransactions]);
+  }, { income: 0, spending: 0, livingSpending: 0, invested: 0 }), [visibleTransactions]);
 
   const netCashflow = totals.income - totals.spending;
 
+  const fullLedgerTransactions = useMemo(
+    () => (allLedgerTransactions.length > 0 ? allLedgerTransactions : transactions),
+    [allLedgerTransactions, transactions]
+  );
+
+  const effectiveBudgetCap = useMemo(() => {
+    if (typeof userBudgetCap !== 'number' || userBudgetCap <= 0) return undefined;
+    if (selectedMonth.startsWith('year-')) return userBudgetCap * 12;
+    if (selectedMonth === 'all') return userBudgetCap * countActiveBudgetMonths(fullLedgerTransactions);
+    return userBudgetCap;
+  }, [userBudgetCap, selectedMonth, fullLedgerTransactions]);
+
   const unpaidCommittedReserve = useMemo(() => {
+    if (selectedMonth === 'all' || selectedMonth.startsWith('year-')) return 0;
     try {
-      const pred = predictMonthlySavingsAndInvestments(visibleTransactions, { selectedMonth });
+      const daysInfo = getMonthDaysInfo(selectedMonth);
+      if (daysInfo.isPastMonth) return 0;
+      const pred = predictMonthlySavingsAndInvestments(fullLedgerTransactions, { selectedMonth });
       return pred.unpaidCommittedReserve || 0;
     } catch {
       return 0;
     }
-  }, [visibleTransactions, selectedMonth]);
+  }, [fullLedgerTransactions, selectedMonth]);
   const categoryTotals = useMemo(() => {
     const byCategory = new Map<string, number>();
     visibleTransactions.filter((transaction) => transaction.type === 'expense').forEach((transaction) => {
@@ -501,11 +524,12 @@ export function CashflowCockpit() {
           <MoneyOrbit
             income={totals.income}
             spending={totals.spending}
+            budgetSpending={totals.livingSpending}
             invested={totals.invested}
             netCashflow={netCashflow}
             formatMoney={formatMoney}
             unpaidCommittedReserve={unpaidCommittedReserve}
-            userBudgetCap={userBudgetCap}
+            userBudgetCap={effectiveBudgetCap}
           />
         </div>
 

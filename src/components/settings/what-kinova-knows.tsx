@@ -99,17 +99,17 @@ export function WhatKinovaKnows() {
   };
 
   return (
-    <section id="kinova-knows" className="space-y-4">
+    <section id="kinova-knows" className="space-y-4 min-w-0">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-indigo-500" />
-          <h2 className="text-xs font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider">
+        <div className="flex items-center gap-2 min-w-0">
+          <Sparkles className="h-4 w-4 text-indigo-500 shrink-0" />
+          <h2 className="text-xs font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider leading-snug">
             What Kinova Knows / 助手个人画像与偏好记忆
           </h2>
         </div>
       </div>
 
-      <div className="rounded-2xl border border-indigo-500/20 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-md p-4 sm:p-5 space-y-5 text-sm shadow-sm">
+      <div className="rounded-2xl border border-indigo-500/20 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-md p-4 sm:p-5 space-y-5 text-sm shadow-sm min-w-0 overflow-hidden">
         <p className="text-xs text-slate-600 dark:text-zinc-400 leading-relaxed">
           这些是 Kinova 在为你思考建议、预测资金流走向及判断开支合理性时所引用的真实基准事实。编辑以下内容会立即更新下一次 AI 上下文与建议行为。
         </p>
@@ -168,10 +168,10 @@ export function WhatKinovaKnows() {
               <button
                 type="button"
                 onClick={handleAcceptSuggestedPayday}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs font-medium hover:bg-amber-500/25 cursor-pointer"
+                className="inline-flex max-w-full items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs font-medium text-left hover:bg-amber-500/25 cursor-pointer"
               >
-                <span>💡 历史检测发现每月 {profile.suggestedPayday} 号有稳定收入，点击采纳</span>
-                <Check className="h-3 w-3" />
+                <span className="break-words">💡 历史检测发现每月 {profile.suggestedPayday} 号有稳定收入，点击采纳</span>
+                <Check className="h-3 w-3 shrink-0" />
               </button>
             )}
           </div>
@@ -232,22 +232,22 @@ export function WhatKinovaKnows() {
             <span className="text-[11px] text-slate-500">{profile.goals.length} / 3</span>
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-2 min-w-0">
             {profile.goals.map((g) => (
               <div
                 key={g.id}
-                className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-slate-50 dark:bg-zinc-800/40 border border-slate-200/70 dark:border-zinc-700/50"
+                className="flex items-start justify-between gap-2.5 p-2.5 rounded-xl bg-slate-50 dark:bg-zinc-800/40 border border-slate-200/70 dark:border-zinc-700/50 min-w-0"
               >
-                <div>
-                  <div className="text-xs font-semibold text-slate-900 dark:text-zinc-100">{g.name}</div>
-                  <div className="text-[11px] text-slate-500 dark:text-zinc-400">
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-semibold text-slate-900 dark:text-zinc-100 break-words">{g.name}</div>
+                  <div className="text-[11px] text-slate-500 dark:text-zinc-400 break-words">
                     目标金额: RM {g.targetAmount.toFixed(2)}
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => handleRemoveGoal(g.id)}
-                  className="p-1 rounded-lg text-slate-400 hover:text-rose-500 cursor-pointer"
+                  className="p-1 rounded-lg text-slate-400 hover:text-rose-500 cursor-pointer shrink-0"
                   title="删除目标"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -256,29 +256,31 @@ export function WhatKinovaKnows() {
             ))}
 
             {profile.goals.length < 3 && (
-              <div className="flex items-center gap-2 pt-1">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-1 min-w-0">
                 <input
                   type="text"
                   placeholder="目标名称 (如: 日本旅游基金)"
                   value={newGoalName}
                   onChange={(e) => setNewGoalName(e.target.value)}
-                  className="flex-1 px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full sm:flex-1 min-w-0 px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
-                <input
-                  type="number"
-                  placeholder="目标金额 RM"
-                  value={newGoalAmount}
-                  onChange={(e) => setNewGoalAmount(e.target.value)}
-                  className="w-28 px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-                <button
-                  type="button"
-                  onClick={handleAddGoal}
-                  className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center gap-1 cursor-pointer shrink-0"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  添加
-                </button>
+                <div className="flex items-center gap-2 sm:contents min-w-0">
+                  <input
+                    type="number"
+                    placeholder="目标金额 RM"
+                    value={newGoalAmount}
+                    onChange={(e) => setNewGoalAmount(e.target.value)}
+                    className="flex-1 sm:flex-none sm:w-28 min-w-0 px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddGoal}
+                    className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    添加
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -291,17 +293,17 @@ export function WhatKinovaKnows() {
               <RefreshCw className="h-3.5 w-3.5 text-slate-500" />
               已屏蔽的快捷习惯 (30天内不重复推荐)
             </label>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 min-w-0">
               {profile.rejectedChips.map((c) => (
                 <span
                   key={c.text}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-slate-200 dark:border-zinc-700"
+                  className="inline-flex max-w-full items-center gap-1.5 px-2.5 py-1 rounded-full text-xs bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-slate-200 dark:border-zinc-700"
                 >
-                  <span>{c.text}</span>
+                  <span className="truncate">{c.text}</span>
                   <button
                     type="button"
                     onClick={() => handleUnrejectChip(c.text)}
-                    className="text-slate-400 hover:text-indigo-600 font-bold ml-1 cursor-pointer"
+                    className="text-slate-400 hover:text-indigo-600 font-bold ml-1 cursor-pointer shrink-0"
                     title="恢复此建议"
                   >
                     ×

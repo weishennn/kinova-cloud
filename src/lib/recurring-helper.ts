@@ -1,6 +1,7 @@
 import { addUnifiedRow } from '@/hooks/useSheets';
 import { getLocalMonthString, getDaysInMonth } from './date-helper';
 import { saveSettingWithCloudSync } from './cloud-settings-sync';
+import { normalizeToCanonicalCategory } from './canonical-categories';
 
 export interface CommitmentRateHistory {
   effectiveFrom: string; // 'YYYY-MM'
@@ -43,6 +44,37 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export const DEFAULT_COMMITMENTS: RecurringCommitment[] = [];
 
 export const RECURRING_STORAGE_KEY = 'cashflow_recurring_commitments';
+
+/**
+ * Returns the earliest 'YYYY-MM' month in which a recurring commitment is scheduled to start.
+ */
+export function getCommitmentEarliestEffectiveMonth(
+  commitment: Pick<RecurringCommitment, 'effectiveFrom' | 'history'>
+): string | null {
+  const validHistoryMonths = Array.isArray(commitment?.history)
+    ? commitment.history
+        .map((h) => (typeof h?.effectiveFrom === 'string' ? h.effectiveFrom.slice(0, 7) : ''))
+        .filter((m) => /^\d{4}-\d{2}$/.test(m))
+    : [];
+  if (validHistoryMonths.length > 0) {
+    return validHistoryMonths.sort()[0];
+  }
+  const fallback = typeof commitment?.effectiveFrom === 'string' ? commitment.effectiveFrom.slice(0, 7) : '';
+  return /^\d{4}-\d{2}$/.test(fallback) ? fallback : null;
+}
+
+/**
+ * Returns true if the recurring commitment is already active in `monthStr` ('YYYY-MM').
+ * Commitments scheduled starting in a future month are excluded from earlier months.
+ */
+export function isCommitmentActiveInMonth(
+  commitment: Pick<RecurringCommitment, 'effectiveFrom' | 'history'>,
+  monthStr: string
+): boolean {
+  if (!/^\d{4}-\d{2}$/.test(monthStr)) return true;
+  const earliest = getCommitmentEarliestEffectiveMonth(commitment);
+  return !earliest || monthStr >= earliest;
+}
 
 /**
  * Get active rate for a given month 'YYYY-MM'.
@@ -165,9 +197,18 @@ export function isTransactionMatchingCommitment(
   const txDate = String(tx.date || tx.Date || '');
   if (!txDate.startsWith(monthStr)) return false;
 
-  // 1. Explicit ID tag in notes takes absolute precedence
+  // 1. Explicit ID tag in notes or deterministic recurring ID takes absolute precedence
   const notes = String(tx.notes || tx.Notes || '');
-  if (notes.includes(`[Recurring:${commitment.id}]`)) {
+  const txId = String(tx.id || tx.Id || '');
+  const sanitizedCommitmentId = commitment.id
+    ? String(commitment.id).replace(/[^A-Za-z0-9_-]/g, '_')
+    : '';
+  if (
+    notes.includes(`[Recurring:${commitment.id}]`) ||
+    (commitment.id &&
+      (txId.startsWith(`tx_rec_${commitment.id}_`) ||
+        txId.startsWith(`tx_rec_${sanitizedCommitmentId}_`)))
+  ) {
     return true;
   }
 
@@ -181,10 +222,12 @@ export function isTransactionMatchingCommitment(
   if (descLower === itemLower) return true;
 
   // 3. Substring matching requires:
-  // - Matching category (case-insensitive)
+  // - Canonical category equivalence (so e.g. legacy "Family" matches "Parents")
   // - Minimum 3 characters on both sides to avoid false hits
-  const txCat = String(tx.category || tx.Category || '').trim().toLowerCase();
-  const commCat = String(commitment.category || '').trim().toLowerCase();
+  const rawTxCat = String(tx.category || tx.Category || '').trim();
+  const rawCommCat = String(commitment.category || '').trim();
+  const txCat = rawTxCat ? normalizeToCanonicalCategory(rawTxCat, 'Expense', descLower) : '';
+  const commCat = rawCommCat ? normalizeToCanonicalCategory(rawCommCat, 'Expense', itemLower) : '';
   const categoryMatch = !txCat || !commCat || txCat === commCat;
 
   if (categoryMatch && descLower.length >= 3 && itemLower.length >= 3) {
@@ -222,7 +265,7 @@ export async function checkAndAutoRecordCommitments(
 
   for (let i = 0; i < updatedList.length; i++) {
     const c = updatedList[i];
-    if (!c.autoRecord || c.amount <= 0) continue;
+    if (!c.autoRecord || !isCommitmentActiveInMonth(c, currentMonthStr)) continue;
 
     // Calculate effective due day for current month (clamps 31st to 30th in Sept/Apr/Jun/Nov, 28th/29th in Feb)
     const daysInMonth = getDaysInMonth(currentYear, currentMonthNum);
@@ -279,7 +322,7 @@ export async function checkAndAutoRecordCommitments(
   }
 
   if (hasChanges) {
-    saveCommitmentsToStorage(updatedList);
+    saveCommitmentsLocallyOnly(updatedList);
   }
 
   return updatedList;

@@ -65,3 +65,30 @@ test('cross-year move is removed from the source year and shown in the destinati
   assert.equal(destinationYear[0]._month, '2027-01');
   assert.equal(destinationYear[0]._pendingSync, true);
 });
+
+test('sparse field-level patch (e.g. ReceiptUrl only) updates existing rows without inserting skeletal rows', () => {
+  const sparsePatch = {
+    Id: 'tx-missing',
+    id: 'tx-missing',
+    ReceiptUrl: 'https://drive.google.com/file/d/abc/view',
+    _month: '2026-09',
+  };
+
+  const whenMissing = applyPendingTransactionUpdate(
+    [oldRow], '2026-09', '2026-09', 'tx-missing', sparsePatch, true
+  );
+  assert.equal(whenMissing.length, 1);
+  assert.equal(whenMissing.some((r) => r.Id === 'tx-missing'), false);
+
+  const whenPresent = applyPendingTransactionUpdate(
+    [oldRow],
+    '2026-09',
+    '2026-09',
+    'tx-move-1',
+    { ...sparsePatch, Id: 'tx-move-1', id: 'tx-move-1' },
+    true
+  );
+  assert.equal(whenPresent.length, 1);
+  assert.equal(whenPresent[0].ReceiptUrl, 'https://drive.google.com/file/d/abc/view');
+  assert.equal(whenPresent[0].Amount, 42.5);
+});

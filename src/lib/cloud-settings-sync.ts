@@ -18,6 +18,8 @@ export const CLOUD_SYNC_KEYS = {
   BASELINE_INCOME: 'cashflow_baseline_income',
   SAVINGS_TARGET_PCT: 'cashflow_savings_target_pct',
   INVESTMENT_TARGET_PCT: 'cashflow_investment_target_pct',
+  LOCKED_CATEGORY_CAPS: 'cashflow_locked_category_caps',
+  EMERGENCY_MONTHS_GOAL: 'cashflow_emergency_months_goal',
   EMERGENCY_RESERVE: 'cashflow_emergency_reserve',
   CURRENCY: 'cashflow_currency',
 } as const;
@@ -32,7 +34,7 @@ export const SETTINGS_UPDATED_EVENT = 'cashflow_cloud_settings_synced';
 export function saveSettingWithCloudSync(
   key: string,
   value: string,
-  options: { forceRestoreIds?: string[] } = {}
+  options: { forceRestoreIds?: string[]; forceSync?: boolean } = {}
 ): void {
   if (typeof window === 'undefined') return;
 
@@ -41,10 +43,11 @@ export function saveSettingWithCloudSync(
   const apiUrl = getApiUrl();
   const hasCloud = Boolean(apiUrl && apiUrl.startsWith('http'));
   const isOnline = typeof navigator !== 'undefined' ? navigator.onLine !== false : true;
+  const shouldSyncScalar = Boolean(options.forceSync) || previousValue !== value;
 
   if (isPlanKey) {
     queuePlanListChanges(key, previousValue, value, new Set(options.forceRestoreIds || []));
-  } else if (previousValue !== value && hasCloud) {
+  } else if (shouldSyncScalar && hasCloud) {
     // Enqueue immediately before the network write completes so any concurrent
     // syncCloudSettingsWithLocal() sees this local edit as authoritative and never overwrites it!
     enqueuePendingSettingMutation(key, value);
@@ -71,7 +74,7 @@ export function saveSettingWithCloudSync(
     return;
   }
 
-  if (previousValue === value) return;
+  if (!shouldSyncScalar) return;
 
   const mutationId = `setting_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   sheetsApi.updateSettings(key, value, mutationId)
@@ -168,11 +171,15 @@ async function runCloudSettingsSync(): Promise<SettingsSyncResult> {
     // Reconcile all non-plan settings (Category Caps + Scalar Configurations)
     const managedSettingKeys = [
       CLOUD_SYNC_KEYS.CATEGORY_CAPS,
+      CLOUD_SYNC_KEYS.LOCKED_CATEGORY_CAPS,
       CLOUD_SYNC_KEYS.LHDN_TAX_CAPS,
       CLOUD_SYNC_KEYS.LHDN_TAX_RATE,
       CLOUD_SYNC_KEYS.LHDN_TAX_PROFILE,
       CLOUD_SYNC_KEYS.MONTHLY_BUDGET,
       CLOUD_SYNC_KEYS.BASELINE_INCOME,
+      CLOUD_SYNC_KEYS.SAVINGS_TARGET_PCT,
+      CLOUD_SYNC_KEYS.INVESTMENT_TARGET_PCT,
+      CLOUD_SYNC_KEYS.EMERGENCY_MONTHS_GOAL,
       CLOUD_SYNC_KEYS.EMERGENCY_RESERVE,
       CLOUD_SYNC_KEYS.CURRENCY,
     ] as const;

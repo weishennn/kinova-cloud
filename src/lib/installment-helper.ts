@@ -4,6 +4,7 @@ import { getLocalDateString, parseLocalDate } from '@/lib/date-helper';
 import { saveSettingWithCloudSync } from './cloud-settings-sync';
 
 export interface GroupedInstallmentPlan {
+  id?: string;
   name: string;
   category: string;
   currency: string;
@@ -19,6 +20,8 @@ export interface GroupedInstallmentPlan {
   status: 'active' | 'completed';
   transactions: Transaction[];
   annualInterestRate?: number;
+  tripTag?: string;
+  remainingMonths?: number;
 }
 
 export interface StoredInstallmentPlan {
@@ -36,6 +39,7 @@ export interface StoredInstallmentPlan {
   autoRecord: boolean;
   notes?: string;
   tripTag?: string;
+  remainingMonths?: number;
 }
 
 export const INSTALLMENTS_STORAGE_KEY = 'cashflow_installment_plans';

@@ -14,7 +14,7 @@ import { FloatingDock } from '@/components/money-cockpit/floating-dock';
 import { RECEIPT_PRICE_SEARCH_PATH } from '@/lib/receipt-price-search-route';
 import { ReceiptPriceSearch } from './receipt-price-search';
 import { useAppStore } from '@/stores/app-store';
-import { updateUnifiedRow } from '@/hooks/useSheets';
+import { updateUnifiedRow, applyOptimisticUpdateToQueryCache } from '@/hooks/useSheets';
 import { useSyncAndRefresh } from '@/hooks/useSyncAndRefresh';
 import { driveApi, getActiveUserCacheScope, sheetsApi } from '@/lib/sheets-api';
 import {
@@ -332,15 +332,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             if (!url) throw new Error('Google Drive did not return a receipt link.');
             return url;
           },
-          attachReceipt: (item) => {
+          attachReceipt: async (item) => {
             if (getActiveUserCacheScope() !== item.accountScope) {
               throw new Error('Receipt linking paused because the active account changed.');
             }
-            return updateUnifiedRow(item.sheetName, item.rowIndex, {
+            const receiptPatch = {
               Id: item.transactionId,
               id: item.transactionId,
               ReceiptUrl: item.uploadedUrl || '',
-            });
+              receiptUrl: item.uploadedUrl || '',
+              _month: item.sheetName,
+            };
+            applyOptimisticUpdateToQueryCache(queryClient, item.sheetName, item.rowIndex, receiptPatch);
+            return updateUnifiedRow(item.sheetName, item.rowIndex, receiptPatch);
           },
         });
 

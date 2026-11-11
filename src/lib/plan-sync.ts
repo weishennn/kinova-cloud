@@ -1,8 +1,11 @@
 import { sheetsApi } from './sheets-api';
 import { setLastSyncError, SYNC_STATUS_EVENT } from './cache-manager';
 import { recordDeletedTombstone, recordSyncConflict } from './data-integrity';
+import { arePlanRecordsEquivalent } from './plan-equivalence';
 import type { StoredInstallmentPlan } from './installment-helper';
 import type { RecurringCommitment } from './recurring-helper';
+
+export { arePlanRecordsEquivalent };
 
 type PlanStorageKey = 'cashflow_recurring_commitments' | 'cashflow_installment_plans';
 type PlanKind = 'recurring' | 'installments';
@@ -148,7 +151,7 @@ export function getPlanMigrationComparisons(): PlanMigrationComparison[] {
         const sheetRec = activeMap.get(id);
         if (!sheetRec) {
           phoneOnlyRecords.push(phoneRec);
-        } else if (JSON.stringify(phoneRec) !== JSON.stringify(sheetRec)) {
+        } else if (!arePlanRecordsEquivalent(phoneRec, sheetRec, { ignoreVolatile: true })) {
           differingRecords.push({ phoneRecord: phoneRec, sheetRecord: sheetRec });
         }
       }
@@ -358,7 +361,7 @@ export function queuePlanListChanges(
   for (const [entityId, record] of nextById) {
     if (!entityId) continue;
     const before = previousById.get(entityId);
-    if (before && JSON.stringify(before) === JSON.stringify(record)) continue;
+    if (before && arePlanRecordsEquivalent(before, record, { ignoreVolatile: false })) continue;
     mutations.push({
       mutationId: `${Date.now()}-${sequence++}-${Math.random().toString(36).slice(2)}`,
       storageKey: key,
@@ -591,7 +594,21 @@ async function runPlanListsSyncWithCloud(
       }
 
       const activeCloud = getActiveRecords<PlanRecord>(envelope);
-      if (localRecords.length > 0 && JSON.stringify(localRecords) !== JSON.stringify(activeCloud)) {
+      const localMapForBackup = new Map(localRecords.map((r) => [getEntityId(r), r]));
+      const cloudMapForBackup = new Map(activeCloud.map((r) => [getEntityId(r), r]));
+      const hasBackupDiff =
+        localRecords.length > 0 &&
+        (localRecords.some((r) => {
+          const id = getEntityId(r);
+          const cloudRec = id ? cloudMapForBackup.get(id) : undefined;
+          return !cloudRec || !arePlanRecordsEquivalent(r, cloudRec, { ignoreVolatile: true });
+        }) ||
+          activeCloud.some((r) => {
+            const id = getEntityId(r);
+            return id ? !localMapForBackup.has(id) : false;
+          }));
+
+      if (hasBackupDiff) {
         if (!existingBackupRaw) {
           localStorage.setItem(backupKey, JSON.stringify({
             savedAt: new Date().toISOString(),
@@ -739,8 +756,31 @@ async function runPlanListsSyncWithCloud(
 
     updateKnownEnvelopeTimestamps(key, mergedEnvelope);
     localStorage.setItem(key, JSON.stringify(activeRecords));
-    if (JSON.stringify(localRecords) !== JSON.stringify(activeRecords)) {
+    if (!arePlanRecordsEquivalent(localRecords, activeRecords, { ignoreVolatile: true })) {
       restoredFromCloud = true;
+    }
+
+    // Remove backup automatically once all backup records have converged into the active cloud records
+    if (typeof window !== 'undefined') {
+      const backupKey = `${BACKUP_PREFIX}${key}`;
+      const rawBackup = localStorage.getItem(backupKey);
+      if (rawBackup) {
+        try {
+          const parsedBackup = JSON.parse(rawBackup);
+          const backupRecords: PlanRecord[] = Array.isArray(parsedBackup?.records) ? parsedBackup.records : [];
+          const activeById = new Map(activeRecords.map((r) => [getEntityId(r), r]));
+          const allBackupRecordsConverged = backupRecords.every((rec) => {
+            const id = getEntityId(rec);
+            if (!id) return true;
+            const activeRec = activeById.get(id);
+            return Boolean(activeRec && arePlanRecordsEquivalent(rec, activeRec, { ignoreVolatile: true }));
+          });
+          if (allBackupRecordsConverged) {
+            localStorage.removeItem(backupKey);
+            window.dispatchEvent(new Event(PLAN_RECOVERY_UPDATED_EVENT));
+          }
+        } catch {}
+      }
     }
 
     // P1 #10: Only dequeue mutations whose mutationId AND changedAt match the snapshot sent

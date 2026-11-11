@@ -18,6 +18,8 @@ import {
   saveCommitmentsToStorage,
   saveCommitmentsLocallyOnly,
   getCommitmentRateForMonth,
+  getCommitmentEarliestEffectiveMonth,
+  isCommitmentActiveInMonth,
   updateCommitmentRate,
   isTransactionMatchingCommitment
 } from '@/lib/recurring-helper';
@@ -96,9 +98,10 @@ export function RecurringCommitments() {
   // Financial writes are never triggered merely by opening the page. The
   // project guide requires an explicit user action before recording data.
 
-  // Total monthly commitment sum for this month
+  // Total monthly commitment sum for this month (excluding future-scheduled commitments)
   const totalMonthlyCommitments = useMemo(() => {
     return commitments.reduce((sum, c) => {
+      if (!isCommitmentActiveInMonth(c, currentMonthStr)) return sum;
       return sum + getCommitmentRateForMonth(c, currentMonthStr);
     }, 0);
   }, [commitments, currentMonthStr]);
@@ -381,6 +384,8 @@ export function RecurringCommitments() {
       {/* Commitments List */}
       <div className="grid gap-3 sm:grid-cols-2">
         {commitments.map((item) => {
+          const earliestEffective = getCommitmentEarliestEffectiveMonth(item);
+          const isScheduledFuture = !isCommitmentActiveInMonth(item, currentMonthStr);
           const currentRate = getCommitmentRateForMonth(item, currentMonthStr);
           const iconConfig = CATEGORY_ICONS[item.category] || { icon: Shield, color: 'text-indigo-800 dark:text-indigo-400 bg-indigo-500/10 border-indigo-500/20' };
           const IconComponent = iconConfig.icon;
@@ -393,10 +398,10 @@ export function RecurringCommitments() {
           const daysInCurrentMonth = getDaysInMonth(currentYear, currentMonthNum);
           const effectiveDueDay = Math.min(item.dayOfMonth, daysInCurrentMonth);
           const isRecorded = !!matchedTx;
-          const isDueOrPast = currentDay >= effectiveDueDay;
+          const isDueOrPast = !isScheduledFuture && currentDay >= effectiveDueDay;
 
           // Check if future scheduled change exists
-          const futureRateChange = item.history?.find(h => h.effectiveFrom > currentMonthStr);
+          const futureRateChange = !isScheduledFuture ? item.history?.find(h => h.effectiveFrom > currentMonthStr) : undefined;
 
           return (
             <motion.div
@@ -407,9 +412,11 @@ export function RecurringCommitments() {
               className={`rounded-3xl border p-4 transition-all duration-300 specular-card shadow-sm hover:shadow-md ${
                 isRecorded
                   ? 'border-emerald-500/25 bg-gradient-to-br from-emerald-950/20 via-slate-100 dark:via-zinc-900/60 to-white dark:to-zinc-950 hover:border-emerald-500/40'
-                  : isDueOrPast
-                    ? 'border-amber-500/25 bg-gradient-to-br from-amber-950/20 via-slate-100 dark:via-zinc-900/60 to-white dark:to-zinc-950 hover:border-amber-500/40'
-                    : 'border-slate-200 dark:border-zinc-800/80 bg-gradient-to-br from-zinc-900/70 via-slate-100 dark:via-zinc-900/50 to-white dark:to-zinc-950 hover:border-slate-300 dark:hover:border-zinc-700/80'
+                  : isScheduledFuture
+                    ? 'border-slate-200 dark:border-zinc-800/80 bg-gradient-to-br from-zinc-900/70 via-slate-100 dark:via-zinc-900/50 to-white dark:to-zinc-950 hover:border-slate-300 dark:hover:border-zinc-700/80'
+                    : isDueOrPast
+                      ? 'border-amber-500/25 bg-gradient-to-br from-amber-950/20 via-slate-100 dark:via-zinc-900/60 to-white dark:to-zinc-950 hover:border-amber-500/40'
+                      : 'border-slate-200 dark:border-zinc-800/80 bg-gradient-to-br from-zinc-900/70 via-slate-100 dark:via-zinc-900/50 to-white dark:to-zinc-950 hover:border-slate-300 dark:hover:border-zinc-700/80'
               }`}
             >
               <div className="flex items-start justify-between gap-3">
@@ -458,6 +465,11 @@ export function RecurringCommitments() {
                       <CheckCircle2 className="h-4 w-4" />
                       <span>Recorded for {currentMonthStr}</span>
                     </span>
+                  ) : isScheduledFuture ? (
+                    <span className="text-indigo-700 dark:text-indigo-300 font-medium flex items-center gap-1.5">
+                      <Calendar className="h-4 w-4 text-indigo-500 dark:text-indigo-400" />
+                      <span>Starts {earliestEffective} ({effectiveDueDay}th) · Not due this month</span>
+                    </span>
                   ) : isDueOrPast ? (
                     <span className="text-amber-800 dark:text-amber-400 font-semibold flex items-center gap-1.5">
                       <Clock className="h-4 w-4" />
@@ -478,7 +490,7 @@ export function RecurringCommitments() {
                   )}
                 </div>
 
-                {!isRecorded && (
+                {!isRecorded && !isScheduledFuture && (
                   <button
                     type="button"
                     onClick={(e) => handleManualRecord(item, e)}

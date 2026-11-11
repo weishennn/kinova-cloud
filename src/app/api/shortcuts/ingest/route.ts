@@ -9,6 +9,7 @@ import {
   reportGeminiKeyFailure,
 } from '@/lib/gemini-key-pool';
 import { matchHabitMemory } from '@/lib/habit-memory-engine';
+import { reconcileKinovaReceiptItems } from '@/lib/receipt-item-reconciler';
 import {
   acknowledgeShortcutDraft,
   claimShortcutDraft,
@@ -400,10 +401,11 @@ CRITICAL INSTRUCTIONS:
    - "amount" MUST BE THE NET OUT-OF-POCKET AMOUNT CHARGED TO THE USER'S CARD OR PAID IN CASH! NEVER use the unsubsidized pump total when government subsidy or vouchers paid for part of the fuel!
    - Set "billAmount" (gross pump price), "discountAmount" (subsidy + voucher), and "dealsDescription".
 
-4. NET AMOUNT PAID VS PRE-DISCOUNT BILL:
+4. NET AMOUNT PAID VS PRE-DISCOUNT BILL & MULTI-QUANTITY ITEMS:
    - "amount" MUST ALWAYS BE THE ACTUAL NET OUT-OF-POCKET AMOUNT PAID.
    - NEVER record the pre-discount bill amount as the expense "amount".
    - Extract "billAmount", "discountAmount", and "dealsDescription".
+   - For each item in "items", ALWAYS set "amount" to the EXTENDED LINE TOTAL (quantity * unitPrice), NEVER the single-unit price when quantity > 1.
 
 5. CATEGORIES:
    - [Food & Dining, Transport, Shopping, Housing & Bills, Parents, Insurance, Entertainment, Health, Education, Sport, Gift, Other].
@@ -490,16 +492,53 @@ Return JSON shape:
         ? parsedOcr.dealsDescription.trim()
         : null;
 
-    const items: ShortcutDraftItem[] = Array.isArray(parsedOcr.items)
+    const rawItemCandidates = Array.isArray(parsedOcr.items)
       ? parsedOcr.items
           .filter((it): it is Record<string, unknown> => Boolean(it) && typeof it === 'object')
-          .map((it) => ({
-            name: typeof it.name === 'string' ? it.name.trim() : '',
-            amount: typeof it.amount === 'number' && Number.isFinite(it.amount) && it.amount > 0 ? Number(it.amount.toFixed(2)) : 0,
-          }))
+          .map((it) => {
+            const qty = typeof it.quantity === 'number' && Number.isFinite(it.quantity) && it.quantity > 0
+              ? Number(it.quantity.toFixed(3))
+              : 1;
+            const unitPrice = typeof it.unitPrice === 'number' && Number.isFinite(it.unitPrice) && it.unitPrice > 0
+              ? Number(it.unitPrice.toFixed(2))
+              : 0;
+            const explicitAmt = typeof it.amount === 'number' && Number.isFinite(it.amount) && it.amount > 0
+              ? Number(it.amount.toFixed(2))
+              : 0;
+            const amt = explicitAmt > 0
+              ? explicitAmt
+              : (unitPrice > 0 ? Number((unitPrice * qty).toFixed(2)) : 0);
+            return {
+              name: typeof it.name === 'string' ? it.name.trim() : '',
+              quantity: qty,
+              unitPrice,
+              amount: amt,
+            };
+          })
           .filter((it) => it.name && it.amount > 0)
           .slice(0, 12)
       : [];
+
+    const parsedNumericRawAmount = parseAmountAndCurrencyFromRawInput(
+      rawAmountValue,
+      parsedOcr.currencySymbol || parsedOcr.currency,
+      'MYR'
+    ).amount;
+
+    const reconciledShortcutItems = reconcileKinovaReceiptItems(rawItemCandidates, {
+      amount: parsedNumericRawAmount,
+      subtotal: typeof parsedOcr.subtotal === 'number' && parsedOcr.subtotal > 0 ? parsedOcr.subtotal : null,
+      billAmount,
+      discountAmount,
+      taxAmount: typeof parsedOcr.taxAmount === 'number' && parsedOcr.taxAmount > 0 ? parsedOcr.taxAmount : null,
+      taxRate: typeof parsedOcr.taxRate === 'number' && parsedOcr.taxRate > 0 ? parsedOcr.taxRate : null,
+      taxIncluded: Boolean(parsedOcr.taxIncluded),
+    });
+
+    const items: ShortcutDraftItem[] = reconciledShortcutItems.map((it) => ({
+      name: it.quantity > 1 ? `${it.quantity}x ${it.name}` : it.name,
+      amount: it.amount,
+    }));
 
     const itemsSum = items.length > 0 ? Number(items.reduce((s, it) => s + it.amount, 0).toFixed(2)) : 0;
     const grossCandidate = billAmount ?? (itemsSum > 0 ? itemsSum : null);

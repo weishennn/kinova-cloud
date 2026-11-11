@@ -931,7 +931,8 @@ function addRow(sheetName, rowData, options) {
 
 function normalizeConflictValue(field, value) {
   if (value === undefined || value === null) return '';
-  if (String(field).toLowerCase() === 'date') {
+  const fieldLower = String(field).toLowerCase();
+  if (fieldLower === 'date') {
     if (value instanceof Date && !isNaN(value.getTime())) {
       return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
     }
@@ -940,8 +941,14 @@ function normalizeConflictValue(field, value) {
     if (isoDate) return isoDate[0];
     return text;
   }
+  if (fieldLower === 'type') {
+    return String(value).trim().toLowerCase();
+  }
+  if (fieldLower === 'currency' || fieldLower === 'basecurrency') {
+    return String(value).trim().toUpperCase();
+  }
   const numericFields = ['amount', 'baseamount', 'fxratetobase'];
-  if (numericFields.indexOf(String(field).toLowerCase()) >= 0 && value !== '') {
+  if (numericFields.indexOf(fieldLower) >= 0 && value !== '') {
     const numeric = Number(value);
     if (isFinite(numeric)) return 'number:' + numeric;
   }
@@ -1880,6 +1887,22 @@ function reconcilePlans(kind, mutations, initialRecords) {
       }
     });
 
+    const canonicalPlanJson = function(val) {
+      if (val === null || val === undefined) return 'null';
+      if (Array.isArray(val)) {
+        return '[' + val.map(canonicalPlanJson).join(',') + ']';
+      }
+      if (typeof val === 'object') {
+        const keys = Object.keys(val).filter(function(k) {
+          return val[k] !== undefined && k !== 'lastAutoRecordedMonth';
+        }).sort();
+        return '{' + keys.map(function(k) {
+          return JSON.stringify(k) + ':' + canonicalPlanJson(val[k]);
+        }).join(',') + '}';
+      }
+      return JSON.stringify(val);
+    };
+
     const conflicts = [];
     const mutationList = Array.isArray(mutations) ? mutations : [];
     mutationList.forEach(function(m) {
@@ -1888,8 +1911,8 @@ function reconcilePlans(kind, mutations, initialRecords) {
 
       // Detect concurrent cross-device edits when baseChangedAt is provided
       if (existing && !m.forceRestore && typeof m.baseChangedAt === 'number' && existing.changedAt > m.baseChangedAt) {
-        const existingJson = JSON.stringify(existing.deleted ? null : existing.record);
-        const incomingJson = JSON.stringify(m.action === 'delete' ? null : m.record);
+        const existingJson = canonicalPlanJson(existing.deleted ? null : existing.record);
+        const incomingJson = canonicalPlanJson(m.action === 'delete' ? null : m.record);
         if (existingJson !== incomingJson) {
           conflicts.push({
             entityId: m.entityId,

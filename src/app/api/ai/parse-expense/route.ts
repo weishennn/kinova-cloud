@@ -323,6 +323,9 @@ You MUST set 'category' ONLY to one of the following exact canonical category na
 - For Investment: "Fixed Deposit", "ASNB / Unit Trust", "EPF / KWSP", "Emergency Savings", "Other Savings"
 NEVER invent categories like "Groceries", "Food", "Utilities", "Dining", "Bills", "Technology", "Coffee" — all food, groceries, dining, and supermarket expenses MUST be "Food & Dining"! Map them to the valid list above!
 
+HABIT MEMORY RULES:
+If 【LEARNED HABIT MEMORIES】 are provided, compare partial wording, shorthand ("字眼"), abbreviations, or payee names in the user command against each memory's rawPattern, preferredAlias, and keywords. When a habit matches semantically, use its preferredAlias as description and its category.
+
 Use these exact shapes:
 {
   "intent": "transaction|installment|trade|trip|unknown",
@@ -365,9 +368,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Text is required and must be 1,000 characters or fewer' }, { status: 400 });
     }
 
+    const habitMemories = Array.isArray(body?.habitMemories)
+      ? body.habitMemories
+          .slice(0, 30)
+          .filter((h: unknown): h is Record<string, unknown> => Boolean(h && typeof h === 'object'))
+          .map((h: Record<string, unknown>) => ({
+            rawPattern: textValue(h.rawPattern).slice(0, 48),
+            preferredAlias: textValue(h.preferredAlias).slice(0, 48),
+            category: textValue(h.category).slice(0, 40),
+            ...(Array.isArray(h.keywords) && h.keywords.length > 0
+              ? { keywords: h.keywords.filter((k): k is string => typeof k === 'string').slice(0, 8) }
+              : {}),
+          }))
+          .filter((h: { rawPattern: string; preferredAlias: string }) => Boolean(h.rawPattern && h.preferredAlias))
+      : [];
+
+    const userPrompt = habitMemories.length > 0
+      ? `User command: ${text}\n\n【LEARNED HABIT MEMORIES】:\n${JSON.stringify(habitMemories)}`
+      : `User command: ${text}`;
+
     try {
       const result = await generateGeminiContent({
-        prompt: `User command: ${text}`,
+        prompt: userPrompt,
         systemInstruction: SYSTEM_PROMPT.replace('{{TODAY}}', today),
         responseMimeType: 'application/json',
         thinking: false,
