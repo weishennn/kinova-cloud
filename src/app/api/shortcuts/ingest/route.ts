@@ -11,10 +11,13 @@ import {
 import { matchHabitMemory } from '@/lib/habit-memory-engine';
 import { reconcileKinovaReceiptItems } from '@/lib/receipt-item-reconciler';
 import {
+  acknowledgeShortcutAutoHeal,
   acknowledgeShortcutDraft,
   claimShortcutDraft,
   computeShortcutDraftFingerprint,
+  getPendingShortcutAutoHeals,
   getRecentShortcutAutoRecorded,
+  healPendingShortcutRecords,
   inferCategoryFromMerchant,
   inspectShortcutUrlSafety,
   normalizeApplePayTransactionInput,
@@ -24,6 +27,7 @@ import {
   sanitizeMerchantCandidate,
   saveShortcutQuickDraft,
   type ShortcutDraftItem,
+  type ShortcutQuickDraft,
 } from '@/lib/shortcut-draft-store';
 
 function timingSafeMatch(expected: string, provided: string): boolean {
@@ -74,6 +78,324 @@ function getRequestOrigin(req: NextRequest): string {
 }
 
 export const maxDuration = 60;
+
+async function buildScreenshotDraftPayload(params: {
+  parsedOcr: Record<string, unknown>;
+  ocrFallbackNotice: string;
+  today: string;
+  userEmail: string;
+  startedAtMs: number;
+}): Promise<{
+  ephemeralDraft: ShortcutQuickDraft;
+  moneyRes: ReturnType<typeof parseAmountAndCurrencyFromRawInput>;
+  effectiveDescription: string;
+  effectiveCategory: string;
+  dateStr: string;
+  missingFields: Array<'amount' | 'description' | 'currency' | 'category'>;
+}> {
+  const { parsedOcr, ocrFallbackNotice, today, userEmail, startedAtMs } = params;
+
+  const ocrSummary =
+    (typeof parsedOcr.ocrSummary === 'string' && parsedOcr.ocrSummary.trim()) ||
+    (typeof parsedOcr.notes === 'string' && parsedOcr.notes.trim()) ||
+    ocrFallbackNotice ||
+    '';
+
+  const candidateMerchantText =
+    (typeof parsedOcr.merchant === 'string' && parsedOcr.merchant.trim()) ||
+    (typeof parsedOcr.store === 'string' && parsedOcr.store.trim()) ||
+    (typeof parsedOcr.payee === 'string' && parsedOcr.payee.trim()) ||
+    (typeof parsedOcr.recipient === 'string' && parsedOcr.recipient.trim()) ||
+    (typeof parsedOcr.to === 'string' && parsedOcr.to.trim()) ||
+    (typeof parsedOcr.seller === 'string' && parsedOcr.seller.trim()) ||
+    (typeof parsedOcr.description === 'string' && parsedOcr.description.trim()) ||
+    '';
+
+  const contextText = `${ocrSummary} ${typeof parsedOcr.notes === 'string' ? parsedOcr.notes : ''}`;
+  const rawMerchant = sanitizeMerchantCandidate(candidateMerchantText, contextText);
+
+  let rawAmountValue =
+    parsedOcr.amount ??
+    parsedOcr.total ??
+    parsedOcr.totalAmount ??
+    parsedOcr.paidAmount ??
+    parsedOcr.grandTotal ??
+    parsedOcr.price ??
+    null;
+
+  const discountAmount =
+    typeof parsedOcr.discountAmount === 'number' && Number.isFinite(parsedOcr.discountAmount) && parsedOcr.discountAmount > 0
+      ? Number(parsedOcr.discountAmount.toFixed(2))
+      : null;
+  const billAmount =
+    typeof parsedOcr.billAmount === 'number' && Number.isFinite(parsedOcr.billAmount) && parsedOcr.billAmount > 0
+      ? Number(parsedOcr.billAmount.toFixed(2))
+      : null;
+  const dealsDescription =
+    typeof parsedOcr.dealsDescription === 'string' && parsedOcr.dealsDescription.trim()
+      ? parsedOcr.dealsDescription.trim()
+      : null;
+
+  const rawItemCandidates = Array.isArray(parsedOcr.items)
+    ? parsedOcr.items
+        .filter((it): it is Record<string, unknown> => Boolean(it) && typeof it === 'object')
+        .map((it) => {
+          const qty =
+            typeof it.quantity === 'number' && Number.isFinite(it.quantity) && it.quantity > 0
+              ? Number(it.quantity.toFixed(3))
+              : 1;
+          const unitPrice =
+            typeof it.unitPrice === 'number' && Number.isFinite(it.unitPrice) && it.unitPrice > 0
+              ? Number(it.unitPrice.toFixed(2))
+              : 0;
+          const explicitAmt =
+            typeof it.amount === 'number' && Number.isFinite(it.amount) && it.amount > 0
+              ? Number(it.amount.toFixed(2))
+              : 0;
+          const amt = explicitAmt > 0 ? explicitAmt : unitPrice > 0 ? Number((unitPrice * qty).toFixed(2)) : 0;
+          return {
+            name: typeof it.name === 'string' ? it.name.trim() : '',
+            quantity: qty,
+            unitPrice,
+            amount: amt,
+          };
+        })
+        .filter((it) => it.name && it.amount > 0)
+        .slice(0, 12)
+    : [];
+
+  const parsedNumericRawAmount = parseAmountAndCurrencyFromRawInput(
+    rawAmountValue,
+    parsedOcr.currencySymbol || parsedOcr.currency,
+    'MYR'
+  ).amount;
+
+  const reconciledShortcutItems = reconcileKinovaReceiptItems(rawItemCandidates, {
+    amount: parsedNumericRawAmount,
+    subtotal: typeof parsedOcr.subtotal === 'number' && parsedOcr.subtotal > 0 ? parsedOcr.subtotal : null,
+    billAmount,
+    discountAmount,
+    taxAmount: typeof parsedOcr.taxAmount === 'number' && parsedOcr.taxAmount > 0 ? parsedOcr.taxAmount : null,
+    taxRate: typeof parsedOcr.taxRate === 'number' && parsedOcr.taxRate > 0 ? parsedOcr.taxRate : null,
+    taxIncluded: Boolean(parsedOcr.taxIncluded),
+  });
+
+  const items: ShortcutDraftItem[] = reconciledShortcutItems.map((it) => ({
+    name: it.quantity > 1 ? `${it.quantity}x ${it.name}` : it.name,
+    amount: it.amount,
+  }));
+
+  const itemsSum = items.length > 0 ? Number(items.reduce((s, it) => s + it.amount, 0).toFixed(2)) : 0;
+  const grossCandidate = billAmount ?? (itemsSum > 0 ? itemsSum : null);
+
+  if (
+    grossCandidate != null &&
+    discountAmount != null &&
+    typeof rawAmountValue === 'number' &&
+    Math.abs(rawAmountValue - grossCandidate) < 0.15 &&
+    grossCandidate > discountAmount
+  ) {
+    rawAmountValue = Number((grossCandidate - discountAmount).toFixed(2));
+  }
+
+  let moneyRes = parseAmountAndCurrencyFromRawInput(
+    rawAmountValue,
+    parsedOcr.currencySymbol || parsedOcr.currency,
+    'MYR'
+  );
+
+  if ((moneyRes.amount === null || moneyRes.amount <= 0) && grossCandidate != null) {
+    const net =
+      discountAmount && discountAmount > 0 && grossCandidate > discountAmount
+        ? Number((grossCandidate - discountAmount).toFixed(2))
+        : grossCandidate;
+    moneyRes = { ...moneyRes, amount: net };
+  }
+
+  // Self-healing fallback #1: extract explicit currency + amount from OCR summary/notes if top-level numeric fields missed it
+  if ((moneyRes.amount === null || moneyRes.amount <= 0) && contextText.trim()) {
+    const summaryMoneyMatch = contextText.match(
+      /(RM|MYR|SGD|USD|AUD|HKD|TWD|CNY|RMB|THB|JPY|EUR|GBP|S\$|US\$|A\$|HK\$|NT\$|￥|¥)\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)/i
+    );
+    if (summaryMoneyMatch) {
+      const recovered = parseAmountAndCurrencyFromRawInput(
+        summaryMoneyMatch[2],
+        summaryMoneyMatch[1],
+        moneyRes.currency || 'MYR'
+      );
+      if (recovered.amount !== null && recovered.amount > 0) {
+        moneyRes = recovered;
+      }
+    }
+  }
+
+  if (items.length === 1 && moneyRes.amount != null && moneyRes.amount > 0 && items[0].amount > moneyRes.amount) {
+    items[0].amount = moneyRes.amount;
+  }
+
+  if (items.length === 0 && moneyRes.amount != null && moneyRes.amount > 0) {
+    const fallbackItemName =
+      rawMerchant || (typeof parsedOcr.description === 'string' && parsedOcr.description.trim() ? parsedOcr.description.trim() : '');
+    if (fallbackItemName) {
+      items.push({ name: fallbackItemName, amount: moneyRes.amount });
+    }
+  }
+
+  const currencyAmbiguous = Boolean(parsedOcr.currencyAmbiguous) || moneyRes.currencyAmbiguous;
+  const habitMatch = matchHabitMemory(rawMerchant || (items.length > 0 ? items[0].name : ''));
+  const catRes = inferCategoryFromMerchant(
+    rawMerchant || (items.length > 0 ? items[0].name : ''),
+    typeof parsedOcr.category === 'string' ? parsedOcr.category : undefined
+  );
+  const dateStr = sanitizeDate(parsedOcr.date) || today;
+
+  // Self-healing fallback #2: never drop a valid amount solely because merchant/description was blank
+  const firstSanitizedItem = items[0]?.name ? sanitizeMerchantCandidate(items[0].name) : '';
+  const sanitizedPaymentMethod =
+    typeof parsedOcr.paymentMethod === 'string' && !/^(?:unknown|cash)$/i.test(parsedOcr.paymentMethod.trim())
+      ? sanitizeMerchantCandidate(parsedOcr.paymentMethod)
+      : '';
+
+  let effectiveDescription =
+    rawMerchant ||
+    firstSanitizedItem ||
+    (catRes.category && catRes.category !== 'Other' ? catRes.category : '') ||
+    sanitizedPaymentMethod ||
+    (moneyRes.amount !== null && moneyRes.amount > 0 ? '快捷指令消费' : '');
+  let effectiveCategory = catRes.category;
+  let habitNotice = '';
+
+  if (
+    (catRes.isUncertain || effectiveCategory === 'Other') &&
+    effectiveDescription &&
+    effectiveDescription !== '快捷指令消费' &&
+    !habitMatch &&
+    Date.now() - startedAtMs < 13000
+  ) {
+    try {
+      const aiCategory = await Promise.race([
+        classifyMerchantWithGemini(effectiveDescription),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
+      ]);
+      if (aiCategory && aiCategory !== 'Other') {
+        effectiveCategory = aiCategory;
+        catRes.category = aiCategory;
+        catRes.isUncertain = false;
+      }
+    } catch {
+      // Skip classification timeout/error safely
+    }
+  }
+
+  if (habitMatch) {
+    effectiveCategory = habitMatch.resolvedCategory;
+    if (habitMatch.isAlias) {
+      effectiveDescription = habitMatch.resolvedDescription;
+      habitNotice = `[习惯识别: 转给 ${habitMatch.matchedPattern} ➔ ${habitMatch.resolvedDescription}]`;
+    }
+    if (items.length === 0 && habitMatch.matchedItem.defaultItemName && moneyRes.amount != null && moneyRes.amount > 0) {
+      items.push({ name: habitMatch.matchedItem.defaultItemName, amount: moneyRes.amount });
+    }
+  }
+
+  const missingFields: Array<'amount' | 'description' | 'currency' | 'category'> = [];
+  const uncertainFields: Array<'amount' | 'description' | 'currency' | 'category'> = [];
+
+  if (moneyRes.amount === null || moneyRes.amount <= 0) {
+    missingFields.push('amount');
+  }
+  if (!effectiveDescription) {
+    missingFields.push('description');
+  }
+  if (currencyAmbiguous) {
+    uncertainFields.push('currency');
+  }
+  if ((catRes.isUncertain && !habitMatch) || (typeof parsedOcr.categoryConfidence === 'number' && parsedOcr.categoryConfidence < 0.65)) {
+    uncertainFields.push('category');
+  }
+
+  const fingerprint = computeShortcutDraftFingerprint({
+    date: dateStr,
+    currency: moneyRes.currency,
+    amount: moneyRes.amount,
+    merchantOrDescription: effectiveDescription || 'screenshot_auto',
+  });
+
+  // Check 15-second in-memory duplicate guard without persisting any manual draft
+  let suspectedDuplicateOfDraftId: string | null = null;
+  if (moneyRes.amount !== null && moneyRes.amount > 0) {
+    const recentEntries = await getRecentShortcutAutoRecorded(userEmail, Date.now(), false);
+    const nowMs = Date.now();
+    for (const entry of recentEntries) {
+      const ageMs = nowMs - new Date(entry.recordedAt).getTime();
+      if (ageMs <= 15_000 && entry.rowData) {
+        const entryFp = computeShortcutDraftFingerprint({
+          date: String(entry.rowData.Date || ''),
+          currency: String(entry.rowData.Currency || 'MYR'),
+          amount: typeof entry.rowData.Amount === 'number' ? entry.rowData.Amount : Number(entry.rowData.Amount || 0),
+          merchantOrDescription: String(entry.rowData.Description || ''),
+        });
+        if (entryFp === fingerprint) {
+          suspectedDuplicateOfDraftId = entry.transactionId;
+          break;
+        }
+      }
+    }
+  }
+
+  const nowIso = new Date().toISOString();
+  const ephemeralDraft: ShortcutQuickDraft = {
+    draftId: `ephemeral_sc_${Date.now().toString(36)}`,
+    ownerEmail: userEmail || undefined,
+    source: 'back_tap_screenshot',
+    createdAt: nowIso,
+    expiresAtMs: Date.now() + 60_000,
+    amount: moneyRes.amount,
+    currency: moneyRes.currency,
+    currencyAmbiguous,
+    candidateCurrencies: moneyRes.candidateCurrencies,
+    type: 'Expense',
+    category: effectiveCategory,
+    description: effectiveDescription,
+    merchant: effectiveDescription || rawMerchant,
+    date: dateStr,
+    discountAmount,
+    dealsDescription,
+    billAmount,
+    items: items.length > 0 ? items : undefined,
+    ocrSummary,
+    assistantAdvice: '',
+    proposedActionLabel:
+      moneyRes.amount != null && moneyRes.amount > 0
+        ? `Auto-Record ${moneyRes.currency} ${moneyRes.amount.toFixed(2)} (${effectiveCategory})`
+        : '',
+    notes: [
+      '快捷指令自动识别入账',
+      habitNotice,
+      discountAmount && discountAmount > 0
+        ? `[优惠抵扣: -${moneyRes.currency} ${discountAmount.toFixed(2)}${dealsDescription ? ` (${dealsDescription})` : ''}]`
+        : '',
+      ocrSummary,
+    ]
+      .filter(Boolean)
+      .join(' · '),
+    missingFields,
+    uncertainFields,
+    fingerprint,
+    suspectedDuplicateOfDraftId,
+    aiDisclosure:
+      '截图仅通过服务端加密发送至 Google Gemini Vision API 进行一次性字段提取，不会写入任何服务器日志或公开 URL。',
+  };
+
+  return {
+    ephemeralDraft,
+    moneyRes,
+    effectiveDescription,
+    effectiveCategory,
+    dateStr,
+    missingFields,
+  };
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -270,7 +592,9 @@ export async function POST(req: NextRequest) {
             await recordShortcutDraftToLedger(saved, {
               autoRecord: true,
               userEmail,
+              enqueueOnFailure: true,
             });
+            await healPendingShortcutRecords(userEmail);
           } catch (err) {
             console.error('[Shortcut Ingest ApplePay] Background Google Sheets write error:', err);
           }
@@ -363,13 +687,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const rawModel = (
+    const startedAtMs = Date.now();
+    // Default to gemini-2.5-flash (~2s latency) with automatic failover across gemini-3.5-flash / flash-latest
+    const preferredModel = (
       process.env.GEMINI_OCR_MODEL ||
-      process.env.GEMINI_MODEL ||
-      'gemini-3.5-flash'
+      'gemini-2.5-flash'
     ).trim();
-    // Defensive sanitization: Automatically remap deprecated model to prevent 404 even if remote server env is stale
-    const preferredModel = rawModel === 'gemini-2.5-flash' ? 'gemini-3.5-flash' : rawModel;
 
     const prompt = `You are an intelligent financial OCR and receipt analysis AI.
 Analyze this payment / receipt / transaction screenshot carefully and return ONLY valid JSON.
@@ -436,343 +759,243 @@ Return JSON shape:
   "notes": string
 }`;
 
-    const { parsedOcr, ocrFallbackNotice } = await runShortcutGeminiOcrWithFastFail({
+    const {
+      parsedOcr,
+      ocrFallbackNotice,
+      ocrErrorKind,
+      modelUsed,
+      healed: ocrHealed,
+    } = await runShortcutGeminiOcrWithFastFail({
       geminiKeys,
       onKeyFailure: reportGeminiKeyFailure,
       preferredModel,
       prompt,
       mimeType,
       cleanBase64,
-      timeoutMs: 30000,
+      timeoutMs: 9000,
+      totalTimeoutMs: 22000,
     });
 
-    const ocrSummary =
-      (typeof parsedOcr.ocrSummary === 'string' && parsedOcr.ocrSummary.trim()) ||
-      (typeof parsedOcr.notes === 'string' && parsedOcr.notes.trim()) ||
-      ocrFallbackNotice ||
-      '';
-
-    const candidateMerchantText = (
-      (typeof parsedOcr.merchant === 'string' && parsedOcr.merchant.trim()) ||
-      (typeof parsedOcr.store === 'string' && parsedOcr.store.trim()) ||
-      (typeof parsedOcr.payee === 'string' && parsedOcr.payee.trim()) ||
-      (typeof parsedOcr.recipient === 'string' && parsedOcr.recipient.trim()) ||
-      (typeof parsedOcr.to === 'string' && parsedOcr.to.trim()) ||
-      (typeof parsedOcr.seller === 'string' && parsedOcr.seller.trim()) ||
-      (typeof parsedOcr.description === 'string' && parsedOcr.description.trim()) ||
-      ''
-    );
-
-    const rawMerchant = sanitizeMerchantCandidate(
-      candidateMerchantText,
-      `${ocrSummary} ${typeof parsedOcr.notes === 'string' ? parsedOcr.notes : ''}`
-    );
-
-    let rawAmountValue = (
-      parsedOcr.amount ??
-      parsedOcr.total ??
-      parsedOcr.totalAmount ??
-      parsedOcr.paidAmount ??
-      parsedOcr.grandTotal ??
-      parsedOcr.price ??
-      null
-    );
-
-    // If Gemini mistakenly returned pre-discount bill amount when discount was present, enforce net amount paid
-    const discountAmount =
-      typeof parsedOcr.discountAmount === 'number' && Number.isFinite(parsedOcr.discountAmount) && parsedOcr.discountAmount > 0
-        ? Number(parsedOcr.discountAmount.toFixed(2))
-        : null;
-    const billAmount =
-      typeof parsedOcr.billAmount === 'number' && Number.isFinite(parsedOcr.billAmount) && parsedOcr.billAmount > 0
-        ? Number(parsedOcr.billAmount.toFixed(2))
-        : null;
-    const dealsDescription =
-      typeof parsedOcr.dealsDescription === 'string' && parsedOcr.dealsDescription.trim()
-        ? parsedOcr.dealsDescription.trim()
-        : null;
-
-    const rawItemCandidates = Array.isArray(parsedOcr.items)
-      ? parsedOcr.items
-          .filter((it): it is Record<string, unknown> => Boolean(it) && typeof it === 'object')
-          .map((it) => {
-            const qty = typeof it.quantity === 'number' && Number.isFinite(it.quantity) && it.quantity > 0
-              ? Number(it.quantity.toFixed(3))
-              : 1;
-            const unitPrice = typeof it.unitPrice === 'number' && Number.isFinite(it.unitPrice) && it.unitPrice > 0
-              ? Number(it.unitPrice.toFixed(2))
-              : 0;
-            const explicitAmt = typeof it.amount === 'number' && Number.isFinite(it.amount) && it.amount > 0
-              ? Number(it.amount.toFixed(2))
-              : 0;
-            const amt = explicitAmt > 0
-              ? explicitAmt
-              : (unitPrice > 0 ? Number((unitPrice * qty).toFixed(2)) : 0);
-            return {
-              name: typeof it.name === 'string' ? it.name.trim() : '',
-              quantity: qty,
-              unitPrice,
-              amount: amt,
-            };
-          })
-          .filter((it) => it.name && it.amount > 0)
-          .slice(0, 12)
-      : [];
-
-    const parsedNumericRawAmount = parseAmountAndCurrencyFromRawInput(
-      rawAmountValue,
-      parsedOcr.currencySymbol || parsedOcr.currency,
-      'MYR'
-    ).amount;
-
-    const reconciledShortcutItems = reconcileKinovaReceiptItems(rawItemCandidates, {
-      amount: parsedNumericRawAmount,
-      subtotal: typeof parsedOcr.subtotal === 'number' && parsedOcr.subtotal > 0 ? parsedOcr.subtotal : null,
-      billAmount,
-      discountAmount,
-      taxAmount: typeof parsedOcr.taxAmount === 'number' && parsedOcr.taxAmount > 0 ? parsedOcr.taxAmount : null,
-      taxRate: typeof parsedOcr.taxRate === 'number' && parsedOcr.taxRate > 0 ? parsedOcr.taxRate : null,
-      taxIncluded: Boolean(parsedOcr.taxIncluded),
+    const built = await buildScreenshotDraftPayload({
+      parsedOcr,
+      ocrFallbackNotice,
+      today,
+      userEmail,
+      startedAtMs,
     });
 
-    const items: ShortcutDraftItem[] = reconciledShortcutItems.map((it) => ({
-      name: it.quantity > 1 ? `${it.quantity}x ${it.name}` : it.name,
-      amount: it.amount,
-    }));
+    const { ephemeralDraft, moneyRes, effectiveDescription, effectiveCategory, dateStr } = built;
+    const hasValidAmount = moneyRes.amount !== null && moneyRes.amount > 0;
 
-    const itemsSum = items.length > 0 ? Number(items.reduce((s, it) => s + it.amount, 0).toFixed(2)) : 0;
-    const grossCandidate = billAmount ?? (itemsSum > 0 ? itemsSum : null);
-
-    if (
-      grossCandidate != null &&
-      discountAmount != null &&
-      typeof rawAmountValue === 'number' &&
-      Math.abs(rawAmountValue - grossCandidate) < 0.15 &&
-      grossCandidate > discountAmount
-    ) {
-      rawAmountValue = Number((grossCandidate - discountAmount).toFixed(2));
-    }
-
-    let moneyRes = parseAmountAndCurrencyFromRawInput(
-      rawAmountValue,
-      parsedOcr.currencySymbol || parsedOcr.currency,
-      'MYR'
-    );
-
-    if ((moneyRes.amount === null || moneyRes.amount <= 0) && grossCandidate != null) {
-      const net = discountAmount && discountAmount > 0 && grossCandidate > discountAmount
-        ? Number((grossCandidate - discountAmount).toFixed(2))
-        : grossCandidate;
-      moneyRes = {
-        ...moneyRes,
-        amount: net,
-      };
-    }
-
-    // Align single item amount to net amount paid if discount/subsidy was applied
-    if (items.length === 1 && moneyRes.amount != null && moneyRes.amount > 0 && items[0].amount > moneyRes.amount) {
-      items[0].amount = moneyRes.amount;
-    }
-
-    // Fallback: If receipt items list is empty, generate single line item using merchant / description
-    if (items.length === 0 && moneyRes.amount != null && moneyRes.amount > 0) {
-      const fallbackItemName = rawMerchant || (typeof parsedOcr.description === 'string' && parsedOcr.description.trim() ? parsedOcr.description.trim() : '');
-      if (fallbackItemName) {
-        items.push({ name: fallbackItemName, amount: moneyRes.amount });
-      }
-    }
-
-    const currencyAmbiguous = Boolean(parsedOcr.currencyAmbiguous) || moneyRes.currencyAmbiguous;
-    const habitMatch = matchHabitMemory(rawMerchant || (items.length > 0 ? items[0].name : ''));
-    const catRes = inferCategoryFromMerchant(
-      rawMerchant || (items.length > 0 ? items[0].name : ''),
-      typeof parsedOcr.category === 'string' ? parsedOcr.category : undefined
-    );
-    const hasExplicitCategory = typeof parsedOcr.category === 'string' && catRes.category !== 'Other';
-    const catConfidence = typeof parsedOcr.categoryConfidence === 'number'
-      ? parsedOcr.categoryConfidence
-      : (hasExplicitCategory ? 0.95 : 0.5);
-    const dateStr = sanitizeDate(parsedOcr.date) || today;
-
-    let effectiveDescription = rawMerchant || (catRes.category && catRes.category !== 'Other' ? catRes.category : '');
-    let effectiveCategory = catRes.category;
-    let habitNotice = '';
-
-    // If Gemini Vision did not classify category or returned Other, but we have an extracted merchant or item,
-    // trigger Gemini AI text classification to intelligently reason over the merchant name
-    if (
-      (catRes.isUncertain || effectiveCategory === 'Other') &&
-      effectiveDescription &&
-      !habitMatch
-    ) {
-      try {
-        const aiCategory = await classifyMerchantWithGemini(effectiveDescription);
-        if (aiCategory && aiCategory !== 'Other') {
-          effectiveCategory = aiCategory;
-          catRes.category = aiCategory;
-          catRes.isUncertain = false;
-        }
-      } catch (err) {
-        console.warn('[Shortcut Ingest] Gemini classification fallback in Mode B skipped:', err);
-      }
-    }
-
-    if (habitMatch) {
-      effectiveCategory = habitMatch.resolvedCategory;
-      if (habitMatch.isAlias) {
-        effectiveDescription = habitMatch.resolvedDescription;
-        habitNotice = `[习惯识别: 转给 ${habitMatch.matchedPattern} ➔ ${habitMatch.resolvedDescription}]`;
-      }
-      if (items.length === 0 && habitMatch.matchedItem.defaultItemName && moneyRes.amount != null && moneyRes.amount > 0) {
-        items.push({ name: habitMatch.matchedItem.defaultItemName, amount: moneyRes.amount });
-      }
-    }
-
-    const missingFields: Array<'amount' | 'description' | 'currency' | 'category'> = [];
-    const uncertainFields: Array<'amount' | 'description' | 'currency' | 'category'> = [];
-
-    if (moneyRes.amount === null || moneyRes.amount <= 0) {
-      missingFields.push('amount');
-    }
-    if (!effectiveDescription) {
-      missingFields.push('description');
-    }
-    if (currencyAmbiguous) {
-      uncertainFields.push('currency');
-    }
-    if ((catRes.isUncertain && !habitMatch) || (typeof parsedOcr.categoryConfidence === 'number' && parsedOcr.categoryConfidence < 0.65)) {
-      uncertainFields.push('category');
-    }
-
-    const fingerprint = computeShortcutDraftFingerprint({
-      date: dateStr,
-      currency: moneyRes.currency,
-      amount: moneyRes.amount,
-      merchantOrDescription: effectiveDescription || 'screenshot_draft',
-    });
-
-    const proposedActionLabel = moneyRes.amount != null && moneyRes.amount > 0
-      ? `Save ${moneyRes.currency} ${moneyRes.amount.toFixed(2)} (${effectiveCategory})`
-      : 'Review and Confirm Draft';
-
-    // The client runs the same thinking-based receipt review as the camera flow
-    // when the user opens this draft; OCR results alone are not an AI assessment.
-    const assistantAdvice = '';
-
-    const saved = saveShortcutQuickDraft({
-      ownerEmail: userEmail || undefined,
-      source: 'back_tap_screenshot',
-      amount: moneyRes.amount,
-      currency: moneyRes.currency,
-      currencyAmbiguous,
-      candidateCurrencies: moneyRes.candidateCurrencies,
-      type: 'Expense',
-      category: effectiveCategory,
-      description: effectiveDescription,
-      merchant: effectiveDescription || rawMerchant,
-      date: dateStr,
-      discountAmount,
-      dealsDescription,
-      billAmount,
-      items: items.length > 0 ? items : undefined,
-      ocrSummary,
-      assistantAdvice,
-      proposedActionLabel,
-      notes: [
-        '快捷指令截图草稿（待核对确认）',
-        habitNotice,
-        assistantAdvice,
-        discountAmount && discountAmount > 0
-          ? `[优惠抵扣: -${moneyRes.currency} ${discountAmount.toFixed(2)}${dealsDescription ? ` (${dealsDescription})` : ''}]`
-          : '',
-        ocrSummary,
-      ]
-        .filter(Boolean)
-        .join(' · '),
-      missingFields,
-      uncertainFields,
-      fingerprint,
-      aiDisclosure:
-        '截图仅通过服务端加密发送至 Google Gemini Vision API 进行一次性字段提取，不会写入任何服务器日志或公开 URL。',
-    });
-
-    const canAutoRecord =
-      requestedAutoRecord &&
-      moneyRes.amount !== null &&
-      moneyRes.amount > 0 &&
-      Boolean(effectiveDescription) &&
-      missingFields.length === 0;
-
-    const isExplicitSync = req.nextUrl.searchParams.get('sync') === 'true';
-
-    let ledgerRes: {
-      autoRecorded: boolean;
-      duplicateSkipped: boolean;
-      transactionId: string | null;
-      sheetName: string | null;
-      notificationTitle: string;
-      notificationText: string;
-    };
-
-    if (canAutoRecord && !isExplicitSync) {
-      const label = effectiveDescription || saved.category || '消费记录';
-      const rawCurr = (saved.currency || 'MYR').toUpperCase().trim();
+    if (!requestedAutoRecord) {
+      after(async () => {
+        await healPendingShortcutRecords(userEmail).catch(() => {});
+      });
+      const previewLabel = effectiveDescription || effectiveCategory || '消费记录';
+      const rawCurr = (moneyRes.currency || 'MYR').toUpperCase().trim();
       const curr = rawCurr === 'RM' || !rawCurr ? 'MYR' : rawCurr;
-      const targetDate = String(saved.date || '').trim().slice(0, 10);
+      return NextResponse.json(
+        {
+          success: true,
+          mode: 'screenshot',
+          autoRecorded: false,
+          duplicateSkipped: false,
+          transactionId: null,
+          amount: moneyRes.amount,
+          currency: moneyRes.currency,
+          merchant: effectiveDescription,
+          category: effectiveCategory,
+          date: dateStr,
+          modelUsed,
+          healed: ocrHealed,
+          ocrErrorKind,
+          notificationTitle: hasValidAmount ? `ℹ️ 已识别 ${curr} ${moneyRes.amount!.toFixed(2)}` : '⚠️ 未识别到消费金额',
+          notificationText: hasValidAmount
+            ? `ℹ️ 已识别 [${dateStr}]：${curr} ${moneyRes.amount!.toFixed(2)} · ${previewLabel}（autoRecord=false 未写入）`
+            : `⚠️ ${ocrFallbackNotice || '画面未检测到有效消费金额'}`,
+          draftId: null,
+          redirectPath: '/',
+          openUrl: `${origin}/`,
+          pwaUrl: `${origin}/`,
+          requiresUserConfirmation: false,
+        },
+        {
+          status: 200,
+          headers: { 'Cache-Control': 'no-store' },
+        }
+      );
+    }
 
-      ledgerRes = {
-        autoRecorded: true,
-        duplicateSkipped: false,
-        transactionId: saved.draftId,
-        sheetName: targetDate.slice(0, 7),
-        notificationTitle: `✅ 已记账 ${curr} ${saved.amount!.toFixed(2)} (${targetDate})`,
-        notificationText: `✅ 已记账 [${targetDate}]：${curr} ${saved.amount!.toFixed(2)} · ${label} (${saved.category})`,
-      };
+    if (hasValidAmount) {
+      // Verified synchronous ledger recording with automatic 3x retry + self-heal queue fallback
+      const ledgerRes = await recordShortcutDraftToLedger(ephemeralDraft, {
+        fallbackNotice: ocrFallbackNotice,
+        autoRecord: true,
+        userEmail,
+        enqueueOnFailure: true,
+      });
 
-      // Optimistic response: return immediately to iPhone, write to Google Sheets in background
+      // Background self-heal sweep: retries any previously queued records (and just-queued ones)
       after(async () => {
         try {
-          await recordShortcutDraftToLedger(saved, {
-            fallbackNotice: ocrFallbackNotice,
-            autoRecord: true,
-            userEmail,
-          });
+          if (ledgerRes.selfHealedQueued) {
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+          }
+          await healPendingShortcutRecords(userEmail);
         } catch (err) {
-          console.error('[Shortcut Ingest] Background Google Sheets write error:', err);
+          console.error('[Shortcut Ingest] Background heal sweep error:', err);
         }
       });
-    } else {
-      ledgerRes = await recordShortcutDraftToLedger(saved, {
-        fallbackNotice: ocrFallbackNotice,
-        autoRecord: canAutoRecord,
-        userEmail,
-      });
+
+      return NextResponse.json(
+        {
+          success: true,
+          mode: 'screenshot',
+          autoRecorded: ledgerRes.autoRecorded,
+          selfHealedQueued: Boolean(ledgerRes.selfHealedQueued),
+          duplicateSkipped: ledgerRes.duplicateSkipped,
+          transactionId: ledgerRes.transactionId,
+          amount: ephemeralDraft.amount,
+          currency: ephemeralDraft.currency,
+          merchant: effectiveDescription,
+          category: ephemeralDraft.category,
+          date: ephemeralDraft.date,
+          modelUsed,
+          healed: ocrHealed || Boolean(ledgerRes.selfHealedQueued),
+          notificationTitle: ledgerRes.notificationTitle,
+          notificationText: ledgerRes.notificationText,
+          draftId: null,
+          redirectPath: '/',
+          openUrl: `${origin}/`,
+          pwaUrl: `${origin}/`,
+          missingFields: [],
+          uncertainFields: ephemeralDraft.uncertainFields,
+          suspectedDuplicateOfDraftId: ephemeralDraft.suspectedDuplicateOfDraftId || null,
+          requiresUserConfirmation: false,
+        },
+        {
+          status: 200,
+          headers: { 'Cache-Control': 'no-store' },
+        }
+      );
     }
+
+    // Amount was not extracted -> distinguish transient AI/network failures vs empty non-receipt screens
+    if (ocrErrorKind === 'transient') {
+      after(async () => {
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 1200));
+          const freshKeys = getLoadBalancedGeminiKeys();
+          let healedOcr = await runShortcutGeminiOcrWithFastFail({
+            geminiKeys: freshKeys.length > 0 ? freshKeys : geminiKeys,
+            onKeyFailure: reportGeminiKeyFailure,
+            preferredModel: 'gemini-3.5-flash',
+            prompt,
+            mimeType,
+            cleanBase64,
+            timeoutMs: 14000,
+            totalTimeoutMs: 36000,
+          });
+
+          if (!healedOcr.parsedOcr || Object.keys(healedOcr.parsedOcr).length === 0) {
+            const concisePrompt = `Extract receipt/payment details as strict JSON: {"amount": number, "currency": "MYR", "merchant": string, "category": "Food & Dining"|"Transport"|"Shopping"|"Housing & Bills"|"Entertainment"|"Health"|"Other", "date": "${today}", "ocrSummary": string}.`;
+            healedOcr = await runShortcutGeminiOcrWithFastFail({
+              geminiKeys: freshKeys.length > 0 ? freshKeys : geminiKeys,
+              onKeyFailure: reportGeminiKeyFailure,
+              preferredModel: 'gemini-2.5-flash',
+              prompt: concisePrompt,
+              mimeType,
+              cleanBase64,
+              timeoutMs: 10000,
+              totalTimeoutMs: 18000,
+            });
+          }
+
+          const retryBuilt = await buildScreenshotDraftPayload({
+            parsedOcr: healedOcr.parsedOcr,
+            ocrFallbackNotice: healedOcr.ocrFallbackNotice,
+            today,
+            userEmail,
+            startedAtMs: Date.now(),
+          });
+
+          if (retryBuilt.moneyRes.amount !== null && retryBuilt.moneyRes.amount > 0) {
+            await recordShortcutDraftToLedger(retryBuilt.ephemeralDraft, {
+              fallbackNotice: healedOcr.ocrFallbackNotice,
+              autoRecord: true,
+              userEmail,
+              enqueueOnFailure: true,
+            });
+          }
+
+          await healPendingShortcutRecords(userEmail);
+        } catch (err) {
+          console.error('[Shortcut Ingest] Background OCR self-heal failed:', err);
+        }
+      });
+
+      return NextResponse.json(
+        {
+          success: true,
+          mode: 'screenshot',
+          autoRecorded: false,
+          selfHealingQueued: true,
+          duplicateSkipped: false,
+          transactionId: null,
+          amount: null,
+          currency: moneyRes.currency,
+          merchant: effectiveDescription || '',
+          category: effectiveCategory,
+          date: dateStr,
+          modelUsed,
+          healed: false,
+          ocrErrorKind,
+          notificationTitle: '🔄 已转入后台自愈记账',
+          notificationText: '🔄 网络或 AI 服务暂时繁忙，已在后台自动重试本次截图入账，稍后自动完成',
+          draftId: null,
+          redirectPath: '/',
+          openUrl: `${origin}/`,
+          pwaUrl: `${origin}/`,
+          missingFields: built.missingFields,
+          uncertainFields: ephemeralDraft.uncertainFields,
+          requiresUserConfirmation: false,
+        },
+        {
+          status: 200,
+          headers: { 'Cache-Control': 'no-store' },
+        }
+      );
+    }
+
+    after(async () => {
+      await healPendingShortcutRecords(userEmail).catch(() => {});
+    });
 
     return NextResponse.json(
       {
         success: true,
         mode: 'screenshot',
-        autoRecorded: ledgerRes.autoRecorded,
-        duplicateSkipped: ledgerRes.duplicateSkipped,
-        transactionId: ledgerRes.transactionId,
-        amount: saved.amount,
-        currency: saved.currency,
-        merchant: effectiveDescription,
-        category: saved.category,
-        date: saved.date,
-        notificationTitle: ledgerRes.notificationTitle,
-        notificationText: ledgerRes.notificationText,
-        draftId: saved.draftId,
-        redirectPath: ledgerRes.autoRecorded ? '/' : `/?quickDraft=${encodeURIComponent(saved.draftId)}`,
-        openUrl: ledgerRes.autoRecorded ? `${origin}/` : `${origin}/?quickDraft=${encodeURIComponent(saved.draftId)}`,
+        autoRecorded: false,
+        selfHealingQueued: false,
+        duplicateSkipped: false,
+        transactionId: null,
+        amount: null,
+        currency: moneyRes.currency,
+        merchant: effectiveDescription || '',
+        category: effectiveCategory,
+        date: dateStr,
+        modelUsed,
+        healed: false,
+        ocrErrorKind: 'empty_image',
+        notificationTitle: '⚠️ 未识别到消费金额',
+        notificationText: '⚠️ 画面未检测到有效消费金额，本次未记账（请停留在付款成功页后轻点背面重试）',
+        draftId: null,
+        redirectPath: '/',
+        openUrl: `${origin}/`,
         pwaUrl: `${origin}/`,
-        missingFields: saved.missingFields,
-        uncertainFields: saved.uncertainFields,
-        assistantAdvice: saved.assistantAdvice,
-        proposedActionLabel: saved.proposedActionLabel,
-        suspectedDuplicateOfDraftId: saved.suspectedDuplicateOfDraftId || null,
-        requiresUserConfirmation: !ledgerRes.autoRecorded,
+        missingFields: built.missingFields,
+        uncertainFields: ephemeralDraft.uncertainFields,
+        requiresUserConfirmation: false,
       },
       {
         status: 200,
@@ -809,24 +1032,42 @@ export async function GET(req: NextRequest) {
 
     const { session } = await getValidGoogleSession(req);
     const callerEmail = (session?.email || '').trim().toLowerCase();
+
+    const ackHealId = (searchParams.get('ackHeal') || '').trim();
+    if (ackHealId) {
+      const removed = await acknowledgeShortcutAutoHeal(ackHealId, true, callerEmail || undefined);
+      return NextResponse.json(
+        { success: true, removed },
+        { status: 200, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
     if (!callerEmail) {
       return NextResponse.json(
-        { success: false, draft: null, recentAutoRecorded: [] },
+        { success: false, draft: null, recentAutoRecorded: [], pendingAutoHealRecords: [] },
         { status: 200, headers: { 'Cache-Control': 'no-store' } }
       );
     }
 
     void setActiveShortcutOwner(callerEmail, req.headers.get('user-agent')).catch(() => {});
 
+    // Server-side self-healing replay whenever client polls or opens app
+    const healResult = await healPendingShortcutRecords(callerEmail);
+
     const id = (searchParams.get('id') || 'latest').trim();
-    const draft = claimShortcutDraft(id, Date.now(), false, callerEmail);
+    const rawDraft = claimShortcutDraft(id, Date.now(), false, callerEmail);
+    // Double Tap screenshots never pop manual draft forms
+    const draft = rawDraft && rawDraft.source !== 'back_tap_screenshot' ? rawDraft : null;
     const recentAutoRecorded = await getRecentShortcutAutoRecorded(callerEmail);
+    const pendingAutoHealRecords = await getPendingShortcutAutoHeals(callerEmail, false);
 
     return NextResponse.json(
       {
-        success: Boolean(draft) || recentAutoRecorded.length > 0,
+        success: Boolean(draft) || recentAutoRecorded.length > 0 || pendingAutoHealRecords.length > 0,
         draft: draft || null,
         recentAutoRecorded,
+        pendingAutoHealRecords,
+        healedCount: healResult.healedCount,
       },
       {
         status: 200,
@@ -835,7 +1076,7 @@ export async function GET(req: NextRequest) {
     );
   } catch {
     return NextResponse.json(
-      { success: false, draft: null, recentAutoRecorded: [] },
+      { success: false, draft: null, recentAutoRecorded: [], pendingAutoHealRecords: [] },
       { status: 200, headers: { 'Cache-Control': 'no-store' } }
     );
   }

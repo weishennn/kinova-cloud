@@ -1892,10 +1892,10 @@ export default function SettingsPage() {
             </div>
             <div className="space-y-1">
               <div className="font-bold text-slate-950 dark:text-white text-sm">
-                Kinova 快速记账（背面轻点截图 &amp; Apple Pay 交易触发）
+                Kinova 快速记账（背面轻点截图全自动自愈 &amp; Apple Pay 交易触发）
               </div>
               <p className="text-xs text-slate-600 dark:text-zinc-400 leading-relaxed">
-                所有通过快捷指令或 Apple Pay 触发的交易都只会生成<strong>待确认草稿</strong>（使用一次性不透明令牌 <code className="px-1 py-0.5 rounded bg-slate-100 dark:bg-zinc-800">/?quickDraft=drf_...</code>），绝不后台自动入账，也绝不把截图、金额、商家或密钥放入 URL 或普通日志。
+                背面轻点截图会由服务端 <strong>直接识别并自动写入你的账本</strong>（无任何草稿单弹窗）。若遇到 AI 模型波动、超时或云端写入拥堵，系统会自动切换多模型/多 Key 与后台自愈补录队列，无需人工二次确认即可完成记账；且绝不把截图、金额、商家或密钥放入普通日志。
               </p>
             </div>
           </div>
@@ -1908,7 +1908,7 @@ export default function SettingsPage() {
             </div>
             <p className="leading-relaxed">
               • <strong>服务端密钥保护</strong>：请在部署环境变量设置 <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">KINOVA_SHORTCUT_TOKEN</code>（或复用 <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">KINOVA_PROXY_TOKEN</code>），在 iPhone 快捷指令的请求头传入 <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">x-shortcut-token</code>，切勿放入 URL 参数或前端代码。<br />
-              • <strong>截图发送去向</strong>：当使用背面轻点截图识别时，截图通过 HTTPS 仅发送至你的 Kinova 服务端 <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">/api/shortcuts/ingest</code>，再由服务端使用 <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">GEMINI_API_KEY</code> 调用 <strong>Google Gemini Vision API (gemini-2.5-flash)</strong> 解析商家、金额、币种、日期和分类。服务端不落盘保存截图，也不将任何财务内容写入日志。
+              • <strong>截图发送去向</strong>：当使用背面轻点截图识别时，截图通过 HTTPS 仅发送至你的 Kinova 服务端 <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">/api/shortcuts/ingest</code>，再由服务端使用 <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">GEMINI_API_KEY</code> 调用 <strong>Google Gemini Vision API（多模型自愈容错：gemini-2.5-flash / gemini-3.5-flash）</strong> 解析商家、金额、币种、日期和分类。服务端不落盘保存截图，也不将任何财务内容写入日志。
             </p>
           </div>
 
@@ -1942,6 +1942,11 @@ export default function SettingsPage() {
                   <span>打开快捷指令 App</span>
                 </a>
               </div>
+            </div>
+
+            {/* Important: iCloud Shortcut requires pasting personal ?user= URL */}
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
+              ⚠️ <strong>关键必做一步（否则会报「未绑定账号」失败）：</strong>公开分享的 iCloud 快捷指令模板默认<strong>不含你的邮箱</strong>。安装「Kinova Automation」后，请点下方 <strong>「📋 复制专属 API 地址」</strong>，并在 iPhone 快捷指令 App 内将 <strong>「获取 URL 内容」</strong> 的网址替换为这个带 <code className="px-1 py-0.5 rounded bg-amber-500/20">?user=你的邮箱</code> 的专属地址（或添加请求头 <code className="px-1 py-0.5 rounded bg-amber-500/20">x-shortcut-email</code>）。
             </div>
 
             {/* Fast Copy Helpers */}

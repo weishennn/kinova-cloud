@@ -693,20 +693,21 @@ export function RecordPaymentModal() {
         if (!currentEmail || currentEmail !== activeEmail) return;
 
         const syncedStorageKey = `kinova_synced_shortcut_tx_ids_${activeEmail}`;
+        let syncedIds: string[] = [];
+        try {
+          const rawSynced = localStorage.getItem(syncedStorageKey);
+          if (rawSynced) {
+            const parsedSynced = JSON.parse(rawSynced);
+            if (Array.isArray(parsedSynced)) syncedIds = parsedSynced.map(String);
+          }
+        } catch {
+          // ignore
+        }
+        const syncedSet = new Set(syncedIds);
+        let syncedSetDirty = false;
 
         // Sync any background auto-recorded Double Tap transactions belonging strictly to activeEmail
         if (Array.isArray(json?.recentAutoRecorded) && json.recentAutoRecorded.length > 0) {
-          let syncedIds: string[] = [];
-          try {
-            const rawSynced = localStorage.getItem(syncedStorageKey);
-            if (rawSynced) {
-              const parsedSynced = JSON.parse(rawSynced);
-              if (Array.isArray(parsedSynced)) syncedIds = parsedSynced.map(String);
-            }
-          } catch {
-            // ignore
-          }
-          const syncedSet = new Set(syncedIds);
           const newlyAdded: Array<{ sheetName: string; rowData: Record<string, unknown> }> = [];
 
           for (const item of json.recentAutoRecorded) {
@@ -717,6 +718,7 @@ export function RecordPaymentModal() {
             const rowData = item?.rowData as Record<string, unknown> | undefined;
             if (!txId || !sheetName || !rowData || syncedSet.has(txId)) continue;
             syncedSet.add(txId);
+            syncedSetDirty = true;
             const optimisticRow = sheetsData.optimisticAddRow(sheetName, rowData);
             applyOptimisticAddToQueryCache(queryClient, sheetName, optimisticRow);
             newlyAdded.push({ sheetName, rowData });
@@ -728,6 +730,7 @@ export function RecordPaymentModal() {
                 syncedStorageKey,
                 JSON.stringify(Array.from(syncedSet).slice(-50))
               );
+              syncedSetDirty = false;
             } catch {
               // ignore
             }
@@ -752,9 +755,72 @@ export function RecordPaymentModal() {
           }
         }
 
+        // Client-side self-healing replay: if server deferred a queued record, commit it with active session
+        if (Array.isArray(json?.pendingAutoHealRecords) && json.pendingAutoHealRecords.length > 0) {
+          for (const healItem of json.pendingAutoHealRecords) {
+            const itemOwner = String(healItem?.ownerEmail || '').trim().toLowerCase();
+            if (!itemOwner || itemOwner !== activeEmail) continue;
+            const healId = String(healItem?.healId || '').trim();
+            const sheetName = String(healItem?.sheetName || '').trim();
+            const rowData = healItem?.rowData as Record<string, unknown> | undefined;
+            const txId = String(rowData?.Id || rowData?.id || healItem?.mutationId || healId).trim();
+            if (!healId || !sheetName || !rowData) continue;
+
+            if (syncedSet.has(txId)) {
+              void fetch(`/api/shortcuts/ingest?ackHeal=${encodeURIComponent(healId)}`, {
+                cache: 'no-store',
+              }).catch(() => {});
+              continue;
+            }
+
+            syncedSet.add(txId);
+            syncedSetDirty = true;
+            try {
+              localStorage.setItem(
+                syncedStorageKey,
+                JSON.stringify(Array.from(syncedSet).slice(-50))
+              );
+              syncedSetDirty = false;
+            } catch {
+              // ignore
+            }
+
+            try {
+              await addUnifiedRow(sheetName, rowData);
+              applyOptimisticAddToQueryCache(queryClient, sheetName, rowData);
+              void queryClient.invalidateQueries({ queryKey: ['sheet'] });
+              void queryClient.invalidateQueries({ queryKey: ['months'] });
+              void fetch(`/api/shortcuts/ingest?ackHeal=${encodeURIComponent(healId)}`, {
+                cache: 'no-store',
+              }).catch(() => {});
+              const desc = String(rowData.Description || '快捷指令消费');
+              const amt = Number(rowData.Amount || 0).toFixed(2);
+              const curr = String(rowData.Currency || 'MYR');
+              toast.success(`✅ 自动自愈入账：${curr} ${amt} · ${desc}`);
+            } catch {
+              // Allow future retry if browser write failed offline
+              syncedSet.delete(txId);
+              syncedSetDirty = true;
+            }
+          }
+        }
+
+        if (syncedSetDirty) {
+          try {
+            localStorage.setItem(
+              syncedStorageKey,
+              JSON.stringify(Array.from(syncedSet).slice(-50))
+            );
+          } catch {
+            // ignore
+          }
+        }
+
         if (!json?.success || !json?.draft) return;
 
         const draft = json.draft as ShortcutQuickDraft;
+        // Never pop manual draft modals for Double Tap screenshot auto-record
+        if (draft.source === 'back_tap_screenshot') return;
         const draftOwner = String(draft.ownerEmail || '').trim().toLowerCase();
         if (draftOwner && draftOwner !== activeEmail) return;
 

@@ -198,6 +198,18 @@ export interface ShortcutAutoRecordedEntry {
   rowData: Record<string, unknown>;
 }
 
+export interface AutoHealShortcutRecord {
+  healId: string;
+  ownerEmail: string;
+  sheetName: string;
+  mutationId: string;
+  rowData: Record<string, unknown>;
+  createdAt: string;
+  attempts: number;
+  lastAttemptAt?: string;
+  lastError?: string;
+}
+
 declare global {
   // eslint-disable-next-line no-var
   var __kinovaShortcutDraftMap: Map<string, ShortcutQuickDraft> | undefined;
@@ -205,6 +217,10 @@ declare global {
   var __kinovaAckedShortcutDraftSet: Set<string> | undefined;
   // eslint-disable-next-line no-var
   var __kinovaRecentAutoRecordedMap: Map<string, ShortcutAutoRecordedEntry> | undefined;
+  // eslint-disable-next-line no-var
+  var __kinovaShortcutAutoHealMap: Map<string, AutoHealShortcutRecord> | undefined;
+  // eslint-disable-next-line no-var
+  var __kinovaAckedAutoHealSet: Set<string> | undefined;
 }
 
 function getDraftStore(): Map<string, ShortcutQuickDraft> {
@@ -226,6 +242,20 @@ function getRecentAutoRecordedStore(): Map<string, ShortcutAutoRecordedEntry> {
     globalThis.__kinovaRecentAutoRecordedMap = new Map<string, ShortcutAutoRecordedEntry>();
   }
   return globalThis.__kinovaRecentAutoRecordedMap;
+}
+
+function getAutoHealStore(): Map<string, AutoHealShortcutRecord> {
+  if (!globalThis.__kinovaShortcutAutoHealMap) {
+    globalThis.__kinovaShortcutAutoHealMap = new Map<string, AutoHealShortcutRecord>();
+  }
+  return globalThis.__kinovaShortcutAutoHealMap;
+}
+
+function getAckedAutoHealSet(): Set<string> {
+  if (!globalThis.__kinovaAckedAutoHealSet) {
+    globalThis.__kinovaAckedAutoHealSet = new Set<string>();
+  }
+  return globalThis.__kinovaAckedAutoHealSet;
 }
 
 export function isShortcutDraftAcknowledged(draftId?: string | null): boolean {
@@ -831,10 +861,59 @@ export function inspectShortcutUrlSafety(urlStr: string): {
 }
 
 /**
- * Executes Gemini Vision OCR with strict retry discipline:
- * - Stops immediately on timeout or network error (never waits across multiple models).
- * - Only tries at most 1 fallback model (max 2 attempts total) when the primary model explicitly returns 404 or unsupported model.
- * - Fails fast on 429, 503, and invalid JSON responses, returning a human-readable fallback notice so the user can manually complete the draft.
+ * Selects the correct thinkingConfig for the target Gemini model family.
+ * - Gemini 3.x and flash-latest models hang/timeout when given `thinkingBudget: 0`; they require `thinkingLevel: 'low'`.
+ * - Gemini 2.5 Flash disables thinking cleanly via `thinkingBudget: 0` (~2s latency).
+ */
+export function getThinkingConfigForShortcutModel(model: string): Record<string, unknown> {
+  const normalized = String(model || '').toLowerCase();
+  if (/gemini-(?:3|4)|flash-latest/.test(normalized)) {
+    return { thinkingLevel: 'low' };
+  }
+  return { thinkingBudget: 0 };
+}
+
+/**
+ * Parses Gemini OCR output robustly, tolerating markdown fences and surrounding commentary.
+ */
+export function parseShortcutOcrJsonResponse(rawText: string): Record<string, unknown> | null {
+  const cleaned = String(rawText || '')
+    .replace(/```(?:json)?\s*([\s\S]*?)\s*```/i, '$1')
+    .trim();
+  if (!cleaned) return null;
+
+  const tryParse = (candidate: string): Record<string, unknown> | null => {
+    try {
+      const rawParsed = JSON.parse(candidate);
+      const unwrapped = Array.isArray(rawParsed) ? rawParsed[0] : rawParsed;
+      if (unwrapped && typeof unwrapped === 'object' && !Array.isArray(unwrapped)) {
+        return unwrapped as Record<string, unknown>;
+      }
+    } catch {
+      // fall through
+    }
+    return null;
+  };
+
+  const direct = tryParse(cleaned);
+  if (direct) return direct;
+
+  const objStart = cleaned.indexOf('{');
+  const objEnd = cleaned.lastIndexOf('}');
+  if (objStart >= 0 && objEnd > objStart) {
+    const extracted = tryParse(cleaned.slice(objStart, objEnd + 1));
+    if (extracted) return extracted;
+  }
+
+  return null;
+}
+
+/**
+ * Executes Gemini Vision OCR with bounded self-healing failover:
+ * - Uses model-appropriate thinkingConfig (`thinkingBudget: 0` for 2.5, `thinkingLevel: 'low'` for 3.x)
+ *   so Gemini 3.x models never stall on incompatible thinkingBudget=0.
+ * - Automatically self-heals across healthy API keys and fast fallback models on timeout, 429, 5xx, 404, or invalid JSON
+ *   within a bounded total deadline (`totalTimeoutMs`).
  * - Never logs screenshots, transaction details, or API keys.
  */
 export async function runShortcutGeminiOcrWithFastFail(options: {
@@ -846,15 +925,21 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
   mimeType: string;
   cleanBase64: string;
   timeoutMs?: number;
+  totalTimeoutMs?: number;
   fetchImpl?: typeof fetch;
 }): Promise<{
   parsedOcr: Record<string, unknown>;
   ocrFallbackNotice: string;
+  ocrErrorKind: 'none' | 'transient' | 'empty_image';
   attempts: number;
   modelUsed: string | null;
+  healed: boolean;
 }> {
   const fetchFn = options.fetchImpl || fetch;
-  const timeoutMs = options.timeoutMs ?? 30000;
+  const perAttemptTimeoutMs = options.timeoutMs ?? 9500;
+  const totalTimeoutMs = options.totalTimeoutMs ?? Math.max(perAttemptTimeoutMs * 2 + 4000, 24000);
+  const deadline = Date.now() + totalTimeoutMs;
+
   const splitKeys = (raw?: string) =>
     raw
       ? String(raw)
@@ -868,39 +953,58 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
       : splitKeys(options.geminiKey);
   const effectiveKeys = candidateKeys.length > 0 ? candidateKeys : [''];
 
-  const rawPreferred = (options.preferredModel || 'gemini-3.5-flash').trim();
-  const preferred = rawPreferred === 'gemini-2.5-flash' ? 'gemini-3.5-flash' : rawPreferred;
+  const preferred = (options.preferredModel || 'gemini-2.5-flash').trim();
   const candidateModels = [
     preferred,
     'gemini-3.5-flash',
-    'gemini-3.6-flash',
-    'gemini-flash-latest',
     'gemini-2.5-flash',
+    'gemini-flash-latest',
+    'gemini-3.6-flash',
   ]
     .filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
 
   let parsedOcr: Record<string, unknown> = {};
   let ocrFallbackNotice = '';
+  let ocrErrorKind: 'none' | 'transient' | 'empty_image' = 'none';
   let attempts = 0;
   let modelUsed: string | null = null;
 
   for (let idx = 0; idx < candidateModels.length; idx += 1) {
     const model = candidateModels[idx];
+    const remainingBeforeModel = deadline - Date.now();
+    if (remainingBeforeModel <= 300) {
+      if (!ocrFallbackNotice) {
+        ocrFallbackNotice = '云端 AI 识别超时，已转入后台自愈重试';
+        ocrErrorKind = 'transient';
+      }
+      break;
+    }
+
     let shouldTryNextModel = false;
 
     for (let keyIdx = 0; keyIdx < effectiveKeys.length; keyIdx += 1) {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 300) {
+        if (!ocrFallbackNotice) {
+          ocrFallbackNotice = '云端 AI 识别超时，已转入后台自愈重试';
+          ocrErrorKind = 'transient';
+        }
+        break;
+      }
+
       const activeKey = effectiveKeys[keyIdx];
       attempts += 1;
+      const attemptTimeout = Math.max(250, Math.min(perAttemptTimeoutMs, remainingMs));
+
       try {
         const buildOcrBody = (omitThinking = false) => {
           const generationConfig: Record<string, unknown> = {
             responseMimeType: 'application/json',
             temperature: 0.1,
-            maxOutputTokens: 768,
+            maxOutputTokens: 2048,
           };
           if (!omitThinking) {
-            // Strictly disable thinking tokens to ensure sub-5s response time for iOS Shortcuts OCR
-            generationConfig.thinkingConfig = { thinkingBudget: 0 };
+            generationConfig.thinkingConfig = getThinkingConfigForShortcutModel(model);
           }
           return {
             contents: [
@@ -925,16 +1029,17 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
               'x-goog-api-key': activeKey,
             },
             body: JSON.stringify(buildOcrBody()),
-            signal: AbortSignal.timeout(timeoutMs),
+            signal: AbortSignal.timeout(attemptTimeout),
           }
         );
 
-        // Fallback retry if model does not accept thinkingConfig
+        // Self-heal if model rejects thinkingConfig
         if (geminiRes.status === 400) {
           try {
             const errClone = await geminiRes.clone().json();
             const errMsg = String(errClone?.error?.message || '').toLowerCase();
             if (errMsg.includes('thinkingconfig') || errMsg.includes('thinkingbudget') || errMsg.includes('thinkinglevel')) {
+              const retryRemaining = Math.max(250, Math.min(perAttemptTimeoutMs, deadline - Date.now()));
               geminiRes = await fetchFn(
                 `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
                 {
@@ -944,7 +1049,7 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
                     'x-goog-api-key': activeKey,
                   },
                   body: JSON.stringify(buildOcrBody(true)),
-                  signal: AbortSignal.timeout(timeoutMs),
+                  signal: AbortSignal.timeout(retryRemaining),
                 }
               );
             }
@@ -953,10 +1058,11 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
           }
         }
 
-        // Transient 503 / 500 handling: 1 quick retry with backoff if server is temporarily overloaded
-        if ((geminiRes.status === 503 || geminiRes.status === 500) && !options.fetchImpl && timeoutMs > 5000) {
-          await new Promise((resolve) => setTimeout(resolve, 800));
+        // Transient 503 / 500 quick retry if time budget allows
+        if ((geminiRes.status === 503 || geminiRes.status === 500) && !options.fetchImpl && deadline - Date.now() > 3500) {
+          await new Promise((resolve) => setTimeout(resolve, 450));
           try {
+            const retryRemaining = Math.max(500, Math.min(perAttemptTimeoutMs, deadline - Date.now()));
             geminiRes = await fetchFn(
               `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
               {
@@ -966,7 +1072,7 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
                   'x-goog-api-key': activeKey,
                 },
                 body: JSON.stringify(buildOcrBody()),
-                signal: AbortSignal.timeout(timeoutMs),
+                signal: AbortSignal.timeout(retryRemaining),
               }
             );
           } catch {
@@ -980,34 +1086,39 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
           const rawText = Array.isArray(parts)
             ? parts.filter((p) => p && typeof p.text === 'string' && !p.thought).map((p) => p.text).join('')
             : (typeof parts?.[0]?.text === 'string' ? parts[0].text : '');
-          const cleaned = String(rawText).replace(/```(?:json)?\s*([\s\S]*?)\s*```/i, '$1').trim();
-          if (!cleaned) {
-            ocrFallbackNotice = '云端 AI 未返回有效识别内容，请直接手动补充金额与商户';
+          const parsedObj = parseShortcutOcrJsonResponse(rawText);
+
+          if (parsedObj) {
+            parsedOcr = parsedObj;
+            modelUsed = model;
+            ocrFallbackNotice = '';
+            ocrErrorKind = 'none';
             break;
           }
-          try {
-            const rawParsed = JSON.parse(cleaned);
-            const unwrapped = Array.isArray(rawParsed) ? rawParsed[0] : rawParsed;
-            if (unwrapped && typeof unwrapped === 'object') {
-              parsedOcr = unwrapped as Record<string, unknown>;
-              modelUsed = model;
-              ocrFallbackNotice = '';
-            } else {
-              ocrFallbackNotice = '云端 AI 返回格式无效，请直接手动补充金额与商户';
-            }
-          } catch {
-            ocrFallbackNotice = '云端 AI 响应无法解析，请直接手动补充金额与商户';
+
+          // Self-heal on empty/malformed JSON by trying next key/model if time remains
+          ocrFallbackNotice = rawText.trim()
+            ? '云端 AI 返回格式异常，已尝试自愈'
+            : '云端 AI 未返回有效识别内容';
+          ocrErrorKind = 'transient';
+          if (keyIdx + 1 < effectiveKeys.length && deadline - Date.now() > 1500) {
+            continue;
+          }
+          if (idx + 1 < candidateModels.length && deadline - Date.now() > 1500) {
+            shouldTryNextModel = true;
+            break;
           }
           break;
         }
 
-        // Only try the 1 fallback model if the current model explicitly does not exist / is not supported
+        // 404 Model Not Found -> self-heal via next model
         if (geminiRes.status === 404) {
           if (idx + 1 < candidateModels.length) {
             shouldTryNextModel = true;
             break;
           }
-          ocrFallbackNotice = '配置的 AI 识别模型不存在或暂不可用 (HTTP 404)，请直接手动补充金额与商户';
+          ocrFallbackNotice = '配置的 AI 识别模型不存在或暂不可用 (HTTP 404)';
+          ocrErrorKind = 'transient';
           break;
         }
 
@@ -1016,7 +1127,7 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
           try {
             const errBody = await geminiRes.json();
             const errMsg = String(errBody?.error?.message || '').toLowerCase();
-            if (errMsg.includes('not found') || errMsg.includes('not supported')) {
+            if (errMsg.includes('not found') || errMsg.includes('not supported') || errMsg.includes('invalid')) {
               isModelNotSupported = true;
             }
           } catch {
@@ -1026,41 +1137,57 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
             shouldTryNextModel = true;
             break;
           }
-          ocrFallbackNotice = 'AI 识别请求参数或模型不受支持，请直接手动补充金额与商户';
+          ocrFallbackNotice = 'AI 识别请求参数或模型不受支持';
+          ocrErrorKind = 'transient';
           break;
         }
 
-        // On 429 (Quota/Rate limit) or 401/403 (Invalid key): quarantine this key and failover to next key if available
-        if (geminiRes.status === 429 || geminiRes.status === 401 || geminiRes.status === 403) {
+        // On 429 (Quota) / 401 / 403 / 5xx: quarantine key, fail over across keys and then models
+        if (geminiRes.status === 429 || geminiRes.status === 401 || geminiRes.status === 403 || geminiRes.status >= 500) {
           options.onKeyFailure?.(activeKey, geminiRes.status);
-          if (keyIdx + 1 < effectiveKeys.length) {
+          ocrErrorKind = 'transient';
+          if (geminiRes.status === 429) {
+            ocrFallbackNotice = '云端 AI 识别配额繁忙 (HTTP 429)';
+          } else if (geminiRes.status >= 500) {
+            ocrFallbackNotice = `云端 AI 服务暂时繁忙 (HTTP ${geminiRes.status})`;
+          } else {
+            ocrFallbackNotice = `云端 AI 鉴权异常 (HTTP ${geminiRes.status})`;
+          }
+          if (keyIdx + 1 < effectiveKeys.length && deadline - Date.now() > 500) {
             continue;
           }
-          if (geminiRes.status === 429) {
-            ocrFallbackNotice = '云端 AI 识别配额繁忙 (HTTP 429)，已为您生成可补充草稿，请直接手动填写';
+          if (idx + 1 < candidateModels.length && deadline - Date.now() > 500) {
+            shouldTryNextModel = true;
             break;
           }
-        }
-        if (geminiRes.status === 503 || geminiRes.status >= 500) {
-          options.onKeyFailure?.(activeKey, geminiRes.status);
-          // Failover to next key in pool if available
-          if (keyIdx + 1 < effectiveKeys.length) {
-            continue;
-          }
-          ocrFallbackNotice = `云端 AI 服务暂时繁忙 (HTTP ${geminiRes.status})，已为您生成可补充草稿，请直接手动填写`;
           break;
         }
 
-        ocrFallbackNotice = `云端 AI 识别未完成 (HTTP ${geminiRes.status})，请直接手动补充金额与商户`;
+        ocrFallbackNotice = `云端 AI 识别未完成 (HTTP ${geminiRes.status})`;
+        ocrErrorKind = 'transient';
+        if (idx + 1 < candidateModels.length && deadline - Date.now() > 1000) {
+          shouldTryNextModel = true;
+          break;
+        }
         break;
       } catch (err: unknown) {
-        // Immediately stop on timeout or network error — never stack multiple timeouts across models
         const isTimeout =
           err instanceof Error &&
           (err.name === 'TimeoutError' || err.name === 'AbortError' || /timeout|aborted/i.test(err.message));
+        ocrErrorKind = 'transient';
         ocrFallbackNotice = isTimeout
-          ? '云端 AI 识别超时，已为您生成可补充草稿，请直接手动填写金额与商户'
-          : '连接云端 AI 网络异常，已为您生成可补充草稿，请直接手动填写金额与商户';
+          ? '云端 AI 识别超时'
+          : '连接云端 AI 网络异常';
+        options.onKeyFailure?.(activeKey, isTimeout ? 504 : 502);
+
+        // Self-heal on timeout/network error: try next model (and/or key) while deadline has time left
+        if (idx + 1 < candidateModels.length && deadline - Date.now() > 1500) {
+          shouldTryNextModel = true;
+          break;
+        }
+        if (keyIdx + 1 < effectiveKeys.length && deadline - Date.now() > 1500) {
+          continue;
+        }
         break;
       }
     }
@@ -1072,8 +1199,10 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
   return {
     parsedOcr,
     ocrFallbackNotice,
+    ocrErrorKind,
     attempts,
     modelUsed,
+    healed: attempts > 1 && Object.keys(parsedOcr).length > 0,
   };
 }
 
@@ -1232,10 +1361,417 @@ export async function getRecentShortcutAutoRecorded(
   return valid.sort((a, b) => new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime());
 }
 
+const AUTO_HEAL_SETTING_KEY = 'kinova_shortcut_auto_heal_queue_v1';
+let lastRemoteAutoHealFetchMs = 0;
+
+async function persistAutoHealStoreRemote(): Promise<void> {
+  try {
+    const { url, apiKey } = resolveShortcutSheetsEndpoint();
+    if (!url) return;
+    const store = getAutoHealStore();
+    const list = Array.from(store.values())
+      .filter((v) => Boolean(v.ownerEmail))
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 30);
+    await fetch(`${url}?apiKey=${encodeURIComponent(apiKey)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'updateSettings',
+        key: AUTO_HEAL_SETTING_KEY,
+        value: JSON.stringify(list),
+        mutationId: `sc_heal_q_${Date.now()}`,
+        apiKey,
+      }),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(6000),
+    });
+  } catch {
+    // Non-blocking remote persistence
+  }
+}
+
+export async function enqueueShortcutAutoHeal(
+  record: Omit<AutoHealShortcutRecord, 'healId' | 'createdAt' | 'attempts'> & { healId?: string },
+  persistRemote = true
+): Promise<AutoHealShortcutRecord> {
+  const cleanOwner = (record.ownerEmail || '').trim().toLowerCase();
+  if (persistRemote && cleanOwner) {
+    await getPendingShortcutAutoHeals(cleanOwner, true);
+  }
+  const entry: AutoHealShortcutRecord = {
+    healId: record.healId || `heal_${Date.now().toString(36)}_${crypto.randomBytes(3).toString('hex')}`,
+    ownerEmail: cleanOwner,
+    sheetName: record.sheetName,
+    mutationId: record.mutationId,
+    rowData: record.rowData,
+    createdAt: new Date().toISOString(),
+    attempts: 0,
+    lastError: record.lastError,
+  };
+  const store = getAutoHealStore();
+  store.set(entry.healId, entry);
+  const now = Date.now();
+  for (const [k, v] of store.entries()) {
+    if (now - new Date(v.createdAt).getTime() > RECENT_AUTO_RECORDED_TTL_MS || !v.ownerEmail) {
+      store.delete(k);
+    }
+  }
+  if (persistRemote && cleanOwner) {
+    await persistAutoHealStoreRemote();
+  }
+  return entry;
+}
+
+export async function acknowledgeShortcutAutoHeal(
+  healId: string,
+  persistRemote = true,
+  ownerEmail?: string
+): Promise<boolean> {
+  const cleanId = String(healId || '').trim();
+  if (!cleanId) return false;
+  getAckedAutoHealSet().add(cleanId);
+  if (persistRemote && ownerEmail) {
+    await getPendingShortcutAutoHeals(ownerEmail, true);
+  }
+  const store = getAutoHealStore();
+  const existed = store.delete(cleanId);
+  if (persistRemote && (existed || ownerEmail)) {
+    await persistAutoHealStoreRemote();
+  }
+  return existed;
+}
+
+export async function getPendingShortcutAutoHeals(
+  ownerEmail?: string,
+  fetchRemote = true,
+  nowMs = Date.now()
+): Promise<AutoHealShortcutRecord[]> {
+  const cleanOwner = (ownerEmail || '').trim().toLowerCase();
+  if (!cleanOwner) return [];
+  const store = getAutoHealStore();
+  const ackedSet = getAckedAutoHealSet();
+
+  if (fetchRemote && nowMs - lastRemoteAutoHealFetchMs > 3000) {
+    lastRemoteAutoHealFetchMs = nowMs;
+    try {
+      const { url, apiKey } = resolveShortcutSheetsEndpoint();
+      if (url) {
+        const res = await fetch(
+          `${url}?action=getSettings&apiKey=${encodeURIComponent(apiKey)}&key=${encodeURIComponent(apiKey)}&_t=${nowMs}`,
+          { method: 'GET', cache: 'no-store', signal: AbortSignal.timeout(5000) }
+        );
+        if (res.ok) {
+          const json = await res.json();
+          const raw = json?.data?.[AUTO_HEAL_SETTING_KEY];
+          if (typeof raw === 'string' && raw.trim()) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              for (const item of parsed) {
+                if (
+                  item &&
+                  typeof item.healId === 'string' &&
+                  typeof item.ownerEmail === 'string' &&
+                  item.ownerEmail.trim() &&
+                  item.sheetName &&
+                  item.rowData &&
+                  !ackedSet.has(item.healId) &&
+                  !store.has(item.healId)
+                ) {
+                  store.set(item.healId, {
+                    ...(item as AutoHealShortcutRecord),
+                    ownerEmail: item.ownerEmail.trim().toLowerCase(),
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // Ignore remote fetch errors
+    }
+  }
+
+  const list: AutoHealShortcutRecord[] = [];
+  for (const [k, v] of store.entries()) {
+    if (ackedSet.has(k)) {
+      store.delete(k);
+      continue;
+    }
+    const age = nowMs - new Date(v.createdAt).getTime();
+    const itemOwner = (v.ownerEmail || '').trim().toLowerCase();
+    if (age <= RECENT_AUTO_RECORDED_TTL_MS && itemOwner) {
+      if (itemOwner === cleanOwner) {
+        list.push(v);
+      }
+    } else {
+      store.delete(k);
+    }
+  }
+  return list.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+}
+
+async function writeShortcutRowToOwnerLedger(params: {
+  ownerEmail: string;
+  sheetName: string;
+  mutationId: string;
+  rowData: Record<string, unknown>;
+  fetchImpl?: typeof fetch;
+  scriptUrl?: string;
+  apiSecret?: string;
+}): Promise<{ recordedSuccessfully: boolean; duplicateDetected: boolean; lastError?: string }> {
+  let recordedSuccessfully = false;
+  let duplicateDetected = false;
+  let lastError: string | undefined;
+
+  if (params.fetchImpl) {
+    const endpoint = resolveShortcutSheetsEndpoint();
+    const url = params.scriptUrl || endpoint.url;
+    const apiKey = params.apiSecret || endpoint.apiKey;
+    if (url) {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          const res = await params.fetchImpl(`${url}?apiKey=${encodeURIComponent(apiKey)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+              action: 'addRow',
+              sheetName: params.sheetName,
+              rowData: params.rowData,
+              mutationId: params.mutationId,
+              key: apiKey,
+              apiKey,
+            }),
+            cache: 'no-store',
+            signal: AbortSignal.timeout(15000),
+          });
+          if (res.ok) {
+            const json = await res.json();
+            if (json?.data?.deduplicated) {
+              duplicateDetected = true;
+              break;
+            }
+            const isSuccess = Boolean(json?.success || json?.status === 'success' || json?.data?.success);
+            const isAdded = json?.data?.added !== false && !json?.data?.tombstoned;
+            if (isSuccess && isAdded) {
+              recordedSuccessfully = true;
+              break;
+            }
+            lastError = String(json?.message || 'Apps Script addRow returned false');
+          } else {
+            lastError = `HTTP ${res.status}`;
+          }
+        } catch (err) {
+          lastError = err instanceof Error ? err.message : 'Network error';
+        }
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+        }
+      }
+    }
+    return { recordedSuccessfully, duplicateDetected, lastError };
+  }
+
+  try {
+    const [
+      { getAdminUserRegistry },
+      { isAdminEmail, refreshGoogleAccessToken },
+      { executeUserGoogleAction },
+    ] = await Promise.all([
+      import('./admin-registry'),
+      import('./google-auth'),
+      import('./google-sheets-user-engine'),
+    ]);
+
+    if (isAdminEmail(params.ownerEmail)) {
+      const endpoint = resolveShortcutSheetsEndpoint();
+      const url = params.scriptUrl || endpoint.url;
+      const apiKey = params.apiSecret || endpoint.apiKey;
+      if (!url) {
+        return { recordedSuccessfully: false, duplicateDetected: false, lastError: 'Missing Apps Script URL' };
+      }
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          const res = await fetch(`${url}?apiKey=${encodeURIComponent(apiKey)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+              action: 'addRow',
+              sheetName: params.sheetName,
+              rowData: params.rowData,
+              mutationId: params.mutationId,
+              key: apiKey,
+              apiKey,
+            }),
+            cache: 'no-store',
+            signal: AbortSignal.timeout(16000),
+          });
+
+          if (res.ok) {
+            const json = await res.json();
+            if (json?.data?.deduplicated) {
+              duplicateDetected = true;
+              break;
+            }
+            const isSuccess = Boolean(json?.success || json?.status === 'success' || json?.data?.success);
+            const isAdded = json?.data?.added !== false && !json?.data?.tombstoned;
+            if (isSuccess && isAdded) {
+              recordedSuccessfully = true;
+              break;
+            }
+            lastError = String(json?.message || 'Apps Script rejected row');
+          } else {
+            lastError = `Apps Script HTTP ${res.status}`;
+          }
+        } catch (err) {
+          lastError = err instanceof Error ? err.message : 'Apps Script request failed';
+        }
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+        }
+      }
+    } else {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const registry = await getAdminUserRegistry(attempt > 0);
+        const regUser = registry[params.ownerEmail];
+        if (!regUser?.refreshToken || regUser.status === 'blocked') {
+          lastError = regUser?.status === 'blocked' ? 'User blocked' : 'Missing OAuth refresh token';
+          break;
+        }
+        try {
+          const refreshed = await refreshGoogleAccessToken(regUser.refreshToken);
+          if (!refreshed?.accessToken) {
+            lastError = 'OAuth token refresh returned null';
+            continue;
+          }
+          const session = {
+            email: regUser.email,
+            name: regUser.name || regUser.email.split('@')[0],
+            picture: regUser.picture,
+            accessToken: refreshed.accessToken,
+            refreshToken: regUser.refreshToken,
+            expiresAt: refreshed.expiresAt,
+            spreadsheetId: regUser.spreadsheetId,
+            invoicesFolderId: regUser.invoicesFolderId,
+            backupsFolderId: regUser.backupsFolderId,
+            isAdmin: false,
+          };
+          const { result } = await executeUserGoogleAction(session, 'addRow', {
+            sheetName: params.sheetName,
+            rowData: params.rowData,
+            mutationId: params.mutationId,
+          });
+          const resObj = (result || {}) as Record<string, unknown>;
+          if (resObj.deduplicated) {
+            duplicateDetected = true;
+            break;
+          }
+          if (resObj.added !== false && !resObj.tombstoned) {
+            recordedSuccessfully = true;
+            break;
+          }
+          lastError = 'Google Drive addRow returned added=false';
+        } catch (err) {
+          lastError = err instanceof Error ? err.message : 'Google Drive write error';
+        }
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 500));
+        }
+      }
+    }
+  } catch (err) {
+    lastError = err instanceof Error ? err.message : 'Ledger write module error';
+    console.warn('[Shortcut] Single-owner ledger write error:', err);
+  }
+
+  return { recordedSuccessfully, duplicateDetected, lastError };
+}
+
+/**
+ * Self-healing replay loop: retries any queued shortcut transactions that failed transiently
+ * so the user never has to confirm manual drafts.
+ */
+export async function healPendingShortcutRecords(
+  ownerEmail: string,
+  options: {
+    fetchImpl?: typeof fetch;
+    scriptUrl?: string;
+    apiSecret?: string;
+    persistRemote?: boolean;
+  } = {}
+): Promise<{
+  healedCount: number;
+  remainingCount: number;
+  healedEntries: ShortcutAutoRecordedEntry[];
+}> {
+  const cleanOwner = (ownerEmail || '').trim().toLowerCase();
+  if (!cleanOwner) return { healedCount: 0, remainingCount: 0, healedEntries: [] };
+
+  const persistRemote = options.persistRemote ?? !options.fetchImpl;
+  const pending = await getPendingShortcutAutoHeals(cleanOwner, persistRemote);
+  if (pending.length === 0) {
+    return { healedCount: 0, remainingCount: 0, healedEntries: [] };
+  }
+
+  const store = getAutoHealStore();
+  let healedCount = 0;
+  const healedEntries: ShortcutAutoRecordedEntry[] = [];
+  let storeChanged = false;
+
+  for (const item of pending) {
+    const writeRes = await writeShortcutRowToOwnerLedger({
+      ownerEmail: cleanOwner,
+      sheetName: item.sheetName,
+      mutationId: item.mutationId,
+      rowData: item.rowData,
+      fetchImpl: options.fetchImpl,
+      scriptUrl: options.scriptUrl,
+      apiSecret: options.apiSecret,
+    });
+
+    if (writeRes.recordedSuccessfully || writeRes.duplicateDetected) {
+      store.delete(item.healId);
+      storeChanged = true;
+      if (writeRes.recordedSuccessfully) {
+        healedCount += 1;
+        const txId = String(item.rowData.Id || item.rowData.id || item.mutationId);
+        const recEntry: ShortcutAutoRecordedEntry = {
+          transactionId: txId,
+          ownerEmail: cleanOwner,
+          sheetName: item.sheetName,
+          recordedAt: new Date().toISOString(),
+          rowData: item.rowData,
+        };
+        healedEntries.push(recEntry);
+        await recordRecentShortcutAutoRecorded(recEntry, persistRemote);
+      }
+    } else {
+      item.attempts += 1;
+      item.lastAttemptAt = new Date().toISOString();
+      item.lastError = writeRes.lastError;
+      store.set(item.healId, item);
+      storeChanged = true;
+    }
+  }
+
+  if (storeChanged && persistRemote) {
+    await persistAutoHealStoreRemote();
+  }
+
+  return {
+    healedCount,
+    remainingCount: (await getPendingShortcutAutoHeals(cleanOwner, false)).length,
+    healedEntries,
+  };
+}
+
 /**
  * Directly records a validated shortcut transaction to Google Sheets when amount > 0
  * and no duplicate fingerprint is detected, returning a concise notification string for iOS Shortcuts.
  * Strictly routes to the SINGLE active ownerEmail's ledger (never dual-writes across accounts).
+ * Includes self-healing retry + automatic replay queue so transient failures recover automatically
+ * without forcing manual draft forms.
  */
 export async function recordShortcutDraftToLedger(
   draft: ShortcutQuickDraft,
@@ -1246,9 +1782,11 @@ export async function recordShortcutDraftToLedger(
     userEmail?: string;
     scriptUrl?: string;
     apiSecret?: string;
+    enqueueOnFailure?: boolean;
   } = {}
 ): Promise<{
   autoRecorded: boolean;
+  selfHealedQueued?: boolean;
   duplicateSkipped: boolean;
   transactionId: string | null;
   sheetName: string | null;
@@ -1265,11 +1803,11 @@ export async function recordShortcutDraftToLedger(
       duplicateSkipped: false,
       transactionId: null,
       sheetName: null,
-      notificationTitle: '📋 已生成待确认草稿',
+      notificationTitle: '⚠️ 未自动入账',
       notificationText:
         draft.amount && draft.amount > 0
-          ? `📋 待确认：${curr} ${draft.amount.toFixed(2)} · ${label}`
-          : '📋 已生成待补充草稿，请打开 Kinova 确认',
+          ? `⚠️ 已识别 ${curr} ${draft.amount.toFixed(2)} · ${label}（未开启自动入账）`
+          : '⚠️ 未识别到消费金额，本次未入账',
     };
   }
 
@@ -1326,162 +1864,33 @@ export async function recordShortcutDraftToLedger(
     _forceRestore: true,
   };
 
-  let recordedSuccessfully = false;
-  let duplicateDetected = false;
-  let ownerEmail = (options.userEmail || draft.ownerEmail || '').trim().toLowerCase();
+  const ownerEmail = (options.userEmail || draft.ownerEmail || '').trim().toLowerCase();
 
-  // If custom fetchImpl is provided (e.g. unit test), execute directly against fetchImpl
-  if (options.fetchImpl) {
-    const endpoint = resolveShortcutSheetsEndpoint();
-    const url = options.scriptUrl || endpoint.url;
-    const apiKey = options.apiSecret || endpoint.apiKey;
-    if (url) {
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        try {
-          const res = await options.fetchImpl(`${url}?apiKey=${encodeURIComponent(apiKey)}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({
-              action: 'addRow',
-              sheetName,
-              rowData,
-              mutationId,
-              key: apiKey,
-              apiKey,
-            }),
-            cache: 'no-store',
-            signal: AbortSignal.timeout(20000),
-          });
-          if (res.ok) {
-            const json = await res.json();
-            if (json?.data?.deduplicated) {
-              duplicateDetected = true;
-              break;
-            }
-            const isSuccess = Boolean(json?.success || json?.status === 'success' || json?.data?.success);
-            const isAdded = json?.data?.added !== false && !json?.data?.tombstoned;
-            if (isSuccess && isAdded) {
-              recordedSuccessfully = true;
-              break;
-            }
-          }
-        } catch {
-          // retry once
-        }
-      }
-    }
-  } else {
-    // Zero-guess policy: strictly reject if no owner email is provided
-    if (!ownerEmail) {
-      return {
-        autoRecorded: false,
-        duplicateSkipped: false,
-        transactionId: null,
-        sheetName: null,
-        notificationTitle: '⚠️ 未绑定账号',
-        notificationText: '⚠️ 快捷指令未指定用户账号，本次未记账。请在快捷指令中添加 x-shortcut-email 或 ?user=你的邮箱',
-      };
-    }
-
-    draft.ownerEmail = ownerEmail;
-
-    // Production path: resolve SINGLE active account owner and route EXCLUSIVELY to that user's ledger
-    try {
-      const [
-        { getAdminUserRegistry },
-        { isAdminEmail, refreshGoogleAccessToken },
-        { executeUserGoogleAction },
-      ] = await Promise.all([
-        import('./admin-registry'),
-        import('./google-auth'),
-        import('./google-sheets-user-engine'),
-      ]);
-
-      if (isAdminEmail(ownerEmail)) {
-        // Admin account (weishenooi2003@gmail.com) -> write EXCLUSIVELY to Admin Apps Script ledger
-        const endpoint = resolveShortcutSheetsEndpoint();
-        const url = options.scriptUrl || endpoint.url;
-        const apiKey = options.apiSecret || endpoint.apiKey;
-        if (url) {
-          for (let attempt = 0; attempt < 2; attempt += 1) {
-            try {
-              const res = await fetch(`${url}?apiKey=${encodeURIComponent(apiKey)}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify({
-                  action: 'addRow',
-                  sheetName,
-                  rowData,
-                  mutationId,
-                  key: apiKey,
-                  apiKey,
-                }),
-                cache: 'no-store',
-                signal: AbortSignal.timeout(20000),
-              });
-
-              if (res.ok) {
-                const json = await res.json();
-                if (json?.data?.deduplicated) {
-                  duplicateDetected = true;
-                  break;
-                }
-                const isSuccess = Boolean(json?.success || json?.status === 'success' || json?.data?.success);
-                const isAdded = json?.data?.added !== false && !json?.data?.tombstoned;
-                if (isSuccess && isAdded) {
-                  recordedSuccessfully = true;
-                  break;
-                }
-                if (attempt === 0 && String(json?.message || '').toLowerCase().includes('lock')) {
-                  await new Promise((r) => setTimeout(r, 1200));
-                  continue;
-                }
-              }
-            } catch {
-              if (attempt === 0) {
-                await new Promise((r) => setTimeout(r, 800));
-                continue;
-              }
-            }
-          }
-        }
-      } else {
-        // Non-admin OAuth account (e.g. deathroyale0365@gmail.com) -> write EXCLUSIVELY to their personal Google Drive spreadsheet
-        const registry = await getAdminUserRegistry(false);
-        const regUser = registry[ownerEmail];
-        if (regUser?.refreshToken && regUser.status !== 'blocked') {
-          const refreshed = await refreshGoogleAccessToken(regUser.refreshToken);
-          if (refreshed?.accessToken) {
-            const session = {
-              email: regUser.email,
-              name: regUser.name || regUser.email.split('@')[0],
-              picture: regUser.picture,
-              accessToken: refreshed.accessToken,
-              refreshToken: regUser.refreshToken,
-              expiresAt: refreshed.expiresAt,
-              spreadsheetId: regUser.spreadsheetId,
-              invoicesFolderId: regUser.invoicesFolderId,
-              backupsFolderId: regUser.backupsFolderId,
-              isAdmin: false,
-            };
-            const { result } = await executeUserGoogleAction(session, 'addRow', {
-              sheetName,
-              rowData,
-              mutationId,
-            });
-            const resObj = (result || {}) as Record<string, unknown>;
-            if (resObj.deduplicated) {
-              duplicateDetected = true;
-            } else if (resObj.added !== false && !resObj.tombstoned) {
-              recordedSuccessfully = true;
-            }
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('[Shortcut] Single-owner ledger write error:', err);
-    }
+  // Zero-guess policy: strictly reject if no owner email is provided (unless mocked fetchImpl in unit test)
+  if (!options.fetchImpl && !ownerEmail) {
+    return {
+      autoRecorded: false,
+      duplicateSkipped: false,
+      transactionId: null,
+      sheetName: null,
+      notificationTitle: '⚠️ 未绑定账号',
+      notificationText: '⚠️ 快捷指令未指定用户账号，本次未记账。请在快捷指令中添加 x-shortcut-email 或 ?user=你的邮箱',
+    };
   }
+
+  if (ownerEmail) {
+    draft.ownerEmail = ownerEmail;
+  }
+
+  const { recordedSuccessfully, duplicateDetected, lastError } = await writeShortcutRowToOwnerLedger({
+    ownerEmail: ownerEmail || 'test@example.com',
+    sheetName,
+    mutationId,
+    rowData,
+    fetchImpl: options.fetchImpl,
+    scriptUrl: options.scriptUrl,
+    apiSecret: options.apiSecret,
+  });
 
   if (duplicateDetected) {
     acknowledgeShortcutDraft(draft.draftId);
@@ -1517,13 +1926,37 @@ export async function recordShortcutDraftToLedger(
     };
   }
 
+  // Self-healing fallback: enqueue into auto-heal queue instead of dumping a manual draft form
+  if (options.enqueueOnFailure !== false && (ownerEmail || options.fetchImpl)) {
+    acknowledgeShortcutDraft(draft.draftId);
+    await enqueueShortcutAutoHeal(
+      {
+        ownerEmail: ownerEmail || 'test@example.com',
+        sheetName,
+        mutationId,
+        rowData,
+        lastError,
+      },
+      !options.fetchImpl
+    );
+    return {
+      autoRecorded: false,
+      selfHealedQueued: true,
+      duplicateSkipped: false,
+      transactionId: txId,
+      sheetName,
+      notificationTitle: `🔄 已加入自愈补录 ${curr} ${draft.amount.toFixed(2)}`,
+      notificationText: `🔄 云端写入繁忙，已将 [${targetDate}] ${curr} ${draft.amount.toFixed(2)} · ${label} 加入自愈补录队列，稍后自动入账`,
+    };
+  }
+
   return {
     autoRecorded: false,
     duplicateSkipped: false,
     transactionId: null,
     sheetName: null,
-    notificationTitle: '⚠️ 自动入账超时',
-    notificationText: `⚠️ 已识别 [${targetDate}] ${curr} ${draft.amount.toFixed(2)} · ${label}，但写入云端超时，打开 Kinova 即可确认保存`,
+    notificationTitle: '⚠️ 自动入账失败',
+    notificationText: `⚠️ 已识别 [${targetDate}] ${curr} ${draft.amount.toFixed(2)} · ${label}，但写入云端失败`,
   };
 }
 

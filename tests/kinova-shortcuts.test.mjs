@@ -11,8 +11,12 @@ import {
   parseAmountAndCurrencyFromRawInput,
   findDuplicateTransactionsInLedger,
   inspectShortcutUrlSafety,
+  getThinkingConfigForShortcutModel,
+  parseShortcutOcrJsonResponse,
   runShortcutGeminiOcrWithFastFail,
   recordShortcutDraftToLedger,
+  healPendingShortcutRecords,
+  getPendingShortcutAutoHeals,
 } from '../src/lib/shortcut-draft-store.ts';
 
 test('1. URL safety check rejects raw financial fields, screenshots, or secrets in URL query/hash', () => {
@@ -184,11 +188,11 @@ test('5. ShortcutQuickDraft encodes and decodes ocrSummary and effective fields 
   assert.equal(getShortcutQuickDraft(sample.draftId), null);
 });
 
-test('6. Gemini Vision OCR fast-fail retry logic: normal 200, timeout, 404 fallback, and 429/503 fast-fail', async () => {
+test('6. Gemini Vision OCR self-healing retry logic: normal 200, timeout failover, 404 fallback, and multi-key/model 429/503 healing', async () => {
   // 6a. Normal 200 OK response (unwraps array or object, 1 attempt)
   const normalRes = await runShortcutGeminiOcrWithFastFail({
     geminiKey: 'test-key-isolated',
-    preferredModel: 'gemini-flash-lite-latest',
+    preferredModel: 'gemini-2.5-flash',
     prompt: 'test',
     mimeType: 'image/png',
     cleanBase64: 'AAAA',
@@ -219,29 +223,67 @@ test('6. Gemini Vision OCR fast-fail retry logic: normal 200, timeout, 404 fallb
       ),
   });
   assert.equal(normalRes.attempts, 1);
-  assert.equal(normalRes.modelUsed, 'gemini-flash-lite-latest');
+  assert.equal(normalRes.modelUsed, 'gemini-2.5-flash');
   assert.equal(normalRes.parsedOcr.amount, 16.9);
   assert.equal(normalRes.parsedOcr.merchant, 'FamilyMart');
   assert.equal(normalRes.ocrFallbackNotice, '');
+  assert.equal(normalRes.ocrErrorKind, 'none');
+  assert.equal(normalRes.healed, false);
 
-  // 6b. Model timeout / network error -> stops IMMEDIATELY after 1 attempt (never cascades across models)
-  const timeoutRes = await runShortcutGeminiOcrWithFastFail({
+  // 6b. Model timeout -> self-heals via fallback model and succeeds; when all models time out, stops within totalTimeoutMs
+  let timeoutHealCount = 0;
+  const timeoutHealedRes = await runShortcutGeminiOcrWithFastFail({
     geminiKey: 'test-key-isolated',
-    preferredModel: 'gemini-flash-lite-latest',
+    preferredModel: 'gemini-2.5-flash',
     prompt: 'test',
     mimeType: 'image/png',
     cleanBase64: 'AAAA',
+    totalTimeoutMs: 12000,
+    fetchImpl: async () => {
+      timeoutHealCount += 1;
+      if (timeoutHealCount === 1) {
+        const err = new Error('The operation was aborted due to timeout');
+        err.name = 'TimeoutError';
+        throw err;
+      }
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [{ text: JSON.stringify({ amount: 18.0, currency: 'MYR', merchant: 'Mixue' }) }],
+              },
+            },
+          ],
+        }),
+        { status: 200 }
+      );
+    },
+  });
+  assert.equal(timeoutHealedRes.attempts, 2);
+  assert.equal(timeoutHealedRes.modelUsed, 'gemini-3.5-flash');
+  assert.equal(timeoutHealedRes.parsedOcr.amount, 18.0);
+  assert.equal(timeoutHealedRes.healed, true);
+
+  const timeoutAllFailedRes = await runShortcutGeminiOcrWithFastFail({
+    geminiKey: 'test-key-isolated',
+    preferredModel: 'gemini-2.5-flash',
+    prompt: 'test',
+    mimeType: 'image/png',
+    cleanBase64: 'AAAA',
+    totalTimeoutMs: 5000,
     fetchImpl: async () => {
       const err = new Error('The operation was aborted due to timeout');
       err.name = 'TimeoutError';
       throw err;
     },
   });
-  assert.equal(timeoutRes.attempts, 1);
-  assert.equal(timeoutRes.modelUsed, null);
-  assert.match(timeoutRes.ocrFallbackNotice, /超时/);
+  assert.ok(timeoutAllFailedRes.attempts >= 1);
+  assert.equal(timeoutAllFailedRes.modelUsed, null);
+  assert.equal(timeoutAllFailedRes.ocrErrorKind, 'transient');
+  assert.match(timeoutAllFailedRes.ocrFallbackNotice, /超时/);
 
-  // 6c. 404 Model Not Found -> tries 1 fallback model (2 attempts total) and succeeds
+  // 6c. 404 Model Not Found -> tries fallback model (2 attempts total) and succeeds
   let count404 = 0;
   const fallback404Res = await runShortcutGeminiOcrWithFastFail({
     geminiKey: 'test-key-isolated',
@@ -271,29 +313,55 @@ test('6. Gemini Vision OCR fast-fail retry logic: normal 200, timeout, 404 fallb
   assert.equal(fallback404Res.attempts, 2);
   assert.equal(fallback404Res.modelUsed, 'gemini-3.5-flash');
   assert.equal(fallback404Res.parsedOcr.amount, 32.0);
+  assert.equal(fallback404Res.healed, true);
 
-  // 6d. 429 Quota / 503 Busy -> stops IMMEDIATELY after 1 attempt (no cascade)
-  const res429 = await runShortcutGeminiOcrWithFastFail({
-    geminiKey: 'test-key-isolated',
-    preferredModel: 'gemini-flash-lite-latest',
+  // 6d. 429 Quota / 503 Busy -> fails over across keys/models to heal; returns transient error if exhausted
+  let multiKeyCount = 0;
+  const failedKeys = [];
+  const res429Healed = await runShortcutGeminiOcrWithFastFail({
+    geminiKeys: ['key-1', 'key-2'],
+    onKeyFailure: (k, s) => failedKeys.push([k, s]),
+    preferredModel: 'gemini-2.5-flash',
     prompt: 'test',
     mimeType: 'image/png',
     cleanBase64: 'AAAA',
-    fetchImpl: async () => new Response('Quota exceeded', { status: 429 }),
+    totalTimeoutMs: 12000,
+    fetchImpl: async (_url, init) => {
+      multiKeyCount += 1;
+      if (multiKeyCount === 1) {
+        return new Response('Quota exceeded', { status: 429 });
+      }
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [{ text: JSON.stringify({ amount: 9.9, currency: 'MYR', merchant: 'Tealive' }) }],
+              },
+            },
+          ],
+        }),
+        { status: 200 }
+      );
+    },
   });
-  assert.equal(res429.attempts, 1);
-  assert.match(res429.ocrFallbackNotice, /429/);
+  assert.equal(res429Healed.attempts, 2);
+  assert.equal(res429Healed.parsedOcr.merchant, 'Tealive');
+  assert.equal(res429Healed.healed, true);
+  assert.deepEqual(failedKeys, [['key-1', 429]]);
 
-  const res503 = await runShortcutGeminiOcrWithFastFail({
+  const res503Exhausted = await runShortcutGeminiOcrWithFastFail({
     geminiKey: 'test-key-isolated',
-    preferredModel: 'gemini-flash-lite-latest',
+    preferredModel: 'gemini-2.5-flash',
     prompt: 'test',
     mimeType: 'image/png',
     cleanBase64: 'AAAA',
+    totalTimeoutMs: 5000,
     fetchImpl: async () => new Response('Service Unavailable', { status: 503 }),
   });
-  assert.equal(res503.attempts, 1);
-  assert.match(res503.ocrFallbackNotice, /503/);
+  assert.ok(res503Exhausted.attempts >= 1);
+  assert.equal(res503Exhausted.ocrErrorKind, 'transient');
+  assert.match(res503Exhausted.ocrFallbackNotice, /503/);
 });
 
 test('7. Background auto-record writes valid transactions via mocked fetch, skips duplicates and missing amounts, and returns iOS notification text', async () => {
@@ -426,6 +494,119 @@ test('8. Strict zero-guess policy: shortcut auto-record rejects requests without
   assert.equal(res.transactionId, null);
   assert.match(res.notificationTitle, /未绑定账号/);
   assert.match(res.notificationText, /未指定用户账号/);
+});
+
+test('9. Model-specific thinkingConfig selection and resilient OCR JSON parsing', () => {
+  assert.deepEqual(getThinkingConfigForShortcutModel('gemini-2.5-flash'), { thinkingBudget: 0 });
+  assert.deepEqual(getThinkingConfigForShortcutModel('gemini-3.5-flash'), { thinkingLevel: 'low' });
+  assert.deepEqual(getThinkingConfigForShortcutModel('gemini-flash-latest'), { thinkingLevel: 'low' });
+
+  const fenced = parseShortcutOcrJsonResponse('```json\n{"amount": 12.5, "merchant": "Kopitiam"}\n```');
+  assert.ok(fenced);
+  assert.equal(fenced.amount, 12.5);
+  assert.equal(fenced.merchant, 'Kopitiam');
+
+  const wrapped = parseShortcutOcrJsonResponse('Here is your receipt:\n[{"amount": 45.0, "merchant": "Shell"}]\nThanks');
+  assert.ok(wrapped);
+  assert.equal(wrapped.amount, 45.0);
+  assert.equal(wrapped.merchant, 'Shell');
+});
+
+test('10. Ledger write self-healing: immediate retry on transient error, auto-heal queue enqueue + replay without manual draft wording', async () => {
+  // 10a. Transient 503 recovers automatically inside 3-attempt write retry
+  let writeAttempts = 0;
+  const draftA = saveShortcutQuickDraft({
+    ownerEmail: 'heal-user@example.com',
+    source: 'back_tap_screenshot',
+    amount: 26.8,
+    currency: 'MYR',
+    currencyAmbiguous: false,
+    candidateCurrencies: ['MYR'],
+    type: 'Expense',
+    category: 'Food & Dining',
+    description: 'Chagee',
+    merchant: 'Chagee',
+    date: '2026-10-15',
+    ocrSummary: 'RM 26.80 at Chagee',
+    notes: 'Milk Tea',
+    missingFields: [],
+    uncertainFields: [],
+    fingerprint: 'kfp_chagee_heal_1',
+    aiDisclosure: '自动入账',
+  });
+
+  const retrySuccessRes = await recordShortcutDraftToLedger(draftA, {
+    autoRecord: true,
+    userEmail: 'heal-user@example.com',
+    scriptUrl: 'https://mock.script.google.com/macros/s/test/exec',
+    apiSecret: 'mock-secret',
+    fetchImpl: async () => {
+      writeAttempts += 1;
+      if (writeAttempts === 1) {
+        return new Response('Busy', { status: 503 });
+      }
+      return new Response(JSON.stringify({ status: 'success', data: { success: true } }), { status: 200 });
+    },
+  });
+  assert.equal(writeAttempts, 2);
+  assert.equal(retrySuccessRes.autoRecorded, true);
+  assert.doesNotMatch(retrySuccessRes.notificationText, /草稿/);
+
+  // 10b. Persistent outage queues into auto-heal queue (never produces "草稿") and replays cleanly once healthy
+  const draftB = saveShortcutQuickDraft({
+    ownerEmail: 'heal-queue@example.com',
+    source: 'back_tap_screenshot',
+    amount: 64.0,
+    currency: 'MYR',
+    currencyAmbiguous: false,
+    candidateCurrencies: ['MYR'],
+    type: 'Expense',
+    category: 'Transport',
+    description: 'Petronas',
+    merchant: 'Petronas',
+    date: '2026-10-15',
+    ocrSummary: 'RM 64.00 at Petronas',
+    notes: 'RON95',
+    missingFields: [],
+    uncertainFields: [],
+    fingerprint: 'kfp_petronas_heal_2',
+    aiDisclosure: '自动入账',
+  });
+
+  const queuedRes = await recordShortcutDraftToLedger(draftB, {
+    autoRecord: true,
+    userEmail: 'heal-queue@example.com',
+    scriptUrl: 'https://mock.script.google.com/macros/s/test/exec',
+    apiSecret: 'mock-secret',
+    fetchImpl: async () => new Response('Down', { status: 503 }),
+  });
+
+  assert.equal(queuedRes.autoRecorded, false);
+  assert.equal(queuedRes.selfHealedQueued, true);
+  assert.doesNotMatch(queuedRes.notificationTitle, /草稿/);
+  assert.doesNotMatch(queuedRes.notificationText, /草稿/);
+  assert.match(queuedRes.notificationText, /自愈补录/);
+
+  const pendingBefore = await getPendingShortcutAutoHeals('heal-queue@example.com', false);
+  assert.equal(pendingBefore.length, 1);
+  assert.equal(pendingBefore[0].rowData.Amount, 64.0);
+
+  // Now Apps Script recovers -> healPendingShortcutRecords replays & drains queue
+  const replayedPayloads = [];
+  const healResult = await healPendingShortcutRecords('heal-queue@example.com', {
+    scriptUrl: 'https://mock.script.google.com/macros/s/test/exec',
+    apiSecret: 'mock-secret',
+    persistRemote: false,
+    fetchImpl: async (_url, init) => {
+      replayedPayloads.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ status: 'success', data: { success: true } }), { status: 200 });
+    },
+  });
+
+  assert.equal(healResult.healedCount, 1);
+  assert.equal(healResult.remainingCount, 0);
+  assert.equal(replayedPayloads.length, 1);
+  assert.equal(replayedPayloads[0].rowData.Description, 'Petronas');
 });
 
 
