@@ -103,10 +103,13 @@ const QUERY_STOP_WORDS = new Set([
   '什么', '的', '有', '有没有', '记录', '之前', '上次', '最近', '哪个', '哪', '哪家', '哪间', '哪里', '最便宜', '便宜', '最贵', '贵',
 ]);
 
-const CHINESE_PREFIX_REGEX = /^(请问|我想要找|我想找|我找|帮我找|请帮我找|找一找|找找|找|我想查|我要查|要查|请帮我查|帮我查查|帮我查|查一查|查一下|查查|查询|我查|查|我想搜|我要搜|我搜|搜一搜|搜一下|搜索|搜|我想看|我想看看|帮我看看|看看|看下|看一下|看一看|问一下|有没有买过|有没有买|有没有|有买过|有买|我买过的|买过的|买过|我买的|买的|买了|我吃过的|吃过的|吃过|吃了|之前买的|之前的|之前|上次买的|上次的|上次|最近买的|最近的|最近|我在|在|我想要|想要|我|这里|这家|这间|这|那里|那家|那间|那)\s*/i;
-const CHINESE_SUFFIX_REGEX = /\s*(多少钱|几多钱|多贵|什么价钱|什么价|价钱|价格|是多少|大约多少|多少|市价|售价|记录|呢|呀|啊|啦|吧|么|吗|？|\?|买过|买的|买了|吃过|吃了|吃的|消费多少|消费)+$/i;
-const ENGLISH_PREFIX_REGEX = /^(how much (is|was|did i pay for|are)|what (is|was|did i pay for) the (price|cost) of|can you check (the price of)?|check (the price of)?|find (my)?|tell me the price of|show me (the)?|i bought|i paid for|where (is|was|did i buy|were))\s+/i;
-const ENGLISH_SUFFIX_REGEX = /\s+(cost|price|how much|i paid|i bought|last time|cheapest|cheaper|\?)$/i;
+const TIMEFRAME_AND_AGGREGATION_PREFIX = /^(这个月|本月|上个月|上月|今年|去年|今天|今日|历史|全部|所有|一共|总共|共|this month|last month|this year|all time|total)\s*/i;
+const TIMEFRAME_AND_AGGREGATION_SUFFIX = /\s*(这个月|本月|上个月|上月|今年|去年|今天|今日|历史|全部|所有|一共|总共|共|this month|last month|this year|all time|total)+$/i;
+
+const CHINESE_PREFIX_REGEX = /^(请问|我想要找|我想找|我找|帮我找|请帮我找|找一找|找找|找|我想查|我要查|要查|请帮我查|帮我查查|帮我查|查一查|查一下|查查|查询|我查|查|我想搜|我要搜|我搜|搜一搜|搜一下|搜索|搜|我想看|我想看看|帮我看看|看看|看下|看一下|看一看|问一下|有没有买过|有没有买|有没有|有买过|有买|我买过的|买过的|买过|我买的|买的|买了|我吃过的|吃过的|吃过|吃了|之前买的|之前的|之前|上次买的|上次的|上次|最近买的|最近的|最近|这个月在|上个月在|今年在|今天在|本月在|这个月|上个月|今年|今天|本月|我在|我再|在|再|去过|去|我想要|想要|我|这里|这家|这间|那里|那家|那间|这|那)\s*/i;
+const CHINESE_SUFFIX_REGEX = /\s*(一共花了多少钱|总共花了多少钱|一共花了多少|总共花了多少|花了多少钱|花了多少|一共消费了多少钱|总共消费了多少钱|一共消费了多少|总共消费了多少|消费了多少钱|消费了多少|共消费多少|支出了多少|总共支出多少|一共支出多少|开销了多少|开销多少|用了多少钱|用了多少|几多钱|多少钱|多贵|什么价钱|什么价|价钱|价格|是多少|大约多少|多少|市价|售价|记录|呢|呀|啊|啦|吧|么|吗|？|\?|买过|买的|买了|吃过|吃了|吃的|消费多少|消费了|消费|花了|用了)+$/i;
+const ENGLISH_PREFIX_REGEX = /^(how much (?:did i|have i|i|we)?\s*(?:spend|spent|pay|paid)\s*(?:at|on|in|for)?|how much (?:at|on|in|for)|total spent (?:at|on|in|for)?|what did i spend (?:at|on|in|for)?|how much (?:is|was|did i pay for|are)|what (?:is|was|did i pay for) the (?:price|cost) of|can you check (?:the price of)?|check (?:the price of)?|find (?:my)?|tell me the price of|show me (?:the)?|i bought|i paid for|where (?:is|was|did i buy|were))\s+/i;
+const ENGLISH_SUFFIX_REGEX = /\s+(cost|price|how much|i paid|i bought|did i spend|did i pay|spent|total|last time|cheapest|cheaper|\?)$/i;
 
 const COMMON_BILINGUAL_SYNONYMS: Record<string, string[]> = {
   // Food & Dining
@@ -220,12 +223,14 @@ export function extractCleanItemKeyword(query: string): string {
     cleaned = cleaned.replace(ENGLISH_SUFFIX_REGEX, '');
     cleaned = cleaned.replace(CHINESE_PREFIX_REGEX, '');
     cleaned = cleaned.replace(CHINESE_SUFFIX_REGEX, '');
+    cleaned = cleaned.replace(TIMEFRAME_AND_AGGREGATION_PREFIX, '');
+    cleaned = cleaned.replace(TIMEFRAME_AND_AGGREGATION_SUFFIX, '');
     cleaned = cleaned.replace(/^[？?！!，,。.\s]+|[？?！!，,。.\s]+$/g, '');
     if (cleaned === prev) break;
   }
 
   cleaned = cleaned.trim();
-  return cleaned || query.trim();
+  return cleaned;
 }
 
 export function getItemSearchTarget(rawQuery: string): { coreKeyword: string; synonyms: string[] } {

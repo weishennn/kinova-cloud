@@ -86,3 +86,45 @@ test('3. Store Price Ladder correctly sorts stores from lowest unit price to hig
   assert.equal(ladder[0].minUnitPrice, 1.88);
   assert.ok(ladder[1].minUnitPrice >= ladder[0].minUnitPrice);
 });
+
+test('4. computeDeterministicLedgerFacts correctly extracts merchant spending and does not default to Food & Dining', async () => {
+  const { computeDeterministicLedgerFacts } = await import('../src/lib/copilot-ledger-facts.ts');
+
+  const mockLedger = [
+    { id: '1', date: '2026-11-02', amount: 35.0, type: 'Expense', category: 'Food & Dining', description: 'Pegacorn Cafe', notes: 'Dinner' },
+    { id: '2', date: '2026-11-05', amount: 80.0, type: 'Expense', category: 'Transport', description: 'Shell Petrol', notes: 'Fuel' },
+    { id: '3', date: '2026-11-08', amount: 159.0, type: 'Expense', category: 'Shopping', description: 'Xiaomi 吹风筒', notes: '[商家: Show See Malaysia]' },
+    { id: '4', date: '2026-10-15', amount: 45.0, type: 'Expense', category: 'Food & Dining', description: 'Pegacorn Cafe', notes: 'Brunch' },
+  ];
+
+  // 1. "我再pegacorn 花了多少钱" -> should match Pegacorn (all time = RM 80)
+  const facts1 = computeDeterministicLedgerFacts('我再pegacorn 花了多少钱', mockLedger, '2026-11-15');
+  assert.equal(facts1.queryType, 'merchant_lookup');
+  assert.equal(facts1.itemOrMerchantName, 'pegacorn');
+  assert.equal(facts1.isFoundInPersonalLedger, true);
+  assert.equal(facts1.exactTotalSpent, 80);
+  assert.equal(facts1.transactionCount, 2);
+
+  // 2. "我在pegacorn花了多少钱" -> should match Pegacorn
+  const facts2 = computeDeterministicLedgerFacts('我在pegacorn花了多少钱', mockLedger, '2026-11-15');
+  assert.equal(facts2.itemOrMerchantName, 'pegacorn');
+  assert.equal(facts2.exactTotalSpent, 80);
+
+  // 3. "这个月在pegacorn花了多少" -> only November (RM 35)
+  const facts3 = computeDeterministicLedgerFacts('这个月在pegacorn花了多少', mockLedger, '2026-11-15');
+  assert.equal(facts3.exactTotalSpent, 35);
+  assert.equal(facts3.transactionCount, 1);
+
+  // 4. "show see malaysia 花了多少" -> matches note [商家: Show See Malaysia]
+  const facts4 = computeDeterministicLedgerFacts('show see malaysia 花了多少', mockLedger, '2026-11-15');
+  assert.equal(facts4.itemOrMerchantName, 'show see malaysia');
+  assert.equal(facts4.exactTotalSpent, 159);
+  assert.equal(facts4.transactionCount, 1);
+
+  // 5. Merchant not in ledger -> returns 0, isFoundInPersonalLedger = false (NEVER whole month Food & Dining)
+  const facts5 = computeDeterministicLedgerFacts('我在星巴克花了多少钱', mockLedger, '2026-11-15');
+  assert.equal(facts5.itemOrMerchantName, '星巴克');
+  assert.equal(facts5.isFoundInPersonalLedger, false);
+  assert.equal(facts5.exactTotalSpent, 0);
+  assert.equal(facts5.transactionCount, 0);
+});

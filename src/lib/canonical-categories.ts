@@ -206,6 +206,11 @@ const EXPENSE_SYNONYMS: Record<string, CanonicalExpenseCategory> = {
   personal: 'Shopping',
   beauty: 'Shopping',
   cosmetics: 'Shopping',
+  skincare: 'Shopping',
+  cleanser: 'Shopping',
+  moisturizer: 'Shopping',
+  sunscreen: 'Shopping',
+  hairdryer: 'Shopping',
 
   // Health
   health: 'Health',
@@ -399,7 +404,7 @@ function inferExpenseCategoryFromContext(text: string): CanonicalExpenseCategory
   if (/\b(?:education|school|tuition|university|college|academy|training|course|courses|books?|bookstore)\b|教育|学费|培训|课程|买书/i.test(lower)) {
     return 'Education';
   }
-  if (/\b(?:shopping|retail|mall|store|mart|diy|hardware\s*store|convenience|furniture|appliances?|stationery|clothes|clothing|fashion|shoes|apparel|electronics|gadget|gadgets|uniqlo|zara|shopee|lazada|taobao|ikea)\b|购物|衣服|数码|买东西|网购|商场|五金/i.test(lower)) {
+  if (/\b(?:shopping|retail|mall|store|mart|diy|hardware\s*store|convenience|furniture|appliances?|stationery|clothes|clothing|fashion|shoes|apparel|electronics|gadget|gadgets|uniqlo|zara|shopee|lazada|taobao|ikea|cleanser|skincare|facial\s*wash|face\s*wash|toner|serum|moisturizer|sunscreen|lotion|cosmetics|makeup|lipstick|foundation|perfume|hair\s*dryer|shampoo|body\s*wash|soap)\b|购物|衣服|数码|买东西|网购|商场|五金|吹风筒|护肤|护肤品|洁面|洗面奶|防晒|爽肤水|乳液|面霜|精华|面膜|化妆品|口红|香水|沐浴露|洗发水/i.test(lower)) {
     return 'Shopping';
   }
   return 'Other';

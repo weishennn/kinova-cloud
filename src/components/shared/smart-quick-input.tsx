@@ -1213,29 +1213,6 @@ export function SmartQuickInput() {
     }
 
     let commandToProcess = activeCommand;
-    // If local parse returned 'Other' on a typed phrase while online, let Gemini resolve partial wording / habit keywords before saving
-    if (
-      !aiParsed &&
-      !receiptAttachment &&
-      !isEditingDetails &&
-      commandToProcess?.intent === 'transaction' &&
-      (commandToProcess.data as AiTransactionData).category === 'Other' &&
-      (typeof navigator === 'undefined' || navigator.onLine !== false)
-    ) {
-      const trimmed = input.trim();
-      if (trimmed) {
-        const outcome = await triggerAssistantTurn(trimmed, { silentOnError: true });
-        if (outcome && !outcome.hadError) {
-          if (outcome.command && outcome.command.intent === 'transaction' && outcome.command.data) {
-            commandToProcess = outcome.command;
-          } else if (outcome.command) {
-            commandToProcess = outcome.command;
-          } else {
-            return;
-          }
-        }
-      }
-    }
 
     // If no local transaction command is resolved, send to Kinova Assistant
     if (!commandToProcess) {

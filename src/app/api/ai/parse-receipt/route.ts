@@ -85,6 +85,11 @@ CRITICAL INSTRUCTIONS:
    - MERCHANT LOCATION IS NOT THE STORE NAME: Location fields or city names are locations, NOT the merchant name. NEVER invent generic names like "Food Stall (Location)"!
    - EXTRACT "MEMO" / "REMARK" / "RECIPIENT REFERENCE": Look specifically for "Memo", "Remark", "Recipient Reference", "Payment Details", or "Note". When no separate shop brand is shown, the Memo/Remark text IS the primary description or stall name! Extract it as "description" and include it in "items".
 
+2.6. ITEM NAME VS MERCHANT / STORE NAME (IMPORTANT FOR PERSONAL EXPENSE TRACKING):
+   - Users record expenses by WHAT WAS BOUGHT (e.g. "Xiaomi 吹风筒", "Salmon Don", "Latte & Croissant", "Uniqlo T-shirt"), NOT by obscure corporate company / vendor names (e.g. "Show See Malaysia", "ABC Sdn Bhd", "Official Store")!
+   - "description": MUST be the primary purchased item or product summary (e.g. "Xiaomi 吹风筒", or "Xiaomi 吹风筒 等2件"). NEVER set description to an obscure merchant/seller name when actual product items are visible!
+   - "merchant": MUST capture the merchant, store, or seller brand name (e.g. "Show See Malaysia", "Shopee - Showsee", "Village Park").
+
 3. FUEL / PETROL & SUBSIDY DEDUCTIONS:
    - Gas and petrol stations belong to category "Transport".
    - Extract purchased fuel line items into "items" with litres and unit price when printed.
@@ -468,12 +473,26 @@ ${JSON.stringify(parsed)}`
         // Clean trailing truncated dots (e.g. "Four Beans 四夕豆花 - Taman Me...")
         description = description.replace(/\s*-\s*[A-Za-z0-9\s]*\.\.\.$/, '').trim();
 
+        const merchantName = typeof parsed.merchant === 'string' && parsed.merchant.trim() ? parsed.merchant.trim() : '';
+
+        // Prioritize purchased item name for description when line items are present
+        // (e.g. "Xiaomi 吹风筒" rather than obscure corporate seller "Show See Malaysia")
+        if (items.length > 0) {
+          const firstItem = items[0]?.name?.trim();
+          const isDescSameAsMerchant = description && merchantName && description.toLowerCase() === merchantName.toLowerCase();
+          const isDescGenericStore = /^(?:official\s*store|flagship\s*store|sdn\s*bhd|enterprise|trading|shopee|lazada|merchant|seller|store|receipt\s*expense)$/i.test(description);
+
+          if (firstItem && (!description || isDescSameAsMerchant || isDescGenericStore)) {
+            description = items.length === 1 ? firstItem : `${firstItem} 等${items.length}件`;
+          }
+        }
+
         // Check if items or context reveals the true merchant if description was empty/filtered
         if (!description && items.length > 0) {
           description = items.map((i) => i.name).slice(0, 2).join(', ');
         }
         if (!description) {
-          description = 'Receipt Expense';
+          description = merchantName || 'Receipt Expense';
         }
 
         // If items are empty, but description is available, add a single item
@@ -562,6 +581,12 @@ ${JSON.stringify(parsed)}`
         }
 
         let finalNotes = typeof parsed.notes === 'string' ? parsed.notes.trim() : '';
+        if (merchantName) {
+          const merchantTag = `[商家: ${merchantName}]`;
+          if (!finalNotes.includes(merchantTag) && !finalNotes.toLowerCase().includes(merchantName.toLowerCase())) {
+            finalNotes = finalNotes ? `${merchantTag} · ${finalNotes}` : merchantTag;
+          }
+        }
         if (discountAmount && discountAmount > 0) {
           const discountNote = `[优惠抵扣: -${currency} ${discountAmount.toFixed(2)}${dealsDescription ? ` (${dealsDescription})` : ''}]`;
           if (!finalNotes.includes(discountNote)) {
@@ -590,7 +615,7 @@ ${JSON.stringify(parsed)}`
               taxIncluded,
               taxLabel,
               taxes: rawTaxes.length > 0 ? rawTaxes : undefined,
-              notes: finalNotes || (description ? `Scanned from ${description}` : 'Scanned receipt'),
+              notes: finalNotes || (merchantName ? `Scanned from ${merchantName}` : (description ? `Scanned from ${description}` : 'Scanned receipt')),
             },
             items,
             ocrReasoning: {

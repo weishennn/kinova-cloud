@@ -51,7 +51,10 @@ const CATEGORY_KEYWORDS: Record<string, string[]> = {
   'Shopping': [
     'shopee', 'lazada', 'taobao', 'amazon', 'uniqlo', 'zara', 'h&m', 'clothes', 'shoes',
     'bag', 'shopping', 'buy', 'mall', 'mid valley', 'pavilion', 'sunway', 'ikea', 'decathlon',
-    'gadget', 'phone', 'laptop', 'ipad', 'electronics', '购物', '淘宝', '买衣服'
+    'gadget', 'phone', 'laptop', 'ipad', 'electronics', 'cleanser', 'skincare', 'facial wash',
+    'face wash', 'toner', 'serum', 'moisturizer', 'sunscreen', 'lotion', 'cosmetics', 'makeup',
+    'lipstick', 'foundation', 'perfume', 'hair dryer', 'shampoo', 'body wash', 'soap', 'toothpaste',
+    '购物', '淘宝', '买衣服', '吹风筒', '护肤', '护肤品', '洁面', '洗面奶', '防晒', '爽肤水', '乳液', '面霜', '精华', '面膜', '化妆品', '口红', '香水', '沐浴露', '洗发水'
   ],
   'Housing & Bills': [
     'unifi', 'time internet', 'maxis', 'celcom', 'digi', 'umobile', 'wifi', 'internet',
