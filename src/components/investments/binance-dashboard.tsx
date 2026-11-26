@@ -116,9 +116,9 @@ export function BinanceDashboard() {
   const [displayCurrency, setDisplayCurrency] = useState<'USD' | 'MYR'>('USD');
   const [costBasisMethod, setCostBasisMethod] = useState<'fifo' | 'weighted'>('fifo');
   const [activeTab, setActiveTab] = useState<'holdings' | 'funding' | 'trades' | 'calculator'>('holdings');
-  const [holdingFilter, setHoldingFilter] = useState<'active' | 'spot' | 'funding' | 'closed' | 'all'>('active');
+  const [holdingFilter, setHoldingFilter] = useState<'active' | 'crypto' | 'stocks' | 'spot' | 'funding' | 'closed' | 'all'>('active');
   const [fundingFilter, setFundingFilter] = useState<'all' | 'in' | 'out' | 'neutral'>('all');
-  const [tradeSourceFilter, setTradeSourceFilter] = useState<'all' | 'spot' | 'convert' | 'dust'>('all');
+  const [tradeSourceFilter, setTradeSourceFilter] = useState<'all' | 'spot' | 'equity' | 'convert' | 'dust'>('all');
   const [hideDust, setHideDust] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [lookbackDays, setLookbackDays] = useState<number>(365);
@@ -337,7 +337,7 @@ export function BinanceDashboard() {
       .map((h) => ({
         symbol: h.asset,
         label: h.asset,
-        assetKind: 'Crypto',
+        assetKind: h.assetKind || 'Crypto',
         currentQty: h.totalQty,
         currentAvgCost: costBasisMethod === 'fifo' ? h.avgCostFifoUsd : h.avgCostWeightedUsd,
         currentMarketPrice: h.livePriceUsd,
@@ -349,6 +349,8 @@ export function BinanceDashboard() {
     return holdings.filter((h) => {
       if (hideDust && h.status !== 'closed' && h.marketValueUsd < 1) return false;
       if (holdingFilter === 'active' && h.totalQty <= 1e-8) return false;
+      if (holdingFilter === 'crypto' && (h.assetKind === 'Stock' || h.totalQty <= 1e-8)) return false;
+      if (holdingFilter === 'stocks' && (h.assetKind !== 'Stock' || h.totalQty <= 1e-8)) return false;
       if (holdingFilter === 'spot' && h.spotQty <= 1e-8) return false;
       if (holdingFilter === 'funding' && h.fundingQty <= 1e-8) return false;
       if (holdingFilter === 'closed' && h.status !== 'closed') return false;
@@ -868,6 +870,8 @@ export function BinanceDashboard() {
             <div className="flex flex-wrap items-center gap-1 p-1 rounded-2xl bg-white/90 dark:bg-zinc-950/80 border border-slate-200 dark:border-white/[0.08] text-xs">
               {[
                 { id: 'active' as const, label: 'Active' },
+                { id: 'crypto' as const, label: 'Crypto' },
+                { id: 'stocks' as const, label: 'Stocks' },
                 { id: 'spot' as const, label: 'Spot' },
                 { id: 'funding' as const, label: 'Funding' },
                 { id: 'closed' as const, label: 'Closed' },
@@ -923,10 +927,12 @@ export function BinanceDashboard() {
                     >
                       <div className="flex items-center justify-between">
                         <div>
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="font-bold text-base text-slate-950 dark:text-white">{h.asset}</span>
+                            {h.assetKind === 'Stock' && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/15 text-indigo-800 dark:text-indigo-300">Stock</span>}
                             {h.spotQty > 0 && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/15 text-amber-800 dark:text-amber-300">Spot</span>}
                             {h.fundingQty > 0 && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-500/15 text-blue-800 dark:text-blue-300">Funding</span>}
+                            {h.equityQty > 0 && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-500/15 text-purple-800 dark:text-purple-300">Equity</span>}
                             {h.status === 'closed' && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">Closed</span>}
                           </div>
                           <div className="text-xs font-mono text-slate-500 dark:text-zinc-400 mt-0.5">
@@ -964,7 +970,7 @@ export function BinanceDashboard() {
                                 setCalcModalAsset({
                                   symbol: h.asset,
                                   label: h.asset,
-                                  assetKind: 'Crypto',
+                                  assetKind: h.assetKind || 'Crypto',
                                   currentQty: h.totalQty,
                                   currentAvgCost: avgCost,
                                   currentMarketPrice: h.livePriceUsd,
@@ -1014,6 +1020,9 @@ export function BinanceDashboard() {
                           <td className="p-4">
                             <div className="flex items-center gap-2">
                               <span className="font-bold text-slate-950 dark:text-white">{h.asset}</span>
+                              {h.assetKind === 'Stock' && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/15 text-indigo-700 dark:text-indigo-300">Stock</span>
+                              )}
                               {h.isStablecoin && (
                                 <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">Cash</span>
                               )}
@@ -1037,6 +1046,11 @@ export function BinanceDashboard() {
                               {h.fundingQty > 1e-8 && (
                                 <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-500/15 text-blue-800 dark:text-blue-300">
                                   Funding: {fmtQty(h.fundingQty)}
+                                </span>
+                              )}
+                              {h.equityQty > 1e-8 && (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-purple-500/15 text-purple-800 dark:text-purple-300">
+                                  Equity: {fmtQty(h.equityQty)}
                                 </span>
                               )}
                               {h.status === 'closed' && (
@@ -1100,7 +1114,7 @@ export function BinanceDashboard() {
                                   setCalcModalAsset({
                                     symbol: h.asset,
                                     label: h.asset,
-                                    assetKind: 'Crypto',
+                                    assetKind: h.assetKind || 'Crypto',
                                     currentQty: h.totalQty,
                                     currentAvgCost: avgCost,
                                     currentMarketPrice: h.livePriceUsd,
@@ -1253,6 +1267,7 @@ export function BinanceDashboard() {
               {[
                 { id: 'all' as const, label: 'All' },
                 { id: 'spot' as const, label: 'Spot' },
+                { id: 'equity' as const, label: 'Stocks' },
                 { id: 'convert' as const, label: 'Convert' },
                 { id: 'dust' as const, label: 'Dust' },
               ].map((s) => (
@@ -1434,7 +1449,7 @@ export function BinanceDashboard() {
                   setCalcModalAsset({
                     symbol: h.asset,
                     label: h.asset,
-                    assetKind: 'Crypto',
+                    assetKind: h.assetKind || 'Crypto',
                     currentQty: h.totalQty,
                     currentAvgCost: costBasisMethod === 'fifo' ? h.avgCostFifoUsd : h.avgCostWeightedUsd,
                     currentMarketPrice: h.livePriceUsd,

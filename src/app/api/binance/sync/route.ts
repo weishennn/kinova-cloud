@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getValidGoogleSession, setSessionCookie } from '@/lib/google-auth';
 import { callBinancePublic, callBinanceSigned, getBinanceConfig, type BinanceConfig } from '@/lib/binance-client';
 import {
+  fetchBinanceEquityQuotes,
   fetchBinanceTickers24h,
   fetchServerUsdToMyr,
+  fetchTokenizedEquityMap,
   readStoredBinanceLedger,
   saveStoredBinanceLedger,
 } from '@/lib/binance-cloud-store';
@@ -17,6 +19,7 @@ import {
   normalizeC2cOrder,
   normalizeConvertTrade,
   normalizeCryptoTransfer,
+  normalizeEquityTrade,
   normalizeFiatOrder,
   normalizeSpotTrade,
   resolveAssetPriceUsd,
@@ -179,7 +182,7 @@ export async function POST(req: NextRequest) {
       ? Math.max(0, existingLedger.lastHistorySyncMs - OVERLAP_MS)
       : nowMs - lookbackDays * DAY_MS;
 
-    const [spotRes, fundingRes, tickerMap, exchangeMap, usdToMyr] = await Promise.all([
+    const [spotRes, fundingRes, walletRes, tickerMap, tokenizedMap, exchangeMap, usdToMyr] = await Promise.all([
       callBinanceSigned<{ balances?: Array<{ asset?: string; free?: string; locked?: string }> }>('/api/v3/account', {
         method: 'GET',
         params: { omitZeroBalances: 'true' },
@@ -189,7 +192,17 @@ export async function POST(req: NextRequest) {
         '/sapi/v1/asset/get-funding-asset',
         { method: 'POST', params: { needBtcValuation: 'false' }, config }
       ),
+      callBinanceSigned<Array<{
+        walletName?: string;
+        activate?: boolean;
+        assetBalances?: Array<{ asset?: string; free?: string; locked?: string; freeze?: string; withdrawing?: string }>;
+      }>>('/sapi/v1/asset/wallet/balance', {
+        method: 'GET',
+        params: { needBalanceDetail: 'true', quoteAsset: 'USDT' },
+        config,
+      }),
       fetchBinanceTickers24h(config, true),
+      fetchTokenizedEquityMap(config),
       getExchangeSymbolMap(config),
       fetchServerUsdToMyr(),
     ]);
@@ -206,7 +219,8 @@ export async function POST(req: NextRequest) {
 
     const balances = mergeSpotAndFundingBalances(
       spotRes.data?.balances || [],
-      fundingRes.success && Array.isArray(fundingRes.data) ? fundingRes.data : []
+      fundingRes.success && Array.isArray(fundingRes.data) ? fundingRes.data : [],
+      walletRes.success && Array.isArray(walletRes.data) ? walletRes.data : []
     );
 
     // 1. Funding & Conversion windows
@@ -437,6 +451,105 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // 1G. Binance US Equities / Stocks (/sapi/v1/equity/trade/history + order/history + tokenized/history)
+    const equityOrderFees = new Map<string, number>();
+    const equityOrderRows: Array<Record<string, unknown>> = [];
+    const eqOrderResults = await mapLimited(windows89, 4, (w) =>
+      callBinanceSigned<Array<Record<string, unknown>> | { rows?: Array<Record<string, unknown>> }>(
+        '/sapi/v1/equity/order/history',
+        {
+          method: 'GET',
+          params: { startTime: w.start, endTime: w.end, current: 1, size: 100 },
+          config,
+        }
+      )
+    );
+    for (const res of eqOrderResults) {
+      if (!res.success) continue;
+      const rows = Array.isArray(res.data)
+        ? res.data
+        : Array.isArray((res.data as { rows?: unknown[] } | undefined)?.rows)
+          ? (res.data as { rows: Array<Record<string, unknown>> }).rows
+          : [];
+      for (const ord of rows) {
+        equityOrderRows.push(ord);
+        const oid = String(ord.orderId || '').trim();
+        const fee = Number(ord.fee || 0);
+        if (oid && Number.isFinite(fee) && fee > 0) {
+          equityOrderFees.set(oid, fee);
+        }
+      }
+    }
+
+    const seenEquityOrderIds = new Set<string>();
+    const eqTradeResults = await mapLimited(windows89, 4, async (w) => {
+      const collected: Array<Record<string, unknown>> = [];
+      for (let page = 1; page <= 10; page++) {
+        const res = await callBinanceSigned<{ rows?: Array<Record<string, unknown>>; total?: number }>(
+          '/sapi/v1/equity/trade/history',
+          {
+            method: 'GET',
+            params: { startTime: w.start, endTime: w.end, current: page, size: 100 },
+            config,
+          }
+        );
+        if (!res.success) break;
+        const rows = Array.isArray(res.data?.rows) ? res.data.rows : [];
+        collected.push(...rows);
+        if (rows.length < 100) break;
+      }
+      return collected;
+    });
+    for (const rows of eqTradeResults) {
+      for (const r of rows) {
+        const oid = String(r.orderId || '').trim();
+        if (oid) seenEquityOrderIds.add(oid);
+        const feeOverride = oid ? equityOrderFees.get(oid) : undefined;
+        const norm = normalizeEquityTrade(r, tickerMap as Record<string, BinanceTicker24h>, feeOverride);
+        if (norm) incomingTrades.push(norm);
+      }
+    }
+    // Fallback for any filled equity order not yet returned by trade/history
+    for (const ord of equityOrderRows) {
+      const oid = String(ord.orderId || '').trim();
+      const status = String(ord.status || '').toUpperCase();
+      if (oid && !seenEquityOrderIds.has(oid) && (status === 'FILLED' || Number(ord.filledQty || 0) > 0)) {
+        const norm = normalizeEquityTrade(ord, tickerMap as Record<string, BinanceTicker24h>);
+        if (norm) incomingTrades.push(norm);
+      }
+    }
+
+    // Track tokenized bStock mint/redeem conversions so underlying equity shares aren't double-counted
+    const equityNetAdjustment: Record<string, number> = {};
+    let tokLastId: number | undefined;
+    for (let page = 0; page < 10; page++) {
+      const tokRes = await callBinanceSigned<{
+        rows?: Array<Record<string, unknown>>;
+        hasMore?: boolean;
+        nextLastId?: number;
+      }>('/sapi/v1/equity/tokenized/history', {
+        method: 'GET',
+        params: tokLastId !== undefined ? { lastId: tokLastId, size: 100 } : { size: 100 },
+        config,
+      });
+      if (!tokRes.success) break;
+      const rows = Array.isArray(tokRes.data?.rows) ? tokRes.data.rows : [];
+      for (const r of rows) {
+        if (String(r.status || '').toUpperCase() !== 'S') continue;
+        const underlying = String(r.underlyingAsset || '').trim().toUpperCase();
+        const amt = Number(r.underlyingAssetAmount || 0);
+        const cType = String(r.convertType || '').toUpperCase();
+        if (!underlying || !Number.isFinite(amt) || amt <= 0) continue;
+        if (cType === 'MINT') {
+          equityNetAdjustment[underlying] = (equityNetAdjustment[underlying] || 0) - amt;
+        } else if (cType === 'REDEEM') {
+          equityNetAdjustment[underlying] = (equityNetAdjustment[underlying] || 0) + amt;
+        }
+      }
+      if (!tokRes.data?.hasMore || !tokRes.data?.nextLastId) break;
+      tokLastId = tokRes.data.nextLastId;
+    }
+
     // 2. Discover candidate Spot symbols & paginate myTrades with fromId
     const customSymbols = [
       ...new Set([...existingLedger.customSymbols, ...extraSymbols]),
@@ -495,6 +608,11 @@ export async function POST(req: NextRequest) {
     const mergedTrades = mergeTradesById(existingLedger.trades, incomingTrades);
     const mergedFunding = mergeFundingById(existingLedger.fundingEvents, incomingFunding);
 
+    const effectiveTokenizedMap = {
+      ...(existingLedger.tokenizedAssetMap || {}),
+      ...tokenizedMap,
+    };
+
     const updatedLedger = {
       version: 1 as const,
       lastSyncAt: completedIso,
@@ -505,9 +623,21 @@ export async function POST(req: NextRequest) {
       costBasisOverrides: existingLedger.costBasisOverrides,
       customSymbols,
       lastBalances: balances,
+      tokenizedAssetMap: effectiveTokenizedMap,
+      equityNetAdjustment,
     };
 
     await saveStoredBinanceLedger(session, updatedLedger);
+
+    const equitySymbols = new Set<string>();
+    for (const b of balances) {
+      if (effectiveTokenizedMap[b.asset]) equitySymbols.add(effectiveTokenizedMap[b.asset]);
+      else if ((b.equityQty || 0) > 0) equitySymbols.add(b.asset);
+    }
+    for (const tr of mergedTrades) {
+      if (tr.source === 'equity') equitySymbols.add(tr.baseAsset);
+    }
+    const equityPrices = await fetchBinanceEquityQuotes([...equitySymbols], config);
 
     const analytics = computeBinanceAnalytics({
       balances,
@@ -516,6 +646,9 @@ export async function POST(req: NextRequest) {
       tickerMap,
       usdToMyr,
       costBasisOverrides: updatedLedger.costBasisOverrides,
+      equityPrices,
+      tokenizedAssetMap: effectiveTokenizedMap,
+      equityNetAdjustment,
     });
 
     const response = NextResponse.json({

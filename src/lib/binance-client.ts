@@ -158,7 +158,8 @@ function formatBinanceError(status: number, code?: number, msg?: string): string
 export async function callBinancePublic<T = unknown>(
   path: string,
   params: Record<string, string | number | boolean> = {},
-  config?: BinanceConfig | null
+  config?: BinanceConfig | null,
+  options: { includeApiKey?: boolean } = {}
 ): Promise<BinanceApiResult<T>> {
   const effectiveConfig = config ?? getBinanceConfig();
   const baseUrl = effectiveConfig?.baseUrl || DEFAULT_BASE_URLS[0];
@@ -171,12 +172,17 @@ export async function callBinancePublic<T = unknown>(
   ).toString();
   const url = `${baseUrl}${path}${qs ? `?${qs}` : ''}`;
 
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (options.includeApiKey && effectiveConfig?.apiKey) {
+    headers['X-MBX-APIKEY'] = effectiveConfig.apiKey;
+  }
+
   try {
     const res = await fetchWithProxy(
       url,
       {
         method: 'GET',
-        headers: { Accept: 'application/json' },
+        headers,
         cache: 'no-store',
         signal: AbortSignal.timeout(15000),
       },

@@ -33,6 +33,7 @@ export interface BinanceWalletBalance {
   fundingFreeze: number;
   fundingWithdrawing: number;
   fundingQty: number;
+  equityQty?: number;
   totalQty: number;
 }
 
@@ -66,7 +67,7 @@ export interface BinanceTradeExecution {
   id: string;
   timestamp: number;
   date: string;
-  source: 'spot' | 'convert' | 'dust';
+  source: 'spot' | 'convert' | 'dust' | 'equity';
   symbol: string;
   baseAsset: string;
   quoteAsset: string;
@@ -90,13 +91,17 @@ export interface BinanceStoredLedger {
   costBasisOverrides: Record<string, number>; // fundingEventId -> override USD total cost
   customSymbols: string[];
   lastBalances?: BinanceWalletBalance[];
+  tokenizedAssetMap?: Record<string, string>; // tokenizedAsset (e.g. AAPLB) -> underlying (AAPL)
+  equityNetAdjustment?: Record<string, number>; // underlying symbol -> net minted/redeemed adjustment
 }
 
 export interface BinanceHoldingSummary {
   asset: string;
+  assetKind: 'Crypto' | 'Stock';
   isStablecoin: boolean;
   spotQty: number;
   fundingQty: number;
+  equityQty: number;
   lockedQty: number;
   totalQty: number;
   livePriceUsd: number;
@@ -219,7 +224,9 @@ export function buildTickerMap(rawTickers: Array<Record<string, unknown>>): Reco
 
 export function resolveAssetPriceUsd(
   asset: string,
-  tickerMap: Record<string, BinanceTicker24h>
+  tickerMap: Record<string, BinanceTicker24h>,
+  equityPrices: Record<string, { priceUsd: number; change24hPct: number }> = {},
+  tokenizedAssetMap: Record<string, string> = {}
 ): { priceUsd: number; change24hPct: number } {
   const clean = asset.trim().toUpperCase();
   if (!clean) return { priceUsd: 0, change24hPct: 0 };
@@ -236,6 +243,14 @@ export function resolveAssetPriceUsd(
     if (t && t.lastPrice > 0) {
       return { priceUsd: t.lastPrice, change24hPct: t.priceChangePercent };
     }
+  }
+
+  const underlying = tokenizedAssetMap[clean] || clean;
+  if (equityPrices[clean]?.priceUsd > 0) {
+    return equityPrices[clean];
+  }
+  if (equityPrices[underlying]?.priceUsd > 0) {
+    return equityPrices[underlying];
   }
 
   const btcPair = tickerMap[`${clean}BTC`];
@@ -267,7 +282,18 @@ export function mergeSpotAndFundingBalances(
     locked?: unknown;
     freeze?: unknown;
     withdrawing?: unknown;
-  }>
+  }>,
+  allWalletRows: Array<{
+    walletName?: unknown;
+    activate?: unknown;
+    assetBalances?: Array<{
+      asset?: unknown;
+      free?: unknown;
+      locked?: unknown;
+      freeze?: unknown;
+      withdrawing?: unknown;
+    }>;
+  }> = []
 ): BinanceWalletBalance[] {
   const byAsset = new Map<string, BinanceWalletBalance>();
   const ensure = (asset: string) => {
@@ -284,6 +310,7 @@ export function mergeSpotAndFundingBalances(
         fundingFreeze: 0,
         fundingWithdrawing: 0,
         fundingQty: 0,
+        equityQty: 0,
         totalQty: 0,
       };
       byAsset.set(clean, row);
@@ -301,7 +328,7 @@ export function mergeSpotAndFundingBalances(
     row.spotFree += free;
     row.spotLocked += locked;
     row.spotQty = row.spotFree + row.spotLocked;
-    row.totalQty = row.spotQty + row.fundingQty;
+    row.totalQty = row.spotQty + row.fundingQty + (row.equityQty || 0);
   }
 
   for (const f of fundingBalances) {
@@ -318,7 +345,29 @@ export function mergeSpotAndFundingBalances(
     row.fundingFreeze += freeze;
     row.fundingWithdrawing += withdrawing;
     row.fundingQty = row.fundingFree + row.fundingLocked + row.fundingFreeze + row.fundingWithdrawing;
-    row.totalQty = row.spotQty + row.fundingQty;
+    row.totalQty = row.spotQty + row.fundingQty + (row.equityQty || 0);
+  }
+
+  // Merge any extra wallets (e.g. Stock/Equity/TradFi) from /sapi/v1/asset/wallet/balance
+  for (const w of allWalletRows) {
+    const walletName = String(w.walletName || '').trim().toLowerCase();
+    if (!walletName || walletName === 'spot' || walletName === 'funding') continue;
+    const isEquityWallet = /stock|equity|tradfi|share/.test(walletName);
+    if (!isEquityWallet) continue;
+    const list = Array.isArray(w.assetBalances) ? w.assetBalances : [];
+    for (const item of list) {
+      const asset = String(item.asset || '').trim().toUpperCase();
+      if (!asset) continue;
+      const qty =
+        Math.max(0, toNum(item.free)) +
+        Math.max(0, toNum(item.locked)) +
+        Math.max(0, toNum(item.freeze)) +
+        Math.max(0, toNum(item.withdrawing));
+      if (qty <= 0) continue;
+      const row = ensure(asset);
+      row.equityQty = (row.equityQty || 0) + qty;
+      row.totalQty = row.spotQty + row.fundingQty + row.equityQty;
+    }
   }
 
   return [...byAsset.values()].filter((r) => r.totalQty > 1e-12);
@@ -399,6 +448,46 @@ export function normalizeSpotTrade(
     commissionAsset: commissionAsset || undefined,
     rawCommission: commission || undefined,
     note: `Spot ${side} ${symbol.toUpperCase()}`,
+  };
+}
+
+export function normalizeEquityTrade(
+  raw: Record<string, unknown>,
+  tickerMap: Record<string, BinanceTicker24h>,
+  feeUsdOverride?: number
+): BinanceTradeExecution | null {
+  const executionId = String(raw.executionId || raw.id || raw.orderId || '').trim();
+  const symbol = String(raw.symbol || '').trim().toUpperCase();
+  const quote = String(raw.quote || 'USDC').trim().toUpperCase();
+  const sideRaw = String(raw.side || '').trim().toUpperCase();
+  const side: 'BUY' | 'SELL' = sideRaw === 'SELL' ? 'SELL' : 'BUY';
+  const qty = Math.max(0, toNum(raw.qty ?? raw.filledQty));
+  const price = Math.max(0, toNum(raw.price ?? raw.avgFilledPrice));
+  const rawTotal = Math.max(0, toNum(raw.total ?? raw.filledTotal)) || qty * price;
+  const timestamp = toNum(raw.executionAt ?? raw.updatedAt ?? raw.createdAt);
+
+  if (!executionId || !symbol || qty <= 0 || timestamp <= 0) return null;
+
+  const quotePriceUsd = resolveAssetPriceUsd(quote, tickerMap).priceUsd || 1;
+  const totalUsd = rawTotal * quotePriceUsd;
+  const priceUsd = qty > 0 ? totalUsd / qty : price * quotePriceUsd;
+  const feeUsd = Math.max(0, feeUsdOverride ?? toNum(raw.fee)) * quotePriceUsd;
+
+  return {
+    id: `eq_${symbol}_${executionId}`,
+    timestamp,
+    date: formatKlDate(timestamp),
+    source: 'equity',
+    symbol: `${symbol}${quote}`,
+    baseAsset: symbol,
+    quoteAsset: quote,
+    side,
+    quantity: qty,
+    priceUsd,
+    totalUsd,
+    feeUsd,
+    commissionAsset: quote,
+    note: `Binance Stock ${side} ${symbol} (${quote})`,
   };
 }
 
@@ -661,6 +750,9 @@ export function computeBinanceAnalytics(params: {
   tickerMap: Record<string, BinanceTicker24h>;
   usdToMyr: number;
   costBasisOverrides?: Record<string, number>;
+  equityPrices?: Record<string, { priceUsd: number; change24hPct: number }>;
+  tokenizedAssetMap?: Record<string, string>;
+  equityNetAdjustment?: Record<string, number>;
 }): BinanceAnalyticsReport {
   const {
     balances,
@@ -669,6 +761,9 @@ export function computeBinanceAnalytics(params: {
     tickerMap,
     usdToMyr,
     costBasisOverrides = {},
+    equityPrices = {},
+    tokenizedAssetMap = {},
+    equityNetAdjustment = {},
   } = params;
 
   const balanceMap = new Map<string, BinanceWalletBalance>();
@@ -677,9 +772,11 @@ export function computeBinanceAnalytics(params: {
   }
 
   const tradesByAsset = new Map<string, BinanceTradeExecution[]>();
+  const equityAssetSet = new Set<string>(Object.keys(tokenizedAssetMap).map((k) => k.toUpperCase()));
   for (const tr of trades) {
     const asset = tr.baseAsset.toUpperCase();
     if (!asset || STABLECOIN_ASSETS.has(asset)) continue;
+    if (tr.source === 'equity') equityAssetSet.add(asset);
     const list = tradesByAsset.get(asset) || [];
     list.push(tr);
     tradesByAsset.set(asset, list);
@@ -697,11 +794,36 @@ export function computeBinanceAnalytics(params: {
     const bal = balanceMap.get(asset);
     const spotQty = bal?.spotQty ?? 0;
     const fundingQty = bal?.fundingQty ?? 0;
+    let equityQty = bal?.equityQty ?? 0;
     const lockedQty = (bal?.spotLocked ?? 0) + (bal?.fundingLocked ?? 0) + (bal?.fundingFreeze ?? 0);
-    const totalQty = bal?.totalQty ?? 0;
+    let totalQty = bal?.totalQty ?? 0;
 
     const isStablecoin = STABLECOIN_ASSETS.has(asset);
-    const { priceUsd: livePriceUsd, change24hPct } = resolveAssetPriceUsd(asset, tickerMap);
+    const assetTrades = [...(tradesByAsset.get(asset) || [])].sort((a, b) => a.timestamp - b.timestamp);
+    const isStock = equityAssetSet.has(asset) || Boolean(tokenizedAssetMap[asset]);
+
+    // If Binance US Equities doesn't expose un-tokenized equity shares in Spot/Funding/wallet balance,
+    // derive remaining equity shares held from equity trade fills minus any minted tokenized shares.
+    if (isStock && totalQty <= 1e-10) {
+      let netEqQty = 0;
+      for (const tr of assetTrades) {
+        if (tr.source === 'equity') {
+          netEqQty += tr.side === 'BUY' ? tr.quantity : -tr.quantity;
+        }
+      }
+      netEqQty += Number(equityNetAdjustment[asset] || 0);
+      if (netEqQty > 1e-8) {
+        equityQty = netEqQty;
+        totalQty = netEqQty;
+      }
+    }
+
+    const { priceUsd: livePriceUsd, change24hPct } = resolveAssetPriceUsd(
+      asset,
+      tickerMap,
+      equityPrices,
+      tokenizedAssetMap
+    );
     const marketValueUsd = totalQty * livePriceUsd;
     const marketValueMyr = marketValueUsd * usdToMyr;
 
@@ -709,9 +831,11 @@ export function computeBinanceAnalytics(params: {
       if (totalQty <= 1e-8) continue;
       holdings.push({
         asset,
+        assetKind: 'Crypto',
         isStablecoin: true,
         spotQty,
         fundingQty,
+        equityQty: 0,
         lockedQty,
         totalQty,
         livePriceUsd,
@@ -737,7 +861,6 @@ export function computeBinanceAnalytics(params: {
       continue;
     }
 
-    const assetTrades = [...(tradesByAsset.get(asset) || [])].sort((a, b) => a.timestamp - b.timestamp);
     const fifoLots: Array<{ qty: number; unitCostUsd: number }> = [];
     let wQty = 0;
     let wTotalCostUsd = 0;
@@ -829,9 +952,11 @@ export function computeBinanceAnalytics(params: {
 
     holdings.push({
       asset,
+      assetKind: isStock ? 'Stock' : 'Crypto',
       isStablecoin: false,
       spotQty,
       fundingQty,
+      equityQty,
       lockedQty,
       totalQty,
       livePriceUsd,
@@ -979,6 +1104,8 @@ export function parseChunkedBinanceLedger(settings: Record<string, unknown>): Bi
       costBasisOverrides: parsed.costBasisOverrides && typeof parsed.costBasisOverrides === 'object' ? parsed.costBasisOverrides : {},
       customSymbols: Array.isArray(parsed.customSymbols) ? parsed.customSymbols : [],
       lastBalances: Array.isArray(parsed.lastBalances) ? parsed.lastBalances : [],
+      tokenizedAssetMap: parsed.tokenizedAssetMap && typeof parsed.tokenizedAssetMap === 'object' ? parsed.tokenizedAssetMap : {},
+      equityNetAdjustment: parsed.equityNetAdjustment && typeof parsed.equityNetAdjustment === 'object' ? parsed.equityNetAdjustment : {},
     };
   } catch {
     return null;

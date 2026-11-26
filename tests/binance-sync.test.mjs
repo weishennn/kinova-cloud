@@ -9,6 +9,7 @@ import {
   mergeSpotAndFundingBalances,
   normalizeC2cOrder,
   normalizeConvertTrade,
+  normalizeEquityTrade,
   normalizeSpotTrade,
   parseChunkedBinanceLedger,
   serializeChunkedBinanceLedger,
@@ -250,4 +251,71 @@ test('chunked ledger serialization stays within Google Sheets cell limit and rou
   assert.ok(restored);
   assert.equal(restored.trades.length, 600);
   assert.equal(restored.lastSyncAt, ledger.lastSyncAt);
+});
+
+test('normalizes Binance US equity trades, derives open equity shares, and prices tokenized bStocks', () => {
+  const tickerMap = buildTickerMap([
+    { symbol: 'USDCUSDT', lastPrice: '1', priceChangePercent: '0' },
+  ]);
+
+  const eqBuy = normalizeEquityTrade(
+    {
+      executionId: 'exec-1',
+      orderId: 'ord-1',
+      symbol: 'NVDA',
+      quote: 'USDC',
+      side: 'BUY',
+      price: '120',
+      qty: '10',
+      total: '1200',
+      executionAt: 1700000000000,
+    },
+    tickerMap
+  );
+  const eqSell = normalizeEquityTrade(
+    {
+      executionId: 'exec-2',
+      orderId: 'ord-2',
+      symbol: 'NVDA',
+      quote: 'USDC',
+      side: 'SELL',
+      price: '150',
+      qty: '4',
+      total: '600',
+      executionAt: 1700001000000,
+    },
+    tickerMap
+  );
+  assert.ok(eqBuy && eqSell);
+
+  const balances = mergeSpotAndFundingBalances(
+    [{ asset: 'AAPLB', free: '2', locked: '0' }],
+    []
+  );
+
+  const report = computeBinanceAnalytics({
+    balances,
+    trades: [eqBuy, eqSell],
+    fundingEvents: [],
+    tickerMap,
+    usdToMyr: 4.2,
+    equityPrices: {
+      NVDA: { priceUsd: 160, change24hPct: 3.2 },
+      AAPL: { priceUsd: 220, change24hPct: 1.1 },
+    },
+    tokenizedAssetMap: { AAPLB: 'AAPL' },
+  });
+
+  const nvda = report.holdings.find((h) => h.asset === 'NVDA');
+  assert.ok(nvda);
+  assert.equal(nvda.assetKind, 'Stock');
+  assert.equal(nvda.totalQty, 6);
+  assert.equal(nvda.realizedPnlFifoUsd, 120); // 4 * (150 - 120)
+  assert.equal(nvda.unrealizedPnlFifoUsd, 240); // 6 * (160 - 120)
+
+  const aaplb = report.holdings.find((h) => h.asset === 'AAPLB');
+  assert.ok(aaplb);
+  assert.equal(aaplb.assetKind, 'Stock');
+  assert.equal(aaplb.livePriceUsd, 220);
+  assert.equal(aaplb.marketValueUsd, 440);
 });

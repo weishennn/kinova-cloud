@@ -20,6 +20,13 @@ let cachedTickers: Record<string, BinanceTicker24h> = {};
 let cachedTickersAt = 0;
 const TICKERS_TTL_MS = 30 * 1000;
 
+let cachedTokenizedMap: Record<string, string> = {};
+let cachedTokenizedMapAt = 0;
+const TOKENIZED_MAP_TTL_MS = 60 * 60 * 1000;
+
+const cachedEquityQuotes: Record<string, { priceUsd: number; change24hPct: number; fetchedAt: number }> = {};
+const EQUITY_QUOTE_TTL_MS = 30 * 1000;
+
 export async function fetchServerUsdToMyr(): Promise<number> {
   const now = Date.now();
   if (cachedUsdMyrAt > 0 && now - cachedUsdMyrAt < USD_MYR_TTL_MS) {
@@ -69,6 +76,137 @@ export async function fetchBinanceTickers24h(
     cachedTickersAt = now;
   }
   return cachedTickers;
+}
+
+export async function fetchTokenizedEquityMap(
+  config?: BinanceConfig | null
+): Promise<Record<string, string>> {
+  const now = Date.now();
+  if (cachedTokenizedMapAt > 0 && now - cachedTokenizedMapAt < TOKENIZED_MAP_TTL_MS && Object.keys(cachedTokenizedMap).length > 0) {
+    return cachedTokenizedMap;
+  }
+
+  try {
+    const res = await callBinancePublic<
+      Array<{ assetCode?: string; underlyingEquitySymbol?: string }> | { data?: Array<{ assetCode?: string; underlyingEquitySymbol?: string }> }
+    >('/sapi/v1/equity/market/tokenized-assets', {}, config, { includeApiKey: true });
+
+    const list = Array.isArray(res.data)
+      ? res.data
+      : Array.isArray((res.data as { data?: unknown[] } | undefined)?.data)
+        ? (res.data as { data: Array<{ assetCode?: string; underlyingEquitySymbol?: string }> }).data
+        : [];
+
+    if (res.success && list.length > 0) {
+      const nextMap: Record<string, string> = {};
+      for (const item of list) {
+        const code = String(item.assetCode || '').trim().toUpperCase();
+        const underlying = String(item.underlyingEquitySymbol || '').trim().toUpperCase();
+        if (code && underlying) nextMap[code] = underlying;
+      }
+      cachedTokenizedMap = nextMap;
+      cachedTokenizedMapAt = now;
+    }
+  } catch {
+    // Tokenized assets endpoint is optional if region/account doesn't enable bStocks
+  }
+  return cachedTokenizedMap;
+}
+
+async function fetchSingleEquityQuote(
+  symbol: string,
+  config?: BinanceConfig | null
+): Promise<{ priceUsd: number; change24hPct: number } | null> {
+  const clean = symbol.trim().toUpperCase();
+  if (!clean) return null;
+
+  const now = Date.now();
+  const cached = cachedEquityQuotes[clean];
+  if (cached && now - cached.fetchedAt < EQUITY_QUOTE_TTL_MS) {
+    return { priceUsd: cached.priceUsd, change24hPct: cached.change24hPct };
+  }
+
+  let priceUsd = 0;
+  let change24hPct = 0;
+
+  // 1. Try Yahoo Finance first (provides both live/extended price + regularMarketChangePercent 24/7)
+  for (const host of ['query1.finance.yahoo.com', 'query2.finance.yahoo.com']) {
+    try {
+      const url = `https://${host}/v8/finance/chart/${encodeURIComponent(clean)}?interval=1d&range=1d`;
+      const res = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+          Accept: 'application/json',
+        },
+        signal: AbortSignal.timeout(5000),
+        cache: 'no-store',
+      });
+      if (res.ok) {
+        const data = (await res.json()) as {
+          chart?: {
+            result?: Array<{
+              meta?: {
+                regularMarketPrice?: number;
+                chartPreviousClose?: number;
+                regularMarketChangePercent?: number;
+              };
+            }>;
+          };
+        };
+        const meta = data?.chart?.result?.[0]?.meta;
+        const p = Number(meta?.regularMarketPrice || meta?.chartPreviousClose || 0);
+        if (Number.isFinite(p) && p > 0) {
+          priceUsd = p;
+          change24hPct = Number(meta?.regularMarketChangePercent ?? 0) || 0;
+          break;
+        }
+      }
+    } catch {
+      // fallback to next host or Binance quote
+    }
+  }
+
+  // 2. Also check Binance native equity quote endpoint when available
+  if (priceUsd <= 0 && config) {
+    try {
+      const bRes = await callBinancePublic<{
+        bidPrice?: string;
+        askPrice?: string;
+      }>('/sapi/v1/equity/market/quote', { symbol: clean }, config, { includeApiKey: true });
+      if (bRes.success && bRes.data) {
+        const bid = Number(bRes.data.bidPrice || 0);
+        const ask = Number(bRes.data.askPrice || 0);
+        const mid = bid > 0 && ask > 0 ? (bid + ask) / 2 : (bid || ask);
+        if (Number.isFinite(mid) && mid > 0) {
+          priceUsd = mid;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  if (priceUsd > 0) {
+    cachedEquityQuotes[clean] = { priceUsd, change24hPct, fetchedAt: now };
+    return { priceUsd, change24hPct };
+  }
+  return null;
+}
+
+export async function fetchBinanceEquityQuotes(
+  symbols: string[],
+  config?: BinanceConfig | null
+): Promise<Record<string, { priceUsd: number; change24hPct: number }>> {
+  const unique = [...new Set(symbols.map((s) => s.trim().toUpperCase()).filter(Boolean))].slice(0, 40);
+  if (unique.length === 0) return {};
+  const results = await Promise.all(
+    unique.map(async (sym) => [sym, await fetchSingleEquityQuote(sym, config)] as const)
+  );
+  const out: Record<string, { priceUsd: number; change24hPct: number }> = {};
+  for (const [sym, q] of results) {
+    if (q) out[sym] = q;
+  }
+  return out;
 }
 
 export async function readKinovaSettings(session: GoogleUserSession): Promise<Record<string, unknown>> {

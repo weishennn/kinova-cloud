@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getValidGoogleSession, setSessionCookie } from '@/lib/google-auth';
 import { getBinanceConfig, callBinanceSigned } from '@/lib/binance-client';
 import {
+  fetchBinanceEquityQuotes,
   fetchBinanceTickers24h,
   fetchServerUsdToMyr,
+  fetchTokenizedEquityMap,
   readStoredBinanceLedger,
   saveStoredBinanceLedger,
 } from '@/lib/binance-cloud-store';
@@ -26,6 +28,18 @@ type FundingAssetRow = {
   locked?: string;
   freeze?: string;
   withdrawing?: string;
+};
+
+type WalletBalanceRow = {
+  walletName?: string;
+  activate?: boolean;
+  assetBalances?: Array<{
+    asset?: string;
+    free?: string;
+    locked?: string;
+    freeze?: string;
+    withdrawing?: string;
+  }>;
 };
 
 export async function GET(req: NextRequest) {
@@ -53,7 +67,7 @@ export async function GET(req: NextRequest) {
 
     const fresh = req.nextUrl.searchParams.get('fresh') === '1';
 
-    const [spotRes, fundingRes, tickerMap, usdToMyr, storedLedger] = await Promise.all([
+    const [spotRes, fundingRes, walletRes, tickerMap, tokenizedMap, usdToMyr, storedLedger] = await Promise.all([
       callBinanceSigned<SpotAccountResp>('/api/v3/account', {
         method: 'GET',
         params: { omitZeroBalances: 'true' },
@@ -64,7 +78,13 @@ export async function GET(req: NextRequest) {
         params: { needBtcValuation: 'false' },
         config,
       }),
+      callBinanceSigned<WalletBalanceRow[]>('/sapi/v1/asset/wallet/balance', {
+        method: 'GET',
+        params: { needBalanceDetail: 'true', quoteAsset: 'USDT' },
+        config,
+      }),
       fetchBinanceTickers24h(config, fresh),
+      fetchTokenizedEquityMap(config),
       fetchServerUsdToMyr(),
       readStoredBinanceLedger(session).catch(() => null),
     ]);
@@ -89,10 +109,29 @@ export async function GET(req: NextRequest) {
 
     const balances = mergeSpotAndFundingBalances(
       spotRes.data?.balances || [],
-      fundingRes.success && Array.isArray(fundingRes.data) ? fundingRes.data : []
+      fundingRes.success && Array.isArray(fundingRes.data) ? fundingRes.data : [],
+      walletRes.success && Array.isArray(walletRes.data) ? walletRes.data : []
     );
 
     const ledger = storedLedger || createEmptyBinanceLedger();
+    const effectiveTokenizedMap = {
+      ...(ledger.tokenizedAssetMap || {}),
+      ...tokenizedMap,
+    };
+
+    const equitySymbols = new Set<string>();
+    for (const b of balances) {
+      if (effectiveTokenizedMap[b.asset]) {
+        equitySymbols.add(effectiveTokenizedMap[b.asset]);
+      } else if ((b.equityQty || 0) > 0) {
+        equitySymbols.add(b.asset);
+      }
+    }
+    for (const tr of ledger.trades) {
+      if (tr.source === 'equity') equitySymbols.add(tr.baseAsset);
+    }
+    const equityPrices = await fetchBinanceEquityQuotes([...equitySymbols], config);
+
     const analytics = computeBinanceAnalytics({
       balances,
       trades: ledger.trades,
@@ -100,6 +139,9 @@ export async function GET(req: NextRequest) {
       tickerMap,
       usdToMyr,
       costBasisOverrides: ledger.costBasisOverrides,
+      equityPrices,
+      tokenizedAssetMap: effectiveTokenizedMap,
+      equityNetAdjustment: ledger.equityNetAdjustment || {},
     });
 
     const response = NextResponse.json({
