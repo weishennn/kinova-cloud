@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
         params: { omitZeroBalances: 'true' },
         config,
       }),
-      callBinanceSigned<FundingAssetRow[]>('/sapi/v3/asset/get-funding-asset', {
+      callBinanceSigned<FundingAssetRow[]>('/sapi/v1/asset/get-funding-asset', {
         method: 'POST',
         params: { needBtcValuation: 'false' },
         config,

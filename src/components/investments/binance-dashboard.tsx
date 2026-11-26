@@ -547,6 +547,17 @@ export function BinanceDashboard() {
         </div>
       )}
 
+      {Array.isArray(payload?.warnings) && payload.warnings.length > 0 && (
+        <div className="p-3.5 rounded-2xl border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200 text-xs space-y-1">
+          {payload.warnings.slice(0, 4).map((w, idx) => (
+            <div key={idx} className="flex items-start gap-2">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <span>{w}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {!isLoading && payload?.configured && !payload?.hasSyncedHistory && (
         <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 text-amber-950 dark:text-amber-200 text-xs flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-start gap-2.5">

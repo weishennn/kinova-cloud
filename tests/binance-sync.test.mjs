@@ -14,12 +14,15 @@ import {
   serializeChunkedBinanceLedger,
   BINANCE_MAX_CHUNK_CHARS,
 } from '../src/lib/binance-sync.ts';
-import { detectBinanceKeyType, signBinancePayload } from '../src/lib/binance-client.ts';
+import { detectBinanceKeyType, normalizePrivateKeyPem, signBinancePayload } from '../src/lib/binance-client.ts';
 
 test('Ed25519 keys produce valid Base64 signatures and HMAC secrets produce Hex signatures', () => {
   const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
   const pem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
   assert.equal(detectBinanceKeyType(pem), 'ed25519');
+
+  const quotedEscapedPem = `"${pem.trim().replace(/\n/g, '\\n')}"`;
+  assert.equal(normalizePrivateKeyPem(quotedEscapedPem), pem.trim());
 
   const payload = 'omitZeroBalances=true&timestamp=1700000000000';
   const sigB64 = signBinancePayload(payload, pem);

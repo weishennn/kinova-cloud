@@ -43,7 +43,14 @@ export function getBinanceProxyAgent(proxyUrl?: string): ProxyAgent | undefined 
 }
 
 export function normalizePrivateKeyPem(raw: string): string {
-  return (raw || '').replace(/\\n/g, '\n').trim();
+  let cleaned = (raw || '').trim();
+  if (
+    (cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+    (cleaned.startsWith("'") && cleaned.endsWith("'"))
+  ) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+  return cleaned.replace(/\\n/g, '\n').trim();
 }
 
 export function detectBinanceKeyType(secretOrKey: string): 'ed25519' | 'hmac' {
@@ -128,7 +135,7 @@ export async function syncBinanceServerTime(config?: BinanceConfig | null): Prom
 
 function formatBinanceError(status: number, code?: number, msg?: string): string {
   if (status === 451) {
-    return 'Binance blocked this server region (HTTP 451). Ensure FIXIE_URL points to a non-US proxy region (e.g. Singapore or EU).';
+    return 'Binance blocked this server region (HTTP 451). In Vercel → Project Settings → Functions, set Function Region to Singapore (sin1) or another non-US region (or configure a non-US FIXIE_URL).';
   }
   if (status === 418) {
     return 'Binance temporarily banned this IP for rate-limit violation (HTTP 418). Wait before retrying.';

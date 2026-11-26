@@ -186,7 +186,7 @@ export async function POST(req: NextRequest) {
         config,
       }),
       callBinanceSigned<Array<{ asset?: string; free?: string; locked?: string; freeze?: string; withdrawing?: string }>>(
-        '/sapi/v3/asset/get-funding-asset',
+        '/sapi/v1/asset/get-funding-asset',
         { method: 'POST', params: { needBtcValuation: 'false' }, config }
       ),
       fetchBinanceTickers24h(config, true),
@@ -217,10 +217,10 @@ export async function POST(req: NextRequest) {
     const windows30 = buildTimeWindows(startMs, nowMs, 29);
     const windows89 = buildTimeWindows(startMs, nowMs, 89);
 
-    // 1A. P2P (C2C) Orders (BUY & SELL, 30-day chunks)
+    // 1A. P2P (C2C) Orders (BUY & SELL, 30-day chunks in parallel)
     for (const tradeType of ['BUY', 'SELL'] as const) {
-      for (const w of windows30) {
-        const res = await callBinanceSigned<{ data?: Array<Record<string, unknown>> }>(
+      const p2pResults = await mapLimited(windows30, 5, (w) =>
+        callBinanceSigned<{ data?: Array<Record<string, unknown>> }>(
           '/sapi/v1/c2c/orderMatch/listUserOrderHistory',
           {
             method: 'GET',
@@ -233,12 +233,16 @@ export async function POST(req: NextRequest) {
             },
             config,
           }
-        );
+        )
+      );
+      let warnedP2p = false;
+      for (const res of p2pResults) {
         if (!res.success) {
-          if (res.code !== -1002 && res.status !== 404) {
+          if (!warnedP2p && res.code !== -1002 && res.status !== 404) {
             warnings.push(`P2P ${tradeType} sync: ${res.error}`);
+            warnedP2p = true;
           }
-          break;
+          continue;
         }
         const rows = Array.isArray(res.data?.data) ? res.data.data : [];
         for (const r of rows) {
@@ -251,10 +255,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 1B. Fiat Deposits & Withdrawals
+    // 1B. Fiat Deposits & Withdrawals (89-day chunks in parallel)
     for (const txType of [0, 1] as const) {
-      for (const w of windows89) {
-        const res = await callBinanceSigned<{ data?: Array<Record<string, unknown>> }>('/sapi/v1/fiat/orders', {
+      const fiatResults = await mapLimited(windows89, 5, (w) =>
+        callBinanceSigned<{ data?: Array<Record<string, unknown>> }>('/sapi/v1/fiat/orders', {
           method: 'GET',
           params: {
             transactionType: txType,
@@ -264,10 +268,16 @@ export async function POST(req: NextRequest) {
             page: 1,
           },
           config,
-        });
+        })
+      );
+      let warnedFiat = false;
+      for (const res of fiatResults) {
         if (!res.success) {
-          warnings.push(`Fiat ${txType === 0 ? 'deposit' : 'withdraw'} sync: ${res.error}`);
-          break;
+          if (!warnedFiat) {
+            warnings.push(`Fiat ${txType === 0 ? 'deposit' : 'withdraw'} sync: ${res.error}`);
+            warnedFiat = true;
+          }
+          continue;
         }
         const rows = Array.isArray(res.data?.data) ? res.data.data : [];
         for (const r of rows) {
@@ -277,9 +287,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 1C. On-chain Crypto Deposits & Withdrawals (89-day chunks)
-    for (const w of windows89) {
-      const [depRes, wdRes] = await Promise.all([
+    // 1C. On-chain Crypto Deposits & Withdrawals (89-day chunks in parallel)
+    const depWdResults = await mapLimited(windows89, 4, (w) =>
+      Promise.all([
         callBinanceSigned<Array<Record<string, unknown>>>('/sapi/v1/capital/deposit/hisrec', {
           method: 'GET',
           params: { startTime: w.start, endTime: w.end, limit: 1000 },
@@ -290,7 +300,11 @@ export async function POST(req: NextRequest) {
           params: { startTime: w.start, endTime: w.end, limit: 1000 },
           config,
         }),
-      ]);
+      ])
+    );
+    let warnedDep = false;
+    let warnedWd = false;
+    for (const [depRes, wdRes] of depWdResults) {
       if (depRes.success && Array.isArray(depRes.data)) {
         for (const r of depRes.data) {
           const ev = normalizeCryptoTransfer(r, 'crypto_deposit', tickerMap);
@@ -299,8 +313,9 @@ export async function POST(req: NextRequest) {
             discoveredAssets.add(ev.asset);
           }
         }
-      } else if (!depRes.success) {
+      } else if (!depRes.success && !warnedDep) {
         warnings.push(`Crypto deposit history: ${depRes.error}`);
+        warnedDep = true;
       }
 
       if (wdRes.success && Array.isArray(wdRes.data)) {
@@ -311,20 +326,23 @@ export async function POST(req: NextRequest) {
             discoveredAssets.add(ev.asset);
           }
         }
-      } else if (!wdRes.success) {
+      } else if (!wdRes.success && !warnedWd) {
         warnings.push(`Crypto withdraw history: ${wdRes.error}`);
+        warnedWd = true;
       }
     }
 
-    // 1D. Spot <-> Funding internal transfers (neutral moves)
+    // 1D. Spot <-> Funding internal transfers (neutral moves, in parallel)
     for (const transferType of ['MAIN_FUNDING', 'FUNDING_MAIN'] as const) {
-      for (const w of windows30) {
-        const res = await callBinanceSigned<{ rows?: Array<Record<string, unknown>> }>('/sapi/v1/asset/transfer', {
+      const xferResults = await mapLimited(windows30, 5, (w) =>
+        callBinanceSigned<{ rows?: Array<Record<string, unknown>> }>('/sapi/v1/asset/transfer', {
           method: 'GET',
           params: { type: transferType, startTime: w.start, endTime: w.end, size: 100, current: 1 },
           config,
-        });
-        if (!res.success) break;
+        })
+      );
+      for (const res of xferResults) {
+        if (!res.success) continue;
         const rows = Array.isArray(res.data?.rows) ? res.data.rows : [];
         for (const r of rows) {
           const tranId = String(r.tranId || '').trim();
@@ -349,16 +367,22 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 1E. Binance Convert tradeFlow (30-day chunks)
-    for (const w of windows30) {
-      const convRes = await callBinanceSigned<{ list?: Array<Record<string, unknown>> }>('/sapi/v1/convert/tradeFlow', {
+    // 1E. Binance Convert tradeFlow (30-day chunks in parallel)
+    const convResults = await mapLimited(windows30, 5, (w) =>
+      callBinanceSigned<{ list?: Array<Record<string, unknown>> }>('/sapi/v1/convert/tradeFlow', {
         method: 'GET',
         params: { startTime: w.start, endTime: w.end, limit: 1000 },
         config,
-      });
+      })
+    );
+    let warnedConv = false;
+    for (const convRes of convResults) {
       if (!convRes.success) {
-        if (convRes.code !== -1002) warnings.push(`Convert history: ${convRes.error}`);
-        break;
+        if (!warnedConv && convRes.code !== -1002) {
+          warnings.push(`Convert history: ${convRes.error}`);
+          warnedConv = true;
+        }
+        continue;
       }
       const list = Array.isArray(convRes.data?.list) ? convRes.data.list : [];
       for (const item of list) {
