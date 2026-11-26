@@ -17,6 +17,7 @@ import {
   mergeFundingById,
   mergeSpotAndFundingBalances,
   mergeTradesById,
+  normalizeBinanceAssetSymbol,
   normalizeC2cOrder,
   normalizeConvertTrade,
   normalizeCryptoTransfer,
@@ -199,7 +200,7 @@ export async function POST(req: NextRequest) {
         assetBalances?: Array<{ asset?: string; free?: string; locked?: string; freeze?: string; withdrawing?: string }>;
       }>>('/sapi/v1/asset/wallet/balance', {
         method: 'GET',
-        params: { needBalanceDetail: 'true', quoteAsset: 'USDT' },
+        params: { needBalanceDetail: 'true', quoteAsset: 'BTC' },
         config,
       }),
       fetchBinanceTickers24h(config, true),
@@ -225,15 +226,18 @@ export async function POST(req: NextRequest) {
     const balances = mergeSpotAndFundingBalances(
       spotRes.data?.balances || [],
       fundingRes.success && Array.isArray(fundingRes.data) ? fundingRes.data : [],
-      walletRows
+      walletRows,
+      tickerMap
     );
     const btcPriceUsd = resolveAssetPriceUsd('BTC', tickerMap).priceUsd;
-    const fallbackUsdPriceMap = extractWalletUsdValuations(walletRows, btcPriceUsd);
+    const fallbackUsdPriceMap = extractWalletUsdValuations(walletRows, btcPriceUsd, tickerMap);
 
     // 1. Funding & Conversion windows
     const incomingFunding: BinanceFundingEvent[] = [];
     const incomingTrades: BinanceTradeExecution[] = [];
-    const discoveredAssets = new Set<string>(balances.map((b) => b.asset));
+    const discoveredAssets = new Set<string>(
+      balances.filter((b) => !b.isStock || Boolean(tokenizedMap[b.asset])).map((b) => b.asset)
+    );
 
     const windows30 = buildTimeWindows(startMs, nowMs, 29);
     const windows89 = buildTimeWindows(startMs, nowMs, 89);
@@ -563,7 +567,10 @@ export async function POST(req: NextRequest) {
       const rows = Array.isArray(tokRes.data?.rows) ? tokRes.data.rows : [];
       for (const r of rows) {
         if (String(r.status || '').toUpperCase() !== 'S') continue;
-        const underlying = String(r.underlyingAsset || '').trim().toUpperCase();
+        const underlying = normalizeBinanceAssetSymbol(
+          String(r.underlyingAsset || ''),
+          { fromEquityWallet: true }
+        ).symbol;
         const amt = Number(r.underlyingAssetAmount || 0);
         const cType = String(r.convertType || '').toUpperCase();
         if (!underlying || !Number.isFinite(amt) || amt <= 0) continue;
@@ -660,13 +667,15 @@ export async function POST(req: NextRequest) {
     const equitySymbols = new Set<string>();
     for (const b of balances) {
       if (effectiveTokenizedMap[b.asset]) equitySymbols.add(effectiveTokenizedMap[b.asset]);
-      else if ((b.equityQty || 0) > 0) equitySymbols.add(b.asset);
+      else if (b.isStock || (b.equityQty || 0) > 0) equitySymbols.add(b.asset);
       else if (b.asset.length >= 3 && (b.asset.endsWith('ON') || b.asset.endsWith('B'))) {
         equitySymbols.add(b.asset.replace(/(ON|B)$/, ''));
       }
     }
     for (const tr of mergedTrades) {
-      if (tr.source === 'equity') equitySymbols.add(tr.baseAsset);
+      if (tr.source === 'equity') {
+        equitySymbols.add(normalizeBinanceAssetSymbol(tr.baseAsset, { tickerMap, fromEquityWallet: true }).symbol);
+      }
     }
     const equityPrices = await fetchBinanceEquityQuotes([...equitySymbols], config);
 

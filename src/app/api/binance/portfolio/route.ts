@@ -14,6 +14,7 @@ import {
   createEmptyBinanceLedger,
   extractWalletUsdValuations,
   mergeSpotAndFundingBalances,
+  normalizeBinanceAssetSymbol,
   resolveAssetPriceUsd,
 } from '@/lib/binance-sync';
 
@@ -82,7 +83,7 @@ export async function GET(req: NextRequest) {
       }),
       callBinanceSigned<WalletBalanceRow[]>('/sapi/v1/asset/wallet/balance', {
         method: 'GET',
-        params: { needBalanceDetail: 'true', quoteAsset: 'USDT' },
+        params: { needBalanceDetail: 'true', quoteAsset: 'BTC' },
         config,
       }),
       fetchBinanceTickers24h(config, fresh),
@@ -116,11 +117,12 @@ export async function GET(req: NextRequest) {
     const balances = mergeSpotAndFundingBalances(
       spotRes.data?.balances || [],
       fundingRes.success && Array.isArray(fundingRes.data) ? fundingRes.data : [],
-      walletRows
+      walletRows,
+      tickerMap
     );
 
     const btcPriceUsd = resolveAssetPriceUsd('BTC', tickerMap).priceUsd;
-    const fallbackUsdPriceMap = extractWalletUsdValuations(walletRows, btcPriceUsd);
+    const fallbackUsdPriceMap = extractWalletUsdValuations(walletRows, btcPriceUsd, tickerMap);
 
     const ledger = storedLedger || createEmptyBinanceLedger();
     const effectiveTokenizedMap = {
@@ -132,14 +134,16 @@ export async function GET(req: NextRequest) {
     for (const b of balances) {
       if (effectiveTokenizedMap[b.asset]) {
         equitySymbols.add(effectiveTokenizedMap[b.asset]);
-      } else if ((b.equityQty || 0) > 0) {
+      } else if (b.isStock || (b.equityQty || 0) > 0) {
         equitySymbols.add(b.asset);
       } else if (b.asset.length >= 3 && (b.asset.endsWith('ON') || b.asset.endsWith('B'))) {
         equitySymbols.add(b.asset.replace(/(ON|B)$/, ''));
       }
     }
     for (const tr of ledger.trades) {
-      if (tr.source === 'equity') equitySymbols.add(tr.baseAsset);
+      if (tr.source === 'equity') {
+        equitySymbols.add(normalizeBinanceAssetSymbol(tr.baseAsset, { tickerMap, fromEquityWallet: true }).symbol);
+      }
     }
     const equityPrices = await fetchBinanceEquityQuotes([...equitySymbols], config);
 

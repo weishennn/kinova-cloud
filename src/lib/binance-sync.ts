@@ -25,6 +25,7 @@ export interface BinanceTicker24h {
 
 export interface BinanceWalletBalance {
   asset: string;
+  isStock?: boolean;
   spotFree: number;
   spotLocked: number;
   spotQty: number;
@@ -223,8 +224,46 @@ export function buildTickerMap(rawTickers: Array<Record<string, unknown>>): Reco
   return map;
 }
 
+export function hasSpotMarketTicker(
+  asset: string,
+  tickerMap: Record<string, BinanceTicker24h> = {}
+): boolean {
+  const clean = asset.trim().toUpperCase();
+  if (!clean) return false;
+  for (const q of ['USDT', 'FDUSD', 'USDC', 'BUSD', 'BTC', 'BNB']) {
+    if (tickerMap[`${clean}${q}`]?.lastPrice > 0) return true;
+  }
+  return false;
+}
+
+/**
+ * Strips Binance's `EQ` / `EQ-` / `EQ_` equity prefix (e.g. EQNVDA -> NVDA)
+ * whenever the asset comes from an Equity/Stock wallet or does not exist as a Spot crypto pair.
+ */
+export function normalizeBinanceAssetSymbol(
+  rawAsset: string,
+  options?: {
+    tickerMap?: Record<string, BinanceTicker24h>;
+    fromEquityWallet?: boolean;
+  }
+): { symbol: string; isStock: boolean } {
+  const raw = rawAsset.trim().toUpperCase();
+  if (!raw) return { symbol: '', isStock: false };
+
+  const eqMatch = /^EQ[-_]?([A-Z0-9]{1,12})$/.exec(raw);
+  if (eqMatch) {
+    const candidate = eqMatch[1];
+    if (options?.fromEquityWallet || !hasSpotMarketTicker(raw, options?.tickerMap)) {
+      return { symbol: candidate, isStock: true };
+    }
+  }
+
+  return { symbol: raw, isStock: Boolean(options?.fromEquityWallet) };
+}
+
 export function extractWalletUsdValuations(
   allWalletRows: Array<{
+    walletName?: unknown;
     assetBalances?: Array<{
       asset?: unknown;
       free?: unknown;
@@ -234,13 +273,17 @@ export function extractWalletUsdValuations(
       btcValuation?: unknown;
     }>;
   }>,
-  btcPriceUsd: number
+  btcPriceUsd: number,
+  tickerMap: Record<string, BinanceTicker24h> = {}
 ): Record<string, number> {
   const out: Record<string, number> = {};
   if (!Number.isFinite(btcPriceUsd) || btcPriceUsd <= 0) return out;
   for (const w of allWalletRows) {
+    const walletName = String(w.walletName || '').trim().toLowerCase();
+    const fromEquityWallet = Boolean(walletName) && walletName !== 'spot' && walletName !== 'funding';
     for (const item of w.assetBalances || []) {
-      const asset = String(item.asset || '').trim().toUpperCase();
+      const rawAsset = String(item.asset || '').trim().toUpperCase();
+      const { symbol: asset } = normalizeBinanceAssetSymbol(rawAsset, { tickerMap, fromEquityWallet });
       const btcVal = Math.max(0, toNum(item.btcValuation));
       const qty =
         Math.max(0, toNum(item.free)) +
@@ -279,10 +322,16 @@ export function resolveAssetPriceUsd(
     }
   }
 
+  const eqStripped = normalizeBinanceAssetSymbol(clean, { tickerMap }).symbol;
   const underlying = tokenizedAssetMap[clean]
-    || (clean.length >= 3 && (clean.endsWith('ON') || clean.endsWith('B')) ? clean.replace(/(ON|B)$/, '') : clean);
+    || (eqStripped.length >= 3 && (eqStripped.endsWith('ON') || eqStripped.endsWith('B'))
+      ? eqStripped.replace(/(ON|B)$/, '')
+      : eqStripped);
   if (equityPrices[clean]?.priceUsd > 0) {
     return equityPrices[clean];
+  }
+  if (equityPrices[eqStripped]?.priceUsd > 0) {
+    return equityPrices[eqStripped];
   }
   if (equityPrices[underlying]?.priceUsd > 0) {
     return equityPrices[underlying];
@@ -309,6 +358,9 @@ export function resolveAssetPriceUsd(
   if (fallbackUsdPriceMap[clean] > 0) {
     return { priceUsd: fallbackUsdPriceMap[clean], change24hPct: 0 };
   }
+  if (fallbackUsdPriceMap[eqStripped] > 0) {
+    return { priceUsd: fallbackUsdPriceMap[eqStripped], change24hPct: 0 };
+  }
 
   return { priceUsd: 0, change24hPct: 0 };
 }
@@ -332,15 +384,17 @@ export function mergeSpotAndFundingBalances(
       freeze?: unknown;
       withdrawing?: unknown;
     }>;
-  }> = []
+  }> = [],
+  tickerMap: Record<string, BinanceTicker24h> = {}
 ): BinanceWalletBalance[] {
   const byAsset = new Map<string, BinanceWalletBalance>();
-  const ensure = (asset: string) => {
+  const ensure = (asset: string, isStock = false) => {
     const clean = asset.trim().toUpperCase();
     let row = byAsset.get(clean);
     if (!row) {
       row = {
         asset: clean,
+        isStock,
         spotFree: 0,
         spotLocked: 0,
         spotQty: 0,
@@ -353,17 +407,20 @@ export function mergeSpotAndFundingBalances(
         totalQty: 0,
       };
       byAsset.set(clean, row);
+    } else if (isStock) {
+      row.isStock = true;
     }
     return row;
   };
 
   for (const b of spotBalances) {
-    const asset = String(b.asset || '').trim().toUpperCase();
-    if (!asset) continue;
+    const rawAsset = String(b.asset || '').trim().toUpperCase();
+    if (!rawAsset) continue;
     const free = Math.max(0, toNum(b.free));
     const locked = Math.max(0, toNum(b.locked));
     if (free + locked <= 0) continue;
-    const row = ensure(asset);
+    const { symbol: asset, isStock } = normalizeBinanceAssetSymbol(rawAsset, { tickerMap });
+    const row = ensure(asset, isStock);
     row.spotFree += free;
     row.spotLocked += locked;
     row.spotQty = row.spotFree + row.spotLocked;
@@ -371,14 +428,15 @@ export function mergeSpotAndFundingBalances(
   }
 
   for (const f of fundingBalances) {
-    const asset = String(f.asset || '').trim().toUpperCase();
-    if (!asset) continue;
+    const rawAsset = String(f.asset || '').trim().toUpperCase();
+    if (!rawAsset) continue;
     const free = Math.max(0, toNum(f.free));
     const locked = Math.max(0, toNum(f.locked));
     const freeze = Math.max(0, toNum(f.freeze));
     const withdrawing = Math.max(0, toNum(f.withdrawing));
     if (free + locked + freeze + withdrawing <= 0) continue;
-    const row = ensure(asset);
+    const { symbol: asset, isStock } = normalizeBinanceAssetSymbol(rawAsset, { tickerMap });
+    const row = ensure(asset, isStock);
     row.fundingFree += free;
     row.fundingLocked += locked;
     row.fundingFreeze += freeze;
@@ -394,15 +452,19 @@ export function mergeSpotAndFundingBalances(
     if (/margin|futures|coin-m|isolated|options/.test(walletName)) continue;
     const list = Array.isArray(w.assetBalances) ? w.assetBalances : [];
     for (const item of list) {
-      const asset = String(item.asset || '').trim().toUpperCase();
-      if (!asset) continue;
+      const rawAsset = String(item.asset || '').trim().toUpperCase();
+      if (!rawAsset) continue;
       const qty =
         Math.max(0, toNum(item.free)) +
         Math.max(0, toNum(item.locked)) +
         Math.max(0, toNum(item.freeze)) +
         Math.max(0, toNum(item.withdrawing));
       if (qty <= 0) continue;
-      const row = ensure(asset);
+      const { symbol: asset, isStock } = normalizeBinanceAssetSymbol(rawAsset, {
+        tickerMap,
+        fromEquityWallet: true,
+      });
+      const row = ensure(asset, isStock);
       row.equityQty = (row.equityQty || 0) + qty;
       row.totalQty = row.spotQty + row.fundingQty + row.equityQty;
     }
@@ -495,7 +557,8 @@ export function normalizeEquityTrade(
   feeUsdOverride?: number
 ): BinanceTradeExecution | null {
   const executionId = String(raw.executionId || raw.id || raw.orderId || '').trim();
-  const symbol = String(raw.symbol || '').trim().toUpperCase();
+  const rawSymbol = String(raw.symbol || '').trim().toUpperCase();
+  const symbol = normalizeBinanceAssetSymbol(rawSymbol, { fromEquityWallet: true }).symbol;
   const quote = String(raw.quote || 'USDC').trim().toUpperCase();
   const sideRaw = String(raw.side || '').trim().toUpperCase();
   const side: 'BUY' | 'SELL' = sideRaw === 'SELL' ? 'SELL' : 'BUY';
@@ -808,17 +871,44 @@ export function computeBinanceAnalytics(params: {
 
   const balanceMap = new Map<string, BinanceWalletBalance>();
   for (const b of balances) {
-    balanceMap.set(b.asset.toUpperCase(), b);
+    const norm = normalizeBinanceAssetSymbol(b.asset, {
+      tickerMap,
+      fromEquityWallet: Boolean(b.isStock || (b.equityQty || 0) > 0),
+    });
+    const prev = balanceMap.get(norm.symbol);
+    if (!prev) {
+      balanceMap.set(norm.symbol, {
+        ...b,
+        asset: norm.symbol,
+        isStock: Boolean(b.isStock || norm.isStock),
+      });
+    } else {
+      prev.isStock = Boolean(prev.isStock || b.isStock || norm.isStock);
+      prev.spotFree += b.spotFree;
+      prev.spotLocked += b.spotLocked;
+      prev.spotQty += b.spotQty;
+      prev.fundingFree += b.fundingFree;
+      prev.fundingLocked += b.fundingLocked;
+      prev.fundingFreeze += b.fundingFreeze;
+      prev.fundingWithdrawing += b.fundingWithdrawing;
+      prev.fundingQty += b.fundingQty;
+      prev.equityQty = (prev.equityQty || 0) + (b.equityQty || 0);
+      prev.totalQty += b.totalQty;
+    }
   }
 
   const tradesByAsset = new Map<string, BinanceTradeExecution[]>();
   const equityAssetSet = new Set<string>(Object.keys(tokenizedAssetMap).map((k) => k.toUpperCase()));
   for (const tr of trades) {
-    const asset = tr.baseAsset.toUpperCase();
+    const norm = normalizeBinanceAssetSymbol(tr.baseAsset, {
+      tickerMap,
+      fromEquityWallet: tr.source === 'equity',
+    });
+    const asset = norm.symbol;
     if (!asset || STABLECOIN_ASSETS.has(asset)) continue;
-    if (tr.source === 'equity') equityAssetSet.add(asset);
+    if (tr.source === 'equity' || norm.isStock) equityAssetSet.add(asset);
     const list = tradesByAsset.get(asset) || [];
-    list.push(tr);
+    list.push({ ...tr, baseAsset: asset });
     tradesByAsset.set(asset, list);
   }
 
@@ -846,6 +936,7 @@ export function computeBinanceAnalytics(params: {
     const isStock =
       equityAssetSet.has(asset) ||
       Boolean(tokenizedAssetMap[asset]) ||
+      Boolean(bal?.isStock) ||
       (bal?.equityQty || 0) > 0 ||
       Boolean(strippedOndoOrB && equityPrices[strippedOndoOrB]?.priceUsd > 0);
 

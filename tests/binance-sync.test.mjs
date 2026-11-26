@@ -6,7 +6,9 @@ import {
   computeBinanceAnalytics,
   computeFundingSummary,
   createEmptyBinanceLedger,
+  extractWalletUsdValuations,
   mergeSpotAndFundingBalances,
+  normalizeBinanceAssetSymbol,
   normalizeC2cOrder,
   normalizeConvertTrade,
   normalizeEquityTrade,
@@ -318,4 +320,94 @@ test('normalizes Binance US equity trades, derives open equity shares, and price
   assert.equal(aaplb.assetKind, 'Stock');
   assert.equal(aaplb.livePriceUsd, 220);
   assert.equal(aaplb.marketValueUsd, 440);
+});
+
+test('strips EQ prefix on Binance stocks, merges with equity trades, and preserves real Spot EQ* coins', () => {
+  const tickerMap = buildTickerMap([
+    { symbol: 'BTCUSDT', lastPrice: '90000', priceChangePercent: '1.5' },
+    { symbol: 'EQXUSDT', lastPrice: '0.25', priceChangePercent: '2.0' },
+  ]);
+
+  // Real Spot coin starting with EQ stays intact
+  assert.deepEqual(normalizeBinanceAssetSymbol('EQX', { tickerMap }), {
+    symbol: 'EQX',
+    isStock: false,
+  });
+
+  // EQ-prefixed stocks strip EQ cleanly
+  assert.deepEqual(normalizeBinanceAssetSymbol('EQNVDA', { tickerMap }), {
+    symbol: 'NVDA',
+    isStock: true,
+  });
+
+  const allWallets = [
+    {
+      walletName: 'Stock',
+      activate: true,
+      assetBalances: [
+        { asset: 'EQNVDA', free: '10', locked: '0', btcValuation: '0.0155555556' }, // 10 * 140 / 90000
+      ],
+    },
+  ];
+
+  const balances = mergeSpotAndFundingBalances(
+    [{ asset: 'EQX', free: '100', locked: '0' }],
+    [{ asset: 'EQAAPL', free: '2', locked: '0' }],
+    allWallets,
+    tickerMap
+  );
+
+  const fallbackUsd = extractWalletUsdValuations(allWallets, 90000, tickerMap);
+  assert.ok(Math.abs(fallbackUsd.NVDA - 140) < 0.01);
+  assert.equal(fallbackUsd.EQNVDA, undefined);
+
+  const eqBuy = normalizeEquityTrade(
+    {
+      executionId: 'exec-nvda-1',
+      symbol: 'EQNVDA',
+      quote: 'USDC',
+      side: 'BUY',
+      price: '120',
+      qty: '10',
+      total: '1200',
+      executionAt: 1700000000000,
+    },
+    tickerMap
+  );
+  assert.ok(eqBuy);
+  assert.equal(eqBuy.baseAsset, 'NVDA');
+
+  const report = computeBinanceAnalytics({
+    balances,
+    trades: [eqBuy],
+    fundingEvents: [],
+    tickerMap,
+    usdToMyr: 4.4,
+    equityPrices: {
+      NVDA: { priceUsd: 145, change24hPct: 2.1 },
+      AAPL: { priceUsd: 210, change24hPct: 0.8 },
+    },
+    fallbackUsdPriceMap: fallbackUsd,
+  });
+
+  // No EQ-prefixed holdings in output
+  assert.equal(report.holdings.some((h) => h.asset.startsWith('EQNVDA') || h.asset.startsWith('EQAAPL')), false);
+
+  const nvda = report.holdings.find((h) => h.asset === 'NVDA');
+  assert.ok(nvda);
+  assert.equal(nvda.assetKind, 'Stock');
+  assert.equal(nvda.totalQty, 10);
+  assert.equal(nvda.livePriceUsd, 145);
+  assert.equal(nvda.marketValueUsd, 1450);
+  assert.equal(nvda.unrealizedPnlFifoUsd, 250);
+
+  const aapl = report.holdings.find((h) => h.asset === 'AAPL');
+  assert.ok(aapl);
+  assert.equal(aapl.assetKind, 'Stock');
+  assert.equal(aapl.marketValueUsd, 420);
+
+  const eqx = report.holdings.find((h) => h.asset === 'EQX');
+  assert.ok(eqx);
+  assert.equal(eqx.assetKind, 'Crypto');
+  assert.equal(eqx.marketValueUsd, 25);
 });
