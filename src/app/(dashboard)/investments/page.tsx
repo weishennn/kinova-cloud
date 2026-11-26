@@ -4,7 +4,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { 
   TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight,
-  DollarSign, Activity, PieChart as PieChartIcon, History, X, Loader2, Sparkles, AlertCircle, Edit2, Trash2, Search, ChevronRight, RefreshCw
+  DollarSign, Activity, PieChart as PieChartIcon, History, X, Loader2, Sparkles, AlertCircle, Edit2, Trash2, Search, ChevronRight, RefreshCw, Target
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useQueryClient } from '@tanstack/react-query';
@@ -33,6 +33,9 @@ import { MoneyCalculator } from '@/components/shared/money-calculator';
 import { useAppStore } from '@/stores/app-store';
 import { confirmAction } from '@/stores/confirm-dialog-store';
 import { INVESTMENT_TRADE_REQUEST_EVENT } from '@/lib/investment-trade-events';
+import { InvestmentsSubnav } from '@/components/investments/investments-subnav';
+import { TargetCostModal, type TargetCostAssetOption } from '@/components/investments/target-cost-modal';
+import { saveInvestmentRollup } from '@/lib/binance-browser-cache';
 import { toast } from 'sonner';
 
 const PieChart = dynamic(() => import('recharts').then(m => m.PieChart), { ssr: false });
@@ -78,6 +81,8 @@ export default function InvestmentsPage() {
   const addTradeRequestRef = useRef<{ signature: string; id: string } | null>(null);
   const [selectedTrade, setSelectedTrade] = useState<any | null>(null);
   const [selectedHolding, setSelectedHolding] = useState<any | null>(null);
+  const [isTargetCalcOpen, setIsTargetCalcOpen] = useState(false);
+  const [targetCalcAsset, setTargetCalcAsset] = useState<TargetCostAssetOption | null>(null);
   const [fxRates, setFxRates] = useState<Record<string, number>>(getCachedRatesToMyr);
   const [costBasisMethod, setCostBasisMethod] = useState<'fifo' | 'weighted'>('fifo');
 
@@ -471,6 +476,38 @@ export default function InvestmentsPage() {
   const totalRealizedPnl = useMemo(() => {
     return allPositions.reduce((sum, p) => sum + p.realizedPLBase, 0);
   }, [allPositions]);
+
+  const stockTargetOptions = useMemo<TargetCostAssetOption[]>(() => {
+    return activeHoldings.map((h) => {
+      const avgUsd = convertCurrency(h.avgBuyPrice || h.avgCost || 0, h.currency || 'USD', 'USD', fxRates);
+      const mktUsd = convertCurrency(h.livePrice || 0, h.currency || 'USD', 'USD', fxRates);
+      return {
+        symbol: h.ticker,
+        label: h.name && h.name !== h.ticker ? `${h.ticker} (${h.name})` : h.ticker,
+        assetKind: 'Stock',
+        currentQty: h.units,
+        currentAvgCost: avgUsd,
+        currentMarketPrice: mktUsd,
+      };
+    });
+  }, [activeHoldings, fxRates]);
+
+  useEffect(() => {
+    const usdRate = fxRates.USD || DEFAULT_RATES_TO_MYR.USD || 4.1;
+    const realizedMyr = portfolioReport.positions.length > 0
+      ? (costBasisMethod === 'fifo' ? portfolioReport.totalRealizedPnLFifoMyr : portfolioReport.totalRealizedPnLWeightedMyr)
+      : totalRealizedPnl;
+    saveInvestmentRollup({
+      source: 'stocks',
+      totalValueMyr: totalMarketValue,
+      totalValueUsd: usdRate > 0 ? totalMarketValue / usdRate : totalMarketValue,
+      unrealizedPnlMyr: totalPnl,
+      unrealizedPnlUsd: usdRate > 0 ? totalPnl / usdRate : totalPnl,
+      realizedPnlMyr: realizedMyr,
+      realizedPnlUsd: usdRate > 0 ? realizedMyr / usdRate : realizedMyr,
+      updatedAt: new Date().toISOString(),
+    });
+  }, [totalMarketValue, totalPnl, totalRealizedPnl, portfolioReport, costBasisMethod, fxRates]);
 
   // Realized cash earnings from dividends
   const annualRealizedGain = useMemo(() => {
@@ -1146,6 +1183,7 @@ export default function InvestmentsPage() {
 
   return (
     <div className="cockpit-module-page">
+      <InvestmentsSubnav />
       <CockpitPageHeading
         title="Investment Portfolio"
         description="Real-time stock & crypto tracker with automated Google Sheets formulas"
@@ -1216,6 +1254,17 @@ export default function InvestmentsPage() {
               >
                 <ArrowDownRight className="h-3.5 w-3.5" />
                 <span>Sell</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTargetCalcAsset(stockTargetOptions[0] || null);
+                  setIsTargetCalcOpen(true);
+                }}
+                className="min-h-[40px] px-3.5 py-2 rounded-xl border border-indigo-500/35 bg-indigo-500/10 hover:bg-indigo-500/20 active:scale-[0.97] text-indigo-800 dark:text-indigo-300 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation"
+              >
+                <Target className="h-3.5 w-3.5" />
+                <span>Target Price</span>
               </button>
             </div>
           </div>
@@ -2820,6 +2869,27 @@ export default function InvestmentsPage() {
                   </button>
                 </div>
                 <button
+                  type="button"
+                  onClick={() => {
+                    const h = selectedHolding;
+                    const found = stockTargetOptions.find((o) => o.symbol === h.ticker) || {
+                      symbol: h.ticker,
+                      label: h.ticker,
+                      assetKind: 'Stock' as const,
+                      currentQty: h.units,
+                      currentAvgCost: convertCurrency(h.avgBuyPrice || h.avgCost || 0, h.currency || 'USD', 'USD', fxRates),
+                      currentMarketPrice: convertCurrency(h.livePrice || 0, h.currency || 'USD', 'USD', fxRates),
+                    };
+                    setSelectedHolding(null);
+                    setTargetCalcAsset(found);
+                    setIsTargetCalcOpen(true);
+                  }}
+                  className="w-full py-2.5 px-4 rounded-2xl border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 active:scale-[0.98] text-indigo-800 dark:text-indigo-300 font-semibold text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Target className="h-4 w-4" />
+                  <span>Target Cost Price Calculator</span>
+                </button>
+                <button
                   onClick={() => {
                     setSelectedHolding(null);
                     setActiveTab('trades');
@@ -2832,6 +2902,12 @@ export default function InvestmentsPage() {
               </div>
         </CockpitModal>
       )}
+      <TargetCostModal
+        isOpen={isTargetCalcOpen}
+        onClose={() => setIsTargetCalcOpen(false)}
+        assets={stockTargetOptions}
+        initialAsset={targetCalcAsset}
+      />
     </div>
   );
 }

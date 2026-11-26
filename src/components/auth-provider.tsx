@@ -74,6 +74,7 @@ function wipeAccountStorage(includeLocalStore = true, wipePendingQueues = true) 
         k.startsWith('cashflow_cache_') ||
         k.startsWith('cashflow_pre_sync_') ||
         k.startsWith('cashflow_sync_') ||
+        k.startsWith('cashflow_binance_') ||
         k.startsWith('kinova_synced_shortcut_tx_ids')
       ) {
         keysToRemove.push(k);
