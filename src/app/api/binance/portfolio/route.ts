@@ -12,7 +12,9 @@ import {
 import {
   computeBinanceAnalytics,
   createEmptyBinanceLedger,
+  extractWalletUsdValuations,
   mergeSpotAndFundingBalances,
+  resolveAssetPriceUsd,
 } from '@/lib/binance-sync';
 
 export const dynamic = 'force-dynamic';
@@ -106,12 +108,19 @@ export async function GET(req: NextRequest) {
     if (!fundingRes.success) {
       warnings.push(`Funding wallet read warning: ${fundingRes.error || 'Unavailable'}`);
     }
+    if (!walletRes.success) {
+      warnings.push(`All-wallets read warning: ${walletRes.error || 'Unavailable'}`);
+    }
 
+    const walletRows = walletRes.success && Array.isArray(walletRes.data) ? walletRes.data : [];
     const balances = mergeSpotAndFundingBalances(
       spotRes.data?.balances || [],
       fundingRes.success && Array.isArray(fundingRes.data) ? fundingRes.data : [],
-      walletRes.success && Array.isArray(walletRes.data) ? walletRes.data : []
+      walletRows
     );
+
+    const btcPriceUsd = resolveAssetPriceUsd('BTC', tickerMap).priceUsd;
+    const fallbackUsdPriceMap = extractWalletUsdValuations(walletRows, btcPriceUsd);
 
     const ledger = storedLedger || createEmptyBinanceLedger();
     const effectiveTokenizedMap = {
@@ -125,6 +134,8 @@ export async function GET(req: NextRequest) {
         equitySymbols.add(effectiveTokenizedMap[b.asset]);
       } else if ((b.equityQty || 0) > 0) {
         equitySymbols.add(b.asset);
+      } else if (b.asset.length >= 3 && (b.asset.endsWith('ON') || b.asset.endsWith('B'))) {
+        equitySymbols.add(b.asset.replace(/(ON|B)$/, ''));
       }
     }
     for (const tr of ledger.trades) {
@@ -142,6 +153,7 @@ export async function GET(req: NextRequest) {
       equityPrices,
       tokenizedAssetMap: effectiveTokenizedMap,
       equityNetAdjustment: ledger.equityNetAdjustment || {},
+      fallbackUsdPriceMap,
     });
 
     const response = NextResponse.json({
@@ -161,6 +173,12 @@ export async function GET(req: NextRequest) {
         customSymbols: ledger.customSymbols,
       },
       warnings,
+      diagnostics: {
+        wallets: walletRows.map((w) => String(w.walletName || '')).filter(Boolean),
+        spotCount: (spotRes.data?.balances || []).length,
+        fundingCount: fundingRes.success && Array.isArray(fundingRes.data) ? fundingRes.data.length : 0,
+        equityTradesCount: ledger.trades.filter((t) => t.source === 'equity').length,
+      },
       usedWeight1m: spotRes.usedWeight1m,
       fetchedAt: new Date().toISOString(),
     });

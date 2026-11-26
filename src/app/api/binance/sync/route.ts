@@ -12,6 +12,7 @@ import {
 import {
   computeBinanceAnalytics,
   createEmptyBinanceLedger,
+  extractWalletUsdValuations,
   formatKlDate,
   mergeFundingById,
   mergeSpotAndFundingBalances,
@@ -216,12 +217,18 @@ export async function POST(req: NextRequest) {
     if (!fundingRes.success) {
       warnings.push(`Funding wallet read warning: ${fundingRes.error || 'Unavailable'}`);
     }
+    if (!walletRes.success) {
+      warnings.push(`All-wallets read warning: ${walletRes.error || 'Unavailable'}`);
+    }
 
+    const walletRows = walletRes.success && Array.isArray(walletRes.data) ? walletRes.data : [];
     const balances = mergeSpotAndFundingBalances(
       spotRes.data?.balances || [],
       fundingRes.success && Array.isArray(fundingRes.data) ? fundingRes.data : [],
-      walletRes.success && Array.isArray(walletRes.data) ? walletRes.data : []
+      walletRows
     );
+    const btcPriceUsd = resolveAssetPriceUsd('BTC', tickerMap).priceUsd;
+    const fallbackUsdPriceMap = extractWalletUsdValuations(walletRows, btcPriceUsd);
 
     // 1. Funding & Conversion windows
     const incomingFunding: BinanceFundingEvent[] = [];
@@ -452,9 +459,15 @@ export async function POST(req: NextRequest) {
     }
 
     // 1G. Binance US Equities / Stocks (/sapi/v1/equity/trade/history + order/history + tokenized/history)
+    // Use 30-day windows (Binance SAPI history max interval is typically 30 days).
+    // If equityHistorySynced wasn't marked yet, backfill full lookbackDays even on incremental sync.
+    const equityStartMs = !existingLedger.equityHistorySynced
+      ? nowMs - lookbackDays * DAY_MS
+      : startMs;
+    const equityWindows30 = buildTimeWindows(equityStartMs, nowMs, 29);
     const equityOrderFees = new Map<string, number>();
     const equityOrderRows: Array<Record<string, unknown>> = [];
-    const eqOrderResults = await mapLimited(windows89, 4, (w) =>
+    const eqOrderResults = await mapLimited(equityWindows30, 5, (w) =>
       callBinanceSigned<Array<Record<string, unknown>> | { rows?: Array<Record<string, unknown>> }>(
         '/sapi/v1/equity/order/history',
         {
@@ -464,8 +477,15 @@ export async function POST(req: NextRequest) {
         }
       )
     );
+    let warnedEqOrder = false;
     for (const res of eqOrderResults) {
-      if (!res.success) continue;
+      if (!res.success) {
+        if (!warnedEqOrder && res.status !== 404) {
+          warnings.push(`Stocks order history: ${res.error}`);
+          warnedEqOrder = true;
+        }
+        continue;
+      }
       const rows = Array.isArray(res.data)
         ? res.data
         : Array.isArray((res.data as { rows?: unknown[] } | undefined)?.rows)
@@ -482,7 +502,8 @@ export async function POST(req: NextRequest) {
     }
 
     const seenEquityOrderIds = new Set<string>();
-    const eqTradeResults = await mapLimited(windows89, 4, async (w) => {
+    let warnedEqTrade = false;
+    const eqTradeResults = await mapLimited(equityWindows30, 5, async (w) => {
       const collected: Array<Record<string, unknown>> = [];
       for (let page = 1; page <= 10; page++) {
         const res = await callBinanceSigned<{ rows?: Array<Record<string, unknown>>; total?: number }>(
@@ -493,7 +514,13 @@ export async function POST(req: NextRequest) {
             config,
           }
         );
-        if (!res.success) break;
+        if (!res.success) {
+          if (!warnedEqTrade && res.status !== 404) {
+            warnings.push(`Stocks trade history: ${res.error}`);
+            warnedEqTrade = true;
+          }
+          break;
+        }
         const rows = Array.isArray(res.data?.rows) ? res.data.rows : [];
         collected.push(...rows);
         if (rows.length < 100) break;
@@ -625,6 +652,7 @@ export async function POST(req: NextRequest) {
       lastBalances: balances,
       tokenizedAssetMap: effectiveTokenizedMap,
       equityNetAdjustment,
+      equityHistorySynced: true,
     };
 
     await saveStoredBinanceLedger(session, updatedLedger);
@@ -633,6 +661,9 @@ export async function POST(req: NextRequest) {
     for (const b of balances) {
       if (effectiveTokenizedMap[b.asset]) equitySymbols.add(effectiveTokenizedMap[b.asset]);
       else if ((b.equityQty || 0) > 0) equitySymbols.add(b.asset);
+      else if (b.asset.length >= 3 && (b.asset.endsWith('ON') || b.asset.endsWith('B'))) {
+        equitySymbols.add(b.asset.replace(/(ON|B)$/, ''));
+      }
     }
     for (const tr of mergedTrades) {
       if (tr.source === 'equity') equitySymbols.add(tr.baseAsset);
@@ -649,6 +680,7 @@ export async function POST(req: NextRequest) {
       equityPrices,
       tokenizedAssetMap: effectiveTokenizedMap,
       equityNetAdjustment,
+      fallbackUsdPriceMap,
     });
 
     const response = NextResponse.json({
@@ -667,6 +699,12 @@ export async function POST(req: NextRequest) {
         customSymbols: updatedLedger.customSymbols,
       },
       warnings,
+      diagnostics: {
+        wallets: walletRows.map((w) => String(w.walletName || '')).filter(Boolean),
+        spotCount: (spotRes.data?.balances || []).length,
+        fundingCount: fundingRes.success && Array.isArray(fundingRes.data) ? fundingRes.data.length : 0,
+        equityTradesCount: mergedTrades.filter((t) => t.source === 'equity').length,
+      },
     });
     if (refreshed) setSessionCookie(response, session);
     return response;

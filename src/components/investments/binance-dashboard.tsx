@@ -77,6 +77,12 @@ interface BinanceApiPayload {
     customSymbols: string[];
   };
   warnings?: string[];
+  diagnostics?: {
+    wallets?: string[];
+    spotCount?: number;
+    fundingCount?: number;
+    equityTradesCount?: number;
+  };
   error?: string;
 }
 
@@ -347,7 +353,7 @@ export function BinanceDashboard() {
   const filteredHoldings = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return holdings.filter((h) => {
-      if (hideDust && h.status !== 'closed' && h.marketValueUsd < 1) return false;
+      if (hideDust && h.status !== 'closed' && h.livePriceUsd > 0 && h.marketValueUsd < 1) return false;
       if (holdingFilter === 'active' && h.totalQty <= 1e-8) return false;
       if (holdingFilter === 'crypto' && (h.assetKind === 'Stock' || h.totalQty <= 1e-8)) return false;
       if (holdingFilter === 'stocks' && (h.assetKind !== 'Stock' || h.totalQty <= 1e-8)) return false;
@@ -910,6 +916,11 @@ export function BinanceDashboard() {
               <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1">
                 Try toggling dust visibility or running Sync Binance.
               </p>
+              {payload?.diagnostics?.wallets && payload.diagnostics.wallets.length > 0 && (
+                <p className="text-[11px] font-mono text-slate-400 dark:text-zinc-500 mt-2">
+                  Wallets detected: {payload.diagnostics.wallets.join(', ')} · Equity trades: {payload.diagnostics.equityTradesCount ?? 0}
+                </p>
+              )}
             </div>
           ) : (
             <>

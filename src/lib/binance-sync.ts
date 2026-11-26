@@ -93,6 +93,7 @@ export interface BinanceStoredLedger {
   lastBalances?: BinanceWalletBalance[];
   tokenizedAssetMap?: Record<string, string>; // tokenizedAsset (e.g. AAPLB) -> underlying (AAPL)
   equityNetAdjustment?: Record<string, number>; // underlying symbol -> net minted/redeemed adjustment
+  equityHistorySynced?: boolean;
 }
 
 export interface BinanceHoldingSummary {
@@ -222,11 +223,44 @@ export function buildTickerMap(rawTickers: Array<Record<string, unknown>>): Reco
   return map;
 }
 
+export function extractWalletUsdValuations(
+  allWalletRows: Array<{
+    assetBalances?: Array<{
+      asset?: unknown;
+      free?: unknown;
+      locked?: unknown;
+      freeze?: unknown;
+      withdrawing?: unknown;
+      btcValuation?: unknown;
+    }>;
+  }>,
+  btcPriceUsd: number
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!Number.isFinite(btcPriceUsd) || btcPriceUsd <= 0) return out;
+  for (const w of allWalletRows) {
+    for (const item of w.assetBalances || []) {
+      const asset = String(item.asset || '').trim().toUpperCase();
+      const btcVal = Math.max(0, toNum(item.btcValuation));
+      const qty =
+        Math.max(0, toNum(item.free)) +
+        Math.max(0, toNum(item.locked)) +
+        Math.max(0, toNum(item.freeze)) +
+        Math.max(0, toNum(item.withdrawing));
+      if (asset && btcVal > 0 && qty > 0 && !out[asset]) {
+        out[asset] = (btcVal * btcPriceUsd) / qty;
+      }
+    }
+  }
+  return out;
+}
+
 export function resolveAssetPriceUsd(
   asset: string,
   tickerMap: Record<string, BinanceTicker24h>,
   equityPrices: Record<string, { priceUsd: number; change24hPct: number }> = {},
-  tokenizedAssetMap: Record<string, string> = {}
+  tokenizedAssetMap: Record<string, string> = {},
+  fallbackUsdPriceMap: Record<string, number> = {}
 ): { priceUsd: number; change24hPct: number } {
   const clean = asset.trim().toUpperCase();
   if (!clean) return { priceUsd: 0, change24hPct: 0 };
@@ -245,7 +279,8 @@ export function resolveAssetPriceUsd(
     }
   }
 
-  const underlying = tokenizedAssetMap[clean] || clean;
+  const underlying = tokenizedAssetMap[clean]
+    || (clean.length >= 3 && (clean.endsWith('ON') || clean.endsWith('B')) ? clean.replace(/(ON|B)$/, '') : clean);
   if (equityPrices[clean]?.priceUsd > 0) {
     return equityPrices[clean];
   }
@@ -269,6 +304,10 @@ export function resolveAssetPriceUsd(
       priceUsd: bnbPair.lastPrice * bnbUsdt.lastPrice,
       change24hPct: bnbPair.priceChangePercent + bnbUsdt.priceChangePercent,
     };
+  }
+
+  if (fallbackUsdPriceMap[clean] > 0) {
+    return { priceUsd: fallbackUsdPriceMap[clean], change24hPct: 0 };
   }
 
   return { priceUsd: 0, change24hPct: 0 };
@@ -348,12 +387,11 @@ export function mergeSpotAndFundingBalances(
     row.totalQty = row.spotQty + row.fundingQty + (row.equityQty || 0);
   }
 
-  // Merge any extra wallets (e.g. Stock/Equity/TradFi) from /sapi/v1/asset/wallet/balance
+  // Merge any extra wallets (e.g. Stock/Equity/TradFi/Alpha) from /sapi/v1/asset/wallet/balance
   for (const w of allWalletRows) {
     const walletName = String(w.walletName || '').trim().toLowerCase();
     if (!walletName || walletName === 'spot' || walletName === 'funding') continue;
-    const isEquityWallet = /stock|equity|tradfi|share/.test(walletName);
-    if (!isEquityWallet) continue;
+    if (/margin|futures|coin-m|isolated|options/.test(walletName)) continue;
     const list = Array.isArray(w.assetBalances) ? w.assetBalances : [];
     for (const item of list) {
       const asset = String(item.asset || '').trim().toUpperCase();
@@ -753,6 +791,7 @@ export function computeBinanceAnalytics(params: {
   equityPrices?: Record<string, { priceUsd: number; change24hPct: number }>;
   tokenizedAssetMap?: Record<string, string>;
   equityNetAdjustment?: Record<string, number>;
+  fallbackUsdPriceMap?: Record<string, number>;
 }): BinanceAnalyticsReport {
   const {
     balances,
@@ -764,6 +803,7 @@ export function computeBinanceAnalytics(params: {
     equityPrices = {},
     tokenizedAssetMap = {},
     equityNetAdjustment = {},
+    fallbackUsdPriceMap = {},
   } = params;
 
   const balanceMap = new Map<string, BinanceWalletBalance>();
@@ -800,7 +840,14 @@ export function computeBinanceAnalytics(params: {
 
     const isStablecoin = STABLECOIN_ASSETS.has(asset);
     const assetTrades = [...(tradesByAsset.get(asset) || [])].sort((a, b) => a.timestamp - b.timestamp);
-    const isStock = equityAssetSet.has(asset) || Boolean(tokenizedAssetMap[asset]);
+    const strippedOndoOrB = asset.length >= 3 && (asset.endsWith('ON') || asset.endsWith('B'))
+      ? asset.replace(/(ON|B)$/, '')
+      : '';
+    const isStock =
+      equityAssetSet.has(asset) ||
+      Boolean(tokenizedAssetMap[asset]) ||
+      (bal?.equityQty || 0) > 0 ||
+      Boolean(strippedOndoOrB && equityPrices[strippedOndoOrB]?.priceUsd > 0);
 
     // If Binance US Equities doesn't expose un-tokenized equity shares in Spot/Funding/wallet balance,
     // derive remaining equity shares held from equity trade fills minus any minted tokenized shares.
@@ -822,7 +869,8 @@ export function computeBinanceAnalytics(params: {
       asset,
       tickerMap,
       equityPrices,
-      tokenizedAssetMap
+      tokenizedAssetMap,
+      fallbackUsdPriceMap
     );
     const marketValueUsd = totalQty * livePriceUsd;
     const marketValueMyr = marketValueUsd * usdToMyr;
@@ -1106,6 +1154,7 @@ export function parseChunkedBinanceLedger(settings: Record<string, unknown>): Bi
       lastBalances: Array.isArray(parsed.lastBalances) ? parsed.lastBalances : [],
       tokenizedAssetMap: parsed.tokenizedAssetMap && typeof parsed.tokenizedAssetMap === 'object' ? parsed.tokenizedAssetMap : {},
       equityNetAdjustment: parsed.equityNetAdjustment && typeof parsed.equityNetAdjustment === 'object' ? parsed.equityNetAdjustment : {},
+      equityHistorySynced: parsed.equityHistorySynced === true,
     };
   } catch {
     return null;
