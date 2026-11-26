@@ -113,26 +113,12 @@ export async function fetchTokenizedEquityMap(
   return cachedTokenizedMap;
 }
 
-async function fetchSingleEquityQuote(
-  symbol: string,
-  config?: BinanceConfig | null
+async function fetchYahooEquityQuote(
+  clean: string
 ): Promise<{ priceUsd: number; change24hPct: number } | null> {
-  const clean = symbol.trim().toUpperCase();
-  if (!clean) return null;
-
-  const now = Date.now();
-  const cached = cachedEquityQuotes[clean];
-  if (cached && now - cached.fetchedAt < EQUITY_QUOTE_TTL_MS) {
-    return { priceUsd: cached.priceUsd, change24hPct: cached.change24hPct };
-  }
-
-  let priceUsd = 0;
-  let change24hPct = 0;
-
-  // 1. Try Yahoo Finance first (provides both live/extended price + regularMarketChangePercent 24/7)
   for (const host of ['query1.finance.yahoo.com', 'query2.finance.yahoo.com']) {
     try {
-      const url = `https://${host}/v8/finance/chart/${encodeURIComponent(clean)}?interval=1d&range=1d`;
+      const url = `https://${host}/v8/finance/chart/${encodeURIComponent(clean)}?interval=1m&range=1d&includePrePost=true`;
       const res = await fetch(url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
@@ -141,50 +127,100 @@ async function fetchSingleEquityQuote(
         signal: AbortSignal.timeout(5000),
         cache: 'no-store',
       });
-      if (res.ok) {
-        const data = (await res.json()) as {
-          chart?: {
-            result?: Array<{
-              meta?: {
-                regularMarketPrice?: number;
-                chartPreviousClose?: number;
-                regularMarketChangePercent?: number;
-              };
-            }>;
-          };
+      if (!res.ok) continue;
+      const data = (await res.json()) as {
+        chart?: {
+          result?: Array<{
+            meta?: {
+              regularMarketPrice?: number;
+              chartPreviousClose?: number;
+              previousClose?: number;
+              regularMarketChangePercent?: number;
+              marketState?: string;
+            };
+            indicators?: {
+              quote?: Array<{
+                close?: Array<number | null>;
+              }>;
+            };
+          }>;
         };
-        const meta = data?.chart?.result?.[0]?.meta;
-        const p = Number(meta?.regularMarketPrice || meta?.chartPreviousClose || 0);
-        if (Number.isFinite(p) && p > 0) {
-          priceUsd = p;
-          change24hPct = Number(meta?.regularMarketChangePercent ?? 0) || 0;
+      };
+      const result = data?.chart?.result?.[0];
+      const meta = result?.meta;
+      const closes = result?.indicators?.quote?.[0]?.close || [];
+      let latestBarPrice = 0;
+      for (let i = closes.length - 1; i >= 0; i--) {
+        const val = Number(closes[i]);
+        if (Number.isFinite(val) && val > 0) {
+          latestBarPrice = val;
           break;
         }
       }
+      const marketState = String(meta?.marketState || '').toUpperCase();
+      const regularPrice = Number(meta?.regularMarketPrice || 0);
+      const prevClose = Number(meta?.chartPreviousClose || meta?.previousClose || 0);
+      const chosenPrice =
+        marketState && marketState !== 'REGULAR' && latestBarPrice > 0
+          ? latestBarPrice
+          : regularPrice || latestBarPrice || prevClose;
+      if (Number.isFinite(chosenPrice) && chosenPrice > 0) {
+        const changePct =
+          prevClose > 0 && latestBarPrice > 0 && marketState !== 'REGULAR'
+            ? ((chosenPrice - prevClose) / prevClose) * 100
+            : Number(meta?.regularMarketChangePercent ?? 0) || 0;
+        return { priceUsd: chosenPrice, change24hPct: changePct };
+      }
     } catch {
-      // fallback to next host or Binance quote
+      // fallback to next Yahoo host
+    }
+  }
+  return null;
+}
+
+async function fetchSingleEquityQuote(
+  symbol: string,
+  config?: BinanceConfig | null,
+  forceFresh = false
+): Promise<{ priceUsd: number; change24hPct: number } | null> {
+  const clean = symbol.trim().toUpperCase();
+  if (!clean) return null;
+
+  const now = Date.now();
+  const cached = cachedEquityQuotes[clean];
+  if (!forceFresh && cached && now - cached.fetchedAt < EQUITY_QUOTE_TTL_MS) {
+    return { priceUsd: cached.priceUsd, change24hPct: cached.change24hPct };
+  }
+
+  // Query Binance native equity quote and Yahoo Finance concurrently:
+  // Binance's quote reflects Binance's exact orderbook/tokenized stock price,
+  // while Yahoo supplies regular + pre/post-market prices and 24h % change.
+  const [yahooQuote, binanceRes] = await Promise.all([
+    fetchYahooEquityQuote(clean),
+    config
+      ? callBinancePublic<{
+          lastPrice?: string;
+          price?: string;
+          bidPrice?: string;
+          askPrice?: string;
+        }>('/sapi/v1/equity/market/quote', { symbol: clean }, config, { includeApiKey: true }).catch(() => null)
+      : Promise.resolve(null),
+  ]);
+
+  let binancePriceUsd = 0;
+  if (binanceRes && binanceRes.success && binanceRes.data) {
+    const last = Number(binanceRes.data.lastPrice || binanceRes.data.price || 0);
+    const bid = Number(binanceRes.data.bidPrice || 0);
+    const ask = Number(binanceRes.data.askPrice || 0);
+    const mid = bid > 0 && ask > 0 ? (bid + ask) / 2 : (bid || ask);
+    const picked = mid > 0 ? mid : last;
+    if (Number.isFinite(picked) && picked > 0) {
+      binancePriceUsd = picked;
     }
   }
 
-  // 2. Also check Binance native equity quote endpoint when available
-  if (priceUsd <= 0 && config) {
-    try {
-      const bRes = await callBinancePublic<{
-        bidPrice?: string;
-        askPrice?: string;
-      }>('/sapi/v1/equity/market/quote', { symbol: clean }, config, { includeApiKey: true });
-      if (bRes.success && bRes.data) {
-        const bid = Number(bRes.data.bidPrice || 0);
-        const ask = Number(bRes.data.askPrice || 0);
-        const mid = bid > 0 && ask > 0 ? (bid + ask) / 2 : (bid || ask);
-        if (Number.isFinite(mid) && mid > 0) {
-          priceUsd = mid;
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }
+  const priceUsd = binancePriceUsd > 0 ? binancePriceUsd : (yahooQuote?.priceUsd || 0);
+  const change24hPct = yahooQuote?.change24hPct || 0;
 
   if (priceUsd > 0) {
     cachedEquityQuotes[clean] = { priceUsd, change24hPct, fetchedAt: now };
@@ -195,12 +231,13 @@ async function fetchSingleEquityQuote(
 
 export async function fetchBinanceEquityQuotes(
   symbols: string[],
-  config?: BinanceConfig | null
+  config?: BinanceConfig | null,
+  forceFresh = false
 ): Promise<Record<string, { priceUsd: number; change24hPct: number }>> {
   const unique = [...new Set(symbols.map((s) => s.trim().toUpperCase()).filter(Boolean))].slice(0, 40);
   if (unique.length === 0) return {};
   const results = await Promise.all(
-    unique.map(async (sym) => [sym, await fetchSingleEquityQuote(sym, config)] as const)
+    unique.map(async (sym) => [sym, await fetchSingleEquityQuote(sym, config, forceFresh)] as const)
   );
   const out: Record<string, { priceUsd: number; change24hPct: number }> = {};
   for (const [sym, q] of results) {

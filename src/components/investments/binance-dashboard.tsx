@@ -163,23 +163,27 @@ export function BinanceDashboard() {
     }
   }, [costBasisMethod]);
 
-  const fetchPortfolio = useCallback(async (fresh = false) => {
-    setIsLoading(true);
+  const fetchPortfolio = useCallback(async (fresh = false, silent = false) => {
+    if (!silent) setIsLoading(true);
     try {
       const res = await fetch(`/api/binance/portfolio${fresh ? '?fresh=1' : ''}`, { cache: 'no-store' });
       setHttpStatus(res.status);
       const data = (await res.json()) as BinanceApiPayload;
-      setPayload(data);
+      if (!silent || (res.ok && data.success && data.analytics)) {
+        setPayload(data);
+      }
       if (res.ok && data.success && data.analytics) {
         persistSnapshot(data);
       }
     } catch (err) {
-      setPayload({
-        success: false,
-        error: err instanceof Error ? err.message : 'Network error loading Binance portfolio.',
-      });
+      if (!silent) {
+        setPayload({
+          success: false,
+          error: err instanceof Error ? err.message : 'Network error loading Binance portfolio.',
+        });
+      }
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   }, [persistSnapshot]);
 
@@ -216,6 +220,16 @@ export function BinanceDashboard() {
       persistSnapshot(payload);
     }
   }, [costBasisMethod, payload, persistSnapshot]);
+
+  // Keep live market prices synced with Binance & Yahoo Finance while tab is visible
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        void fetchPortfolio(true, true);
+      }
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, [fetchPortfolio]);
 
   const handleSyncBinance = async (fullHistory = false) => {
     if (fullHistory) {
@@ -349,6 +363,8 @@ export function BinanceDashboard() {
         currentMarketPrice: h.livePriceUsd,
       }));
   }, [holdings, costBasisMethod]);
+
+  const closedCount = useMemo(() => holdings.filter((h) => h.status === 'closed').length, [holdings]);
 
   const filteredHoldings = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -880,7 +896,7 @@ export function BinanceDashboard() {
                 { id: 'stocks' as const, label: 'Stocks' },
                 { id: 'spot' as const, label: 'Spot' },
                 { id: 'funding' as const, label: 'Funding' },
-                { id: 'closed' as const, label: 'Closed' },
+                { id: 'closed' as const, label: closedCount > 0 ? `Closed (${closedCount})` : 'Closed' },
                 { id: 'all' as const, label: 'All' },
               ].map((f) => (
                 <button

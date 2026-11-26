@@ -13,9 +13,11 @@ import {
   computeBinanceAnalytics,
   createEmptyBinanceLedger,
   extractWalletUsdValuations,
+  hasSpotMarketTicker,
   mergeSpotAndFundingBalances,
   normalizeBinanceAssetSymbol,
   resolveAssetPriceUsd,
+  STABLECOIN_ASSETS,
 } from '@/lib/binance-sync';
 
 export const dynamic = 'force-dynamic';
@@ -136,7 +138,12 @@ export async function GET(req: NextRequest) {
         equitySymbols.add(effectiveTokenizedMap[b.asset]);
       } else if (b.isStock || (b.equityQty || 0) > 0) {
         equitySymbols.add(b.asset);
-      } else if (b.asset.length >= 3 && (b.asset.endsWith('ON') || b.asset.endsWith('B'))) {
+      } else if (
+        !STABLECOIN_ASSETS.has(b.asset) &&
+        !hasSpotMarketTicker(b.asset, tickerMap) &&
+        b.asset.length >= 3 &&
+        (b.asset.endsWith('ON') || b.asset.endsWith('B'))
+      ) {
         equitySymbols.add(b.asset.replace(/(ON|B)$/, ''));
       }
     }
@@ -145,7 +152,7 @@ export async function GET(req: NextRequest) {
         equitySymbols.add(normalizeBinanceAssetSymbol(tr.baseAsset, { tickerMap, fromEquityWallet: true }).symbol);
       }
     }
-    const equityPrices = await fetchBinanceEquityQuotes([...equitySymbols], config);
+    const equityPrices = await fetchBinanceEquityQuotes([...equitySymbols], config, fresh);
 
     const analytics = computeBinanceAnalytics({
       balances,

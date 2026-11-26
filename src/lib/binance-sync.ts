@@ -280,10 +280,13 @@ export function extractWalletUsdValuations(
   if (!Number.isFinite(btcPriceUsd) || btcPriceUsd <= 0) return out;
   for (const w of allWalletRows) {
     const walletName = String(w.walletName || '').trim().toLowerCase();
-    const fromEquityWallet = Boolean(walletName) && walletName !== 'spot' && walletName !== 'funding';
+    const isEquityWallet = /stock|equit|tradfi|tokenized|bstock/.test(walletName);
     for (const item of w.assetBalances || []) {
       const rawAsset = String(item.asset || '').trim().toUpperCase();
-      const { symbol: asset } = normalizeBinanceAssetSymbol(rawAsset, { tickerMap, fromEquityWallet });
+      const { symbol: asset } = normalizeBinanceAssetSymbol(rawAsset, {
+        tickerMap,
+        fromEquityWallet: isEquityWallet,
+      });
       const btcVal = Math.max(0, toNum(item.btcValuation));
       const qty =
         Math.max(0, toNum(item.free)) +
@@ -323,10 +326,13 @@ export function resolveAssetPriceUsd(
   }
 
   const eqStripped = normalizeBinanceAssetSymbol(clean, { tickerMap }).symbol;
+  const canStripBStockSuffix =
+    !STABLECOIN_ASSETS.has(clean) &&
+    !hasSpotMarketTicker(clean, tickerMap) &&
+    eqStripped.length >= 3 &&
+    (eqStripped.endsWith('ON') || eqStripped.endsWith('B'));
   const underlying = tokenizedAssetMap[clean]
-    || (eqStripped.length >= 3 && (eqStripped.endsWith('ON') || eqStripped.endsWith('B'))
-      ? eqStripped.replace(/(ON|B)$/, '')
-      : eqStripped);
+    || (canStripBStockSuffix ? eqStripped.replace(/(ON|B)$/, '') : eqStripped);
   if (equityPrices[clean]?.priceUsd > 0) {
     return equityPrices[clean];
   }
@@ -445,11 +451,12 @@ export function mergeSpotAndFundingBalances(
     row.totalQty = row.spotQty + row.fundingQty + (row.equityQty || 0);
   }
 
-  // Merge any extra wallets (e.g. Stock/Equity/TradFi/Alpha) from /sapi/v1/asset/wallet/balance
+  // Merge any extra wallets (e.g. Stock/Equity/TradFi or Earn/Pay) from /sapi/v1/asset/wallet/balance
   for (const w of allWalletRows) {
     const walletName = String(w.walletName || '').trim().toLowerCase();
     if (!walletName || walletName === 'spot' || walletName === 'funding') continue;
     if (/margin|futures|coin-m|isolated|options/.test(walletName)) continue;
+    const isEquityWallet = /stock|equit|tradfi|tokenized|bstock/.test(walletName);
     const list = Array.isArray(w.assetBalances) ? w.assetBalances : [];
     for (const item of list) {
       const rawAsset = String(item.asset || '').trim().toUpperCase();
@@ -462,11 +469,16 @@ export function mergeSpotAndFundingBalances(
       if (qty <= 0) continue;
       const { symbol: asset, isStock } = normalizeBinanceAssetSymbol(rawAsset, {
         tickerMap,
-        fromEquityWallet: true,
+        fromEquityWallet: isEquityWallet,
       });
       const row = ensure(asset, isStock);
-      row.equityQty = (row.equityQty || 0) + qty;
-      row.totalQty = row.spotQty + row.fundingQty + row.equityQty;
+      if (isStock) {
+        row.equityQty = (row.equityQty || 0) + qty;
+      } else {
+        // Non-equity wallets such as Simple Earn / Pay stay under Crypto/Funding
+        row.fundingQty += qty;
+      }
+      row.totalQty = row.spotQty + row.fundingQty + (row.equityQty || 0);
     }
   }
 
@@ -930,9 +942,14 @@ export function computeBinanceAnalytics(params: {
 
     const isStablecoin = STABLECOIN_ASSETS.has(asset);
     const assetTrades = [...(tradesByAsset.get(asset) || [])].sort((a, b) => a.timestamp - b.timestamp);
-    const strippedOndoOrB = asset.length >= 3 && (asset.endsWith('ON') || asset.endsWith('B'))
-      ? asset.replace(/(ON|B)$/, '')
-      : '';
+    const hasCryptoSpotMarket = hasSpotMarketTicker(asset, tickerMap);
+    const strippedOndoOrB =
+      !isStablecoin &&
+      !hasCryptoSpotMarket &&
+      asset.length >= 3 &&
+      (asset.endsWith('ON') || asset.endsWith('B'))
+        ? asset.replace(/(ON|B)$/, '')
+        : '';
     const isStock =
       equityAssetSet.has(asset) ||
       Boolean(tokenizedAssetMap[asset]) ||

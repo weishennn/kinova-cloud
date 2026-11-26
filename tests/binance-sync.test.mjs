@@ -411,3 +411,84 @@ test('strips EQ prefix on Binance stocks, merges with equity trades, and preserv
   assert.equal(eqx.assetKind, 'Crypto');
   assert.equal(eqx.marketValueUsd, 25);
 });
+
+test('keeps BNB under Crypto even when Earn wallet exists or BN equity price is present, and preserves realized PnL on sold-out stocks like SPCX', () => {
+  const tickerMap = buildTickerMap([
+    { symbol: 'BTCUSDT', lastPrice: '90000', priceChangePercent: '1.0' },
+    { symbol: 'BNBUSDT', lastPrice: '600', priceChangePercent: '2.5' },
+  ]);
+
+  const allWallets = [
+    {
+      walletName: 'Earn',
+      activate: true,
+      assetBalances: [
+        { asset: 'BNB', free: '1.5', locked: '0', btcValuation: '0.01' },
+      ],
+    },
+  ];
+
+  const balances = mergeSpotAndFundingBalances(
+    [{ asset: 'BNB', free: '0.5', locked: '0' }],
+    [],
+    allWallets,
+    tickerMap
+  );
+
+  // Sold-out stock SPCX (buy 10 @ $20, sell all 10 @ $28 -> $80 realized gain)
+  const spcxBuy = normalizeEquityTrade(
+    {
+      executionId: 'spcx-1',
+      symbol: 'EQSPCX',
+      quote: 'USDC',
+      side: 'BUY',
+      price: '20',
+      qty: '10',
+      total: '200',
+      executionAt: 1700000000000,
+    },
+    tickerMap
+  );
+  const spcxSell = normalizeEquityTrade(
+    {
+      executionId: 'spcx-2',
+      symbol: 'EQSPCX',
+      quote: 'USDC',
+      side: 'SELL',
+      price: '28',
+      qty: '10',
+      total: '280',
+      executionAt: 1700005000000,
+    },
+    tickerMap
+  );
+  assert.ok(spcxBuy && spcxSell);
+
+  const report = computeBinanceAnalytics({
+    balances,
+    trades: [spcxBuy, spcxSell],
+    fundingEvents: [],
+    tickerMap,
+    usdToMyr: 4.4,
+    equityPrices: {
+      BN: { priceUsd: 55, change24hPct: 0.4 },
+      SPCX: { priceUsd: 29, change24hPct: 1.2 },
+    },
+  });
+
+  const bnb = report.holdings.find((h) => h.asset === 'BNB');
+  assert.ok(bnb);
+  assert.equal(bnb.assetKind, 'Crypto');
+  assert.equal(bnb.totalQty, 2);
+  assert.equal(bnb.livePriceUsd, 600);
+  assert.equal(bnb.equityQty, 0);
+
+  const spcx = report.holdings.find((h) => h.asset === 'SPCX');
+  assert.ok(spcx);
+  assert.equal(spcx.assetKind, 'Stock');
+  assert.equal(spcx.status, 'closed');
+  assert.equal(spcx.totalQty, 0);
+  assert.equal(spcx.realizedPnlFifoUsd, 80);
+  assert.equal(spcx.realizedPnlWeightedUsd, 80);
+  assert.equal(report.totals.realizedPnlFifoUsd, 80);
+});

@@ -14,6 +14,7 @@ import {
   createEmptyBinanceLedger,
   extractWalletUsdValuations,
   formatKlDate,
+  hasSpotMarketTicker,
   mergeFundingById,
   mergeSpotAndFundingBalances,
   mergeTradesById,
@@ -235,9 +236,10 @@ export async function POST(req: NextRequest) {
     // 1. Funding & Conversion windows
     const incomingFunding: BinanceFundingEvent[] = [];
     const incomingTrades: BinanceTradeExecution[] = [];
-    const discoveredAssets = new Set<string>(
-      balances.filter((b) => !b.isStock || Boolean(tokenizedMap[b.asset])).map((b) => b.asset)
-    );
+    const discoveredAssets = new Set<string>([
+      ...balances.filter((b) => !b.isStock || Boolean(tokenizedMap[b.asset])).map((b) => b.asset),
+      ...Object.keys(tokenizedMap),
+    ]);
 
     const windows30 = buildTimeWindows(startMs, nowMs, 29);
     const windows89 = buildTimeWindows(startMs, nowMs, 89);
@@ -668,7 +670,12 @@ export async function POST(req: NextRequest) {
     for (const b of balances) {
       if (effectiveTokenizedMap[b.asset]) equitySymbols.add(effectiveTokenizedMap[b.asset]);
       else if (b.isStock || (b.equityQty || 0) > 0) equitySymbols.add(b.asset);
-      else if (b.asset.length >= 3 && (b.asset.endsWith('ON') || b.asset.endsWith('B'))) {
+      else if (
+        !STABLECOIN_ASSETS.has(b.asset) &&
+        !hasSpotMarketTicker(b.asset, tickerMap) &&
+        b.asset.length >= 3 &&
+        (b.asset.endsWith('ON') || b.asset.endsWith('B'))
+      ) {
         equitySymbols.add(b.asset.replace(/(ON|B)$/, ''));
       }
     }
@@ -677,7 +684,7 @@ export async function POST(req: NextRequest) {
         equitySymbols.add(normalizeBinanceAssetSymbol(tr.baseAsset, { tickerMap, fromEquityWallet: true }).symbol);
       }
     }
-    const equityPrices = await fetchBinanceEquityQuotes([...equitySymbols], config);
+    const equityPrices = await fetchBinanceEquityQuotes([...equitySymbols], config, true);
 
     const analytics = computeBinanceAnalytics({
       balances,
