@@ -6,6 +6,7 @@ import { recordUserAiCall } from '@/lib/admin-registry';
 import { generateGeminiContent } from '@/lib/gemini-key-pool';
 import { getReceiptReasoningReasons } from '@/lib/receipt-reasoning';
 import { reconcileKinovaReceiptItems, type RawReconcilableReceiptItem } from '@/lib/receipt-item-reconciler';
+import { sanitizeShopeePayCoinDiscount } from '@/lib/shopeepay-coin-guard';
 
 const VALID_CURRENCIES = new Set(['MYR', 'USD', 'SGD', 'EUR', 'GBP', 'JPY', 'AUD', 'IDR', 'THB', 'CNY', 'HKD']);
 
@@ -32,6 +33,67 @@ function parseReceiptJson(text: string): Record<string, unknown> | null {
     } catch {
       return null;
     }
+  }
+}
+
+function applyShopeePayGuardToRawParsed(parsed: Record<string, unknown>): void {
+  const rawItemsSum = Array.isArray(parsed.items)
+    ? Number(
+        parsed.items
+          .filter((it): it is Record<string, unknown> => Boolean(it) && typeof it === 'object')
+          .reduce((s, it) => {
+            const qty = typeof it.quantity === 'number' && Number.isFinite(it.quantity) && it.quantity > 0 ? it.quantity : 1;
+            const unitPrice = typeof it.unitPrice === 'number' && Number.isFinite(it.unitPrice) && it.unitPrice > 0 ? it.unitPrice : 0;
+            const explicitAmt = typeof it.amount === 'number' && Number.isFinite(it.amount) && it.amount > 0 ? it.amount : 0;
+            const amt = explicitAmt > 0 ? explicitAmt : (unitPrice > 0 ? Number((unitPrice * qty).toFixed(2)) : 0);
+            return s + amt;
+          }, 0)
+          .toFixed(2)
+      )
+    : 0;
+
+  const guard = sanitizeShopeePayCoinDiscount({
+    amount: typeof parsed.amount === 'number' ? parsed.amount : null,
+    subtotal: typeof parsed.subtotal === 'number' ? parsed.subtotal : null,
+    billAmount: typeof parsed.billAmount === 'number' ? parsed.billAmount : null,
+    discountAmount: typeof parsed.discountAmount === 'number' ? parsed.discountAmount : null,
+    dealsDescription: typeof parsed.dealsDescription === 'string' ? parsed.dealsDescription : null,
+    paymentMethod: typeof parsed.paymentMethod === 'string' ? parsed.paymentMethod : null,
+    ocrSummary: typeof parsed.ocrSummary === 'string' ? parsed.ocrSummary : null,
+    notes: typeof parsed.notes === 'string' ? parsed.notes : null,
+    merchant: typeof parsed.merchant === 'string' ? parsed.merchant : null,
+    description: typeof parsed.description === 'string' ? parsed.description : null,
+    itemsSum: rawItemsSum > 0 ? rawItemsSum : null,
+  });
+
+  if (!guard.suppressedCoinDiscount) return;
+
+  parsed.discountAmount = guard.discountAmount;
+  parsed.billAmount = guard.billAmount;
+  parsed.dealsDescription = guard.dealsDescription;
+  if (typeof parsed.notes === 'string') parsed.notes = guard.notes;
+
+  if ((guard.restoredAmountFromBill || guard.adjustedAmountForCoinRedemption) && guard.amount !== null) {
+    parsed.amount = guard.amount;
+    if (guard.restoredAmountFromBill && Array.isArray(parsed.items) && parsed.items.length === 1) {
+      const onlyItem = parsed.items[0];
+      if (onlyItem && typeof onlyItem === 'object') {
+        const itemObj = onlyItem as Record<string, unknown>;
+        const qty = typeof itemObj.quantity === 'number' && Number.isFinite(itemObj.quantity) && itemObj.quantity > 0 ? itemObj.quantity : 1;
+        if (typeof itemObj.amount === 'number' && itemObj.amount < guard.amount) {
+          itemObj.amount = guard.amount;
+          itemObj.unitPrice = Number((guard.amount / qty).toFixed(2));
+        }
+      }
+    }
+  }
+  if (
+    guard.adjustedAmountForCoinRedemption &&
+    guard.amount !== null &&
+    typeof parsed.subtotal === 'number' &&
+    parsed.subtotal > guard.amount
+  ) {
+    parsed.subtotal = guard.amount;
   }
 }
 
@@ -84,6 +146,10 @@ CRITICAL INSTRUCTIONS:
    - PAYMENT METHOD IS NOT THE MERCHANT: Payment channels/methods (e.g. "Touch 'n Go eWallet", "ShopeePay", "DuitNow QR", "MAE", "Card") are NEVER the merchant/store name!
    - MERCHANT LOCATION IS NOT THE STORE NAME: Location fields or city names are locations, NOT the merchant name. NEVER invent generic names like "Food Stall (Location)"!
    - EXTRACT "MEMO" / "REMARK" / "RECIPIENT REFERENCE": Look specifically for "Memo", "Remark", "Recipient Reference", "Payment Details", or "Note". When no separate shop brand is shown, the Memo/Remark text IS the primary description or stall name! Extract it as "description" and include it in "items".
+   - SHOPEEPAY COIN CASHBACK / REVERT RULE (LIMIT TO SHOPEEPAY PAYMENTS ONLY):
+     * On ShopeePay payment screens ("ShopeePay", "ShopeePay Balance"), ignore Shopee Coins rewards/cashback/reverts (e.g. "10 Coins (RM0.10) From Coins Bonanza", "Coins Cashback", "Coins Earned", "+10 Coins (RM0.10)"). They return as Shopee Coins for future use, NOT as a cash discount off this payment!
+     * For ShopeePay payments: NEVER put reverted/earned/redeemed Shopee Coins into "discountAmount", "dealsDescription", or as "-0.10" in "notes". Keep "amount" as the actual currency amount paid via ShopeePay (e.g. RM14.00, NOT RM13.90), and set "discountAmount": null, "billAmount": null, "dealsDescription": null unless there is a separate non-coin RM voucher/merchant discount.
+     * Always populate "paymentMethod" (e.g. "ShopeePay Balance") when visible.
 
 2.6. ITEM NAME VS MERCHANT / STORE NAME (IMPORTANT FOR PERSONAL EXPENSE TRACKING):
    - Users record expenses by WHAT WAS BOUGHT (e.g. "Xiaomi 吹风筒", "Salmon Don", "Latte & Croissant", "Uniqlo T-shirt"), NOT by obscure corporate company / vendor names (e.g. "Show See Malaysia", "ABC Sdn Bhd", "Official Store")!
@@ -125,6 +191,10 @@ Return ONLY this JSON shape:
   "taxIncluded": boolean,
   "taxLabel": string,
   "items": [{"name": string, "quantity": number, "unitPrice": number, "amount": number, "brand": string | null, "productType": string | null, "category": string}],
+  "paymentMethod": string | null,
+  "billAmount": number | null,
+  "discountAmount": number | null,
+  "dealsDescription": string | null,
   "needsReasoning": boolean,
   "ambiguities": string[],
   "notes": string
@@ -149,7 +219,10 @@ Return ONLY this JSON shape:
       });
       parsed = parseReceiptJson(fastResult.text);
       if (!parsed) fastPassError = new Error('Gemini OCR returned invalid JSON');
-      else usedModel = fastResult.model;
+      else {
+        applyShopeePayGuardToRawParsed(parsed);
+        usedModel = fastResult.model;
+      }
     } catch (err: unknown) {
       fastPassError = err;
     }
@@ -206,6 +279,7 @@ Return ONLY this JSON shape:
       if (!parsed) {
         return NextResponse.json({ success: false, error: 'Gemini OCR returned invalid JSON' }, { status: 502 });
       }
+      applyShopeePayGuardToRawParsed(parsed);
       usedModel = recovered.model;
       reasoningUsed = true;
       finalReasoningReasons = getReceiptReasoningReasons(parsed);
@@ -215,10 +289,10 @@ Return ONLY this JSON shape:
       const reasoningPrompt = !reasoningUsed && parsed && fastResult
         ? `Review the attached receipt image against this first-pass candidate. Re-read the merchant name, each item name and quantity, unit price versus extended line amount, subtotal, discount, tax/service-charge lines, and final paid amount. The first pass flagged: ${initialReasoningReasons.join(', ')}.
 
-Treat the candidate as unverified. Correct a field only when the image supports it. Ensure each item's "amount" is its EXTENDED LINE TOTAL (quantity * unitPrice, e.g. 3 plates * 6.00 = 18.00, NEVER 6.00) and reconciles with printed Subtotal and final paid totals. Decide from the receipt whether tax is included in the listed prices or added after the subtotal. If a detail remains unreadable, retain the best candidate and list the uncertainty; do not invent a value. Do not provide chain-of-thought.
+Treat the candidate as unverified. Correct a field only when the image supports it. Ensure each item's "amount" is its EXTENDED LINE TOTAL (quantity * unitPrice, e.g. 3 plates * 6.00 = 18.00, NEVER 6.00) and reconciles with printed Subtotal and final paid totals. Decide from the receipt whether tax is included in the listed prices or added after the subtotal. For ShopeePay payments ONLY, NEVER treat Shopee Coins rewards/cashback/reverts (e.g. "10 Coins (RM0.10) From Coins Bonanza") or coin usage as a discountAmount or subtract it from the paid amount. If a detail remains unreadable, retain the best candidate and list the uncertainty; do not invent a value. Do not provide chain-of-thought.
 
 Return only valid JSON with this exact structure:
-{"merchant":string,"date":"YYYY-MM-DD","amount":number,"currency":string,"category":string,"description":string,"subtotal":number|null,"taxAmount":number|null,"taxRate":number|null,"taxIncluded":boolean,"taxLabel":string,"items":[{"name":string,"quantity":number,"unitPrice":number,"amount":number,"brand":string|null,"productType":string|null,"category":string}],"needsReasoning":boolean,"ambiguities":string[],"notes":string}
+{"merchant":string,"date":"YYYY-MM-DD","amount":number,"currency":string,"category":string,"description":string,"subtotal":number|null,"taxAmount":number|null,"taxRate":number|null,"taxIncluded":boolean,"taxLabel":string,"items":[{"name":string,"quantity":number,"unitPrice":number,"amount":number,"brand":string|null,"productType":string|null,"category":string}],"paymentMethod":string|null,"billAmount":number|null,"discountAmount":number|null,"dealsDescription":string|null,"needsReasoning":boolean,"ambiguities":string[],"notes":string}
 
 Candidate to verify:
 ${JSON.stringify(parsed)}`
@@ -243,6 +317,7 @@ ${JSON.stringify(parsed)}`
           if (!reviewedJson) {
             reasoningFallback = true;
           } else {
+            applyShopeePayGuardToRawParsed(reviewedJson);
             parsed = reviewedJson;
             usedModel = reviewed.model;
             reasoningUsed = true;

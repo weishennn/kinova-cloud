@@ -10,6 +10,7 @@ import {
 } from '@/lib/gemini-key-pool';
 import { matchHabitMemory } from '@/lib/habit-memory-engine';
 import { reconcileKinovaReceiptItems } from '@/lib/receipt-item-reconciler';
+import { sanitizeShopeePayCoinDiscount } from '@/lib/shopeepay-coin-guard';
 import {
   acknowledgeShortcutAutoHeal,
   acknowledgeShortcutDraft,
@@ -123,15 +124,15 @@ async function buildScreenshotDraftPayload(params: {
     parsedOcr.price ??
     null;
 
-  const discountAmount =
+  let discountAmount =
     typeof parsedOcr.discountAmount === 'number' && Number.isFinite(parsedOcr.discountAmount) && parsedOcr.discountAmount > 0
       ? Number(parsedOcr.discountAmount.toFixed(2))
       : null;
-  const billAmount =
+  let billAmount =
     typeof parsedOcr.billAmount === 'number' && Number.isFinite(parsedOcr.billAmount) && parsedOcr.billAmount > 0
       ? Number(parsedOcr.billAmount.toFixed(2))
       : null;
-  const dealsDescription =
+  let dealsDescription =
     typeof parsedOcr.dealsDescription === 'string' && parsedOcr.dealsDescription.trim()
       ? parsedOcr.dealsDescription.trim()
       : null;
@@ -164,11 +165,53 @@ async function buildScreenshotDraftPayload(params: {
         .slice(0, 12)
     : [];
 
-  const parsedNumericRawAmount = parseAmountAndCurrencyFromRawInput(
+  let parsedNumericRawAmount = parseAmountAndCurrencyFromRawInput(
     rawAmountValue,
     parsedOcr.currencySymbol || parsedOcr.currency,
     'MYR'
   ).amount;
+
+  const rawItemsTotal =
+    rawItemCandidates.length > 0
+      ? Number(rawItemCandidates.reduce((s, it) => s + it.amount, 0).toFixed(2))
+      : null;
+
+  const shopeePayGuard = sanitizeShopeePayCoinDiscount({
+    amount: parsedNumericRawAmount,
+    subtotal: typeof parsedOcr.subtotal === 'number' && parsedOcr.subtotal > 0 ? parsedOcr.subtotal : null,
+    billAmount,
+    discountAmount,
+    dealsDescription,
+    paymentMethod: typeof parsedOcr.paymentMethod === 'string' ? parsedOcr.paymentMethod : null,
+    ocrSummary,
+    notes: typeof parsedOcr.notes === 'string' ? parsedOcr.notes : null,
+    merchant: rawMerchant || candidateMerchantText,
+    description: typeof parsedOcr.description === 'string' ? parsedOcr.description : null,
+    itemsSum: rawItemsTotal,
+  });
+
+  if (shopeePayGuard.suppressedCoinDiscount) {
+    discountAmount = shopeePayGuard.discountAmount;
+    billAmount = shopeePayGuard.billAmount;
+    dealsDescription = shopeePayGuard.dealsDescription;
+    if (
+      (shopeePayGuard.restoredAmountFromBill || shopeePayGuard.adjustedAmountForCoinRedemption) &&
+      shopeePayGuard.amount !== null
+    ) {
+      rawAmountValue = shopeePayGuard.amount;
+      parsedNumericRawAmount = shopeePayGuard.amount;
+      if (
+        shopeePayGuard.restoredAmountFromBill &&
+        rawItemCandidates.length === 1 &&
+        rawItemCandidates[0].amount < shopeePayGuard.amount
+      ) {
+        rawItemCandidates[0].amount = shopeePayGuard.amount;
+        if (rawItemCandidates[0].quantity > 0) {
+          rawItemCandidates[0].unitPrice = Number((shopeePayGuard.amount / rawItemCandidates[0].quantity).toFixed(2));
+        }
+      }
+    }
+  }
 
   const reconciledShortcutItems = reconcileKinovaReceiptItems(rawItemCandidates, {
     amount: parsedNumericRawAmount,
@@ -716,6 +759,10 @@ CRITICAL INSTRUCTIONS:
    - MERCHANT LOCATION IS NOT THE STORE NAME: "Merchant Location: AMPANG", "Location: ...", or city names are locations, NOT the merchant/store name! NEVER invent generic names like "Food Stall (Ampang)" or "Shop (Location)"!
    - EXTRACT "MEMO" / "REMARK" / "RECIPIENT REFERENCE": In e-wallet receipts, look carefully for "Memo", "Remark", "Recipient Reference", "Payment Details", or "Note".
    - When no specific restaurant or shop brand is printed, the "Memo" or "Remark" text IS the primary purchased item, dish, or stall name! Set "merchant" to this value, include it in "items", and classify it under "Food & Dining" (or appropriate category)!
+   - SHOPEEPAY COIN CASHBACK / REVERT RULE (LIMIT TO SHOPEEPAY PAYMENTS ONLY):
+     * On ShopeePay payment screens ("ShopeePay", "ShopeePay Balance"), ignore Shopee Coins rewards/cashback/reverts (e.g. "10 Coins (RM0.10) From Coins Bonanza", "Coins Cashback", "Coins Earned", "+10 Coins (RM0.10)"). They return as Shopee Coins for future use, NOT as a cash discount off this payment!
+     * For ShopeePay payments: NEVER put reverted/earned/redeemed Shopee Coins into "discountAmount", "dealsDescription", or as "-0.10" in "notes". Keep "amount" as the actual currency amount paid via ShopeePay (e.g. RM14.00, NOT RM13.90), and set "discountAmount": null, "billAmount": null, "dealsDescription": null unless there is a separate non-coin RM voucher/merchant discount.
+     * Always set "paymentMethod" (e.g. "ShopeePay Balance") when visible.
 
 3. FUEL / PETROL RECEIPTS (CRITICAL PRICE EXTRACTION):
    - Gas stations (Shell, Petronas, Caltex, Petron, BHPetrol) belong to category "Transport".

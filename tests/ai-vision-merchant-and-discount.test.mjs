@@ -6,6 +6,7 @@ import {
   SYSTEM_NOTIFICATION_NOISE_REGEX,
   inferCategoryFromMerchant,
 } from '../src/lib/shortcut-draft-store.ts';
+import { sanitizeShopeePayCoinDiscount } from '../src/lib/shopeepay-coin-guard.ts';
 
 test('1. System and notification noise terms are rejected as merchants', () => {
   assert.ok(SYSTEM_NOTIFICATION_NOISE_REGEX.test('Kinova Automation'));
@@ -195,5 +196,115 @@ test('6. Petrol volume is not treated as discrete plates and net amount is prese
 
   assert.equal(items[0].amount, 82.36);
   assert.equal(items[0].unitPrice, 1.88); // RM 1.88 per Litre after BUDI MADANI subsidy & voucher
+});
+
+test('7. ShopeePay coin cashback/revert is never recorded as -0.10 discount or deducted from paid amount', () => {
+  // Case A: ShopeePay receipt where OCR extracted full RM14.00 and mistakenly put 10 Coins (RM0.10) into discountAmount
+  const resA = sanitizeShopeePayCoinDiscount({
+    amount: 14.0,
+    discountAmount: 0.1,
+    dealsDescription: '10 Coins (RM0.10) From Coins Bonanza',
+    paymentMethod: 'ShopeePay Balance',
+    ocrSummary: 'RM14.00 22 Oct 2026, 12:43PM 10 Coins (RM0.10) From Coins Bonanza Payment Method ShopeePay Balance Memo Chicken rice',
+    itemsSum: 14.0,
+  });
+  assert.equal(resA.isShopeePay, true);
+  assert.equal(resA.suppressedCoinDiscount, true);
+  assert.equal(resA.amount, 14.0);
+  assert.equal(resA.discountAmount, null);
+  assert.equal(resA.dealsDescription, null);
+  assert.equal(resA.billAmount, null);
+
+  // Case B: Gemini already subtracted RM0.10 coin cashback from RM14.00 bill -> restore RM14.00
+  const resB = sanitizeShopeePayCoinDiscount({
+    amount: 13.9,
+    billAmount: 14.0,
+    discountAmount: 0.1,
+    dealsDescription: '10 Coins (RM0.10) From Coins Bonanza',
+    paymentMethod: 'ShopeePay Balance',
+    notes: '[优惠抵扣: -MYR 0.10 (10 Coins)] · ShopeePay Balance',
+  });
+  assert.equal(resB.isShopeePay, true);
+  assert.equal(resB.suppressedCoinDiscount, true);
+  assert.equal(resB.restoredAmountFromBill, true);
+  assert.equal(resB.amount, 14.0);
+  assert.equal(resB.discountAmount, null);
+  assert.equal(resB.billAmount, null);
+  assert.equal(resB.notes, 'ShopeePay Balance');
+
+  // Case C: Gemini subtracted RM0.10 without setting billAmount, but ocrSummary shows RM14.00
+  const resC = sanitizeShopeePayCoinDiscount({
+    amount: 13.9,
+    discountAmount: 0.1,
+    dealsDescription: 'Coins Bonanza',
+    paymentMethod: 'ShopeePay',
+    ocrSummary: 'RM14.00 10 Coins (RM0.10) From Coins Bonanza Payment Method ShopeePay Balance',
+  });
+  assert.equal(resC.restoredAmountFromBill, true);
+  assert.equal(resC.amount, 14.0);
+  assert.equal(resC.discountAmount, null);
+
+  // Case D: Genuine RM13.90 meal that also earned 10 Coins (RM0.10) -> stays RM13.90
+  const resD = sanitizeShopeePayCoinDiscount({
+    amount: 13.9,
+    discountAmount: 0.1,
+    dealsDescription: '10 Coins (RM0.10) From Coins Bonanza',
+    paymentMethod: 'ShopeePay Balance',
+    ocrSummary: 'RM13.90 10 Coins (RM0.10) From Coins Bonanza Payment Method ShopeePay Balance',
+  });
+  assert.equal(resD.restoredAmountFromBill, false);
+  assert.equal(resD.amount, 13.9);
+  assert.equal(resD.discountAmount, null);
+
+  // Case E: ShopeePay payment where user redeemed coins (RM13.90 cash + 10 Coins used) -> keep RM13.90 cash only, no -0.10 discount
+  const resE = sanitizeShopeePayCoinDiscount({
+    amount: 13.9,
+    billAmount: 14.0,
+    discountAmount: 0.1,
+    dealsDescription: 'Shopee Coins Redeemed',
+    paymentMethod: 'ShopeePay Balance',
+  });
+  assert.equal(resE.suppressedCoinDiscount, true);
+  assert.equal(resE.restoredAmountFromBill, false);
+  assert.equal(resE.amount, 13.9);
+  assert.equal(resE.discountAmount, null);
+
+  // Case F: ShopeePay payment with genuine non-coin RM voucher -> preserve discount
+  const resF = sanitizeShopeePayCoinDiscount({
+    amount: 12.0,
+    billAmount: 14.0,
+    discountAmount: 2.0,
+    dealsDescription: 'ShopeePay Instant Voucher',
+    paymentMethod: 'ShopeePay Balance',
+    ocrSummary: 'RM12.00 Bill RM14.00 ShopeePay Instant Voucher -RM2.00 10 Coins (RM0.10) From Coins Bonanza',
+  });
+  assert.equal(resF.isShopeePay, true);
+  assert.equal(resF.suppressedCoinDiscount, false);
+  assert.equal(resF.amount, 12.0);
+  assert.equal(resF.discountAmount, 2.0);
+  assert.equal(resF.billAmount, 14.0);
+
+  // Case G: Strictly limited to ShopeePay — non-ShopeePay discounts/coins are untouched
+  const resGrab = sanitizeShopeePayCoinDiscount({
+    amount: 18.74,
+    billAmount: 22.05,
+    discountAmount: 3.31,
+    dealsDescription: 'Deals and offers',
+    paymentMethod: 'GrabPay',
+  });
+  assert.equal(resGrab.isShopeePay, false);
+  assert.equal(resGrab.suppressedCoinDiscount, false);
+  assert.equal(resGrab.discountAmount, 3.31);
+
+  const resShopeeCard = sanitizeShopeePayCoinDiscount({
+    amount: 14.0,
+    billAmount: 14.1,
+    discountAmount: 0.1,
+    dealsDescription: '10 Coins (RM0.10)',
+    merchant: 'Shopee',
+    paymentMethod: 'Maybank Visa',
+  });
+  assert.equal(resShopeeCard.isShopeePay, false);
+  assert.equal(resShopeeCard.discountAmount, 0.1);
 });
 
