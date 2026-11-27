@@ -113,14 +113,14 @@ export function WhatKinovaKnows() {
     <section id="kinova-knows" className="space-y-4 min-w-0">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0">
-          <Sparkles className="h-4 w-4 text-indigo-500 shrink-0" />
+          <Sparkles className="h-4 w-4 text-emerald-500 shrink-0" />
           <h2 className="text-xs font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider leading-snug">
             What Kinova Knows / 助手个人画像与偏好记忆
           </h2>
         </div>
       </div>
 
-      <div className="rounded-2xl border border-indigo-500/20 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-md p-4 sm:p-5 space-y-5 text-sm shadow-sm min-w-0 overflow-hidden">
+      <div className="rounded-2xl border border-emerald-500/20 bg-white/80 dark:bg-zinc-900/60 backdrop-blur-md p-4 sm:p-5 space-y-5 text-sm shadow-sm min-w-0 overflow-hidden">
         <p className="text-xs text-slate-600 dark:text-zinc-400 leading-relaxed">
           这些是 Kinova 在为你思考建议、预测资金流走向及判断开支合理性时所引用的真实基准事实。编辑以下内容会立即更新下一次 AI 上下文与建议行为。
         </p>
@@ -128,7 +128,7 @@ export function WhatKinovaKnows() {
         {/* 1. Language Preference */}
         <div className="space-y-2 border-b border-slate-200/80 dark:border-white/[0.06] pb-4">
           <label className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-zinc-200">
-            <Globe className="h-3.5 w-3.5 text-indigo-500" />
+            <Globe className="h-3.5 w-3.5 text-emerald-500" />
             回答语言风格 (Response Language)
           </label>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -144,7 +144,7 @@ export function WhatKinovaKnows() {
                 onClick={() => handleLanguageChange(opt.id as any)}
                 className={`py-2 px-3 rounded-xl text-xs font-medium border text-center transition-all cursor-pointer ${
                   profile.language === opt.id
-                    ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-900 dark:text-indigo-200 font-semibold'
+                    ? '-emerald-/15 border-emerald-500/40 text-emerald-900 dark:text-emerald-200 font-semibold'
                     : 'bg-slate-50 dark:bg-zinc-800/50 border-slate-200 dark:border-zinc-700/60 text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800'
                 }`}
               >
@@ -157,7 +157,7 @@ export function WhatKinovaKnows() {
         {/* 2. Payday */}
         <div className="space-y-2 border-b border-slate-200/80 dark:border-white/[0.06] pb-4">
           <label className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-zinc-200">
-            <Calendar className="h-3.5 w-3.5 text-indigo-500" />
+            <Calendar className="h-3.5 w-3.5 text-emerald-500" />
             每月发薪日 (Payday)
           </label>
           <div className="flex flex-wrap items-center gap-3">
@@ -170,7 +170,7 @@ export function WhatKinovaKnows() {
                 value={profile.paydayDay ?? ''}
                 onChange={(e) => handlePaydayChange(e.target.value)}
                 placeholder="例如 28"
-                className="w-24 px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-24 px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
               <span className="text-xs text-slate-600 dark:text-zinc-400">号发薪</span>
             </div>
@@ -196,7 +196,7 @@ export function WhatKinovaKnows() {
         {/* 3. Budget & Baseline Income */}
         <div className="space-y-3 border-b border-slate-200/80 dark:border-white/[0.06] pb-4">
           <label className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-zinc-200">
-            <DollarSign className="h-3.5 w-3.5 text-indigo-500" />
+            <DollarSign className="h-3.5 w-3.5 text-emerald-500" />
             财务基准数字 (Deterministic Baselines)
           </label>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -207,7 +207,7 @@ export function WhatKinovaKnows() {
                 value={profile.monthlyBudgetCap ?? ''}
                 onChange={(e) => handleBudgetChange(e.target.value)}
                 placeholder="例如 3000"
-                className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
             <div>
@@ -217,7 +217,7 @@ export function WhatKinovaKnows() {
                 value={profile.baselineIncome ?? ''}
                 onChange={(e) => handleIncomeChange(e.target.value)}
                 placeholder="例如 5000"
-                className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
             <div>
@@ -227,7 +227,7 @@ export function WhatKinovaKnows() {
                 value={profile.emergencyReserve ?? ''}
                 onChange={(e) => handleReserveChange(e.target.value)}
                 placeholder="例如 15000"
-                className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
           </div>
@@ -237,7 +237,7 @@ export function WhatKinovaKnows() {
         <div className="space-y-3 border-b border-slate-200/80 dark:border-white/[0.06] pb-4">
           <div className="flex items-center justify-between">
             <label className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-zinc-200">
-              <Target className="h-3.5 w-3.5 text-indigo-500" />
+              <Target className="h-3.5 w-3.5 text-emerald-500" />
               理财目标 (最多 3 个)
             </label>
             <span className="text-[11px] text-slate-500">{profile.goals.length} / 3</span>
@@ -273,7 +273,7 @@ export function WhatKinovaKnows() {
                   placeholder="目标名称 (如: 日本旅游基金)"
                   value={newGoalName}
                   onChange={(e) => setNewGoalName(e.target.value)}
-                  className="w-full sm:flex-1 min-w-0 px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full sm:flex-1 min-w-0 px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
                 <div className="flex items-center gap-2 sm:contents min-w-0">
                   <input
@@ -281,12 +281,12 @@ export function WhatKinovaKnows() {
                     placeholder="目标金额 RM"
                     value={newGoalAmount}
                     onChange={(e) => setNewGoalAmount(e.target.value)}
-                    className="flex-1 sm:flex-none sm:w-28 min-w-0 px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="flex-1 sm:flex-none sm:w-28 min-w-0 px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                   <button
                     type="button"
                     onClick={handleAddGoal}
-                    className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
+                    className="px-3 py-1.5 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
                   >
                     <Plus className="h-3.5 w-3.5" />
                     添加
@@ -314,7 +314,7 @@ export function WhatKinovaKnows() {
                   <button
                     type="button"
                     onClick={() => handleUnrejectChip(c.text)}
-                    className="text-slate-400 hover:text-indigo-600 font-bold ml-1 cursor-pointer shrink-0"
+                    className="text-slate-400 hover:text-emerald-600 font-bold ml-1 cursor-pointer shrink-0"
                     title="恢复此建议"
                   >
                     ×

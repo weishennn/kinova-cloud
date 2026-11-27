@@ -753,7 +753,7 @@ export default function SettingsPage() {
       <section className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-xs font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
-            <Cloud className="h-3.5 w-3.5 text-indigo-800 dark:text-indigo-400" />
+            <Cloud className="h-3.5 w-3.5 text-emerald-800 dark:text-emerald-400" />
             <span>Google Sheets Cloud Architecture & Cache</span>
           </h2>
           <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase flex items-center gap-1.5 ${
@@ -787,7 +787,7 @@ export default function SettingsPage() {
         <div className="rounded-3xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 p-6 backdrop-blur-xl space-y-6 specular-card">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-500/15 text-indigo-800 dark:text-indigo-400 border border-indigo-500/30 shadow-lg shadow-indigo-500/10">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl -emerald-/15 text-emerald-800 dark:text-emerald-400 border border-emerald-500/30 shadow-lg">
                 <Database className="h-6 w-6" />
               </div>
               <div>
@@ -856,7 +856,7 @@ export default function SettingsPage() {
             <div className="p-3.5 rounded-2xl bg-white/90 dark:bg-zinc-950/70 border border-slate-200 dark:border-zinc-800/80 space-y-1">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-semibold text-slate-600 dark:text-zinc-400">Last Successful Sheet Response</span>
-                <Clock className="h-3.5 w-3.5 text-indigo-800 dark:text-indigo-400" />
+                <Clock className="h-3.5 w-3.5 text-emerald-800 dark:text-emerald-400" />
               </div>
               <p className="text-sm font-bold text-slate-950 dark:text-white">
                 {syncStatus.formattedLastSync}
@@ -883,7 +883,7 @@ export default function SettingsPage() {
           {/* Architecture & Expiry Rules Details */}
           <div className="p-4 rounded-2xl bg-white/90 dark:bg-zinc-950/70 border border-slate-200 dark:border-zinc-800/80 space-y-3">
             <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
-              <Layers className="h-3.5 w-3.5 text-indigo-800 dark:text-indigo-400" />
+              <Layers className="h-3.5 w-3.5 text-emerald-800 dark:text-emerald-400" />
               <span>Storage & Expiry Policy:</span>
             </span>
 
@@ -900,7 +900,7 @@ export default function SettingsPage() {
 
               <div className="p-3 rounded-xl bg-white/90 dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800/50 space-y-1">
                 <div className="font-semibold text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-indigo-400" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                   <span>Smart LRU Cache Retention</span>
                 </div>
                 <p className="text-slate-600 dark:text-zinc-400 text-[11px] leading-relaxed">
@@ -920,7 +920,7 @@ export default function SettingsPage() {
 
               <div className="p-3 rounded-xl bg-white/90 dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800/50 space-y-1">
                 <div className="font-semibold text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-purple-400" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
                   <span>Zero-Drop Offline Queue</span>
                 </div>
                 <p className="text-slate-600 dark:text-zinc-400 text-[11px] leading-relaxed">
@@ -1106,7 +1106,7 @@ export default function SettingsPage() {
                         <button
                           type="button"
                           onClick={() => handleResolveConflict(c, 'keep_client')}
-                          className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white dark:text-white text-[11px] font-semibold cursor-pointer"
+                          className="px-2.5 py-1 rounded-lg bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white dark:text-white text-[11px] font-semibold cursor-pointer"
                         >
                           Use This Device Version
                         </button>
@@ -1135,7 +1135,7 @@ export default function SettingsPage() {
                       </div>
                     )}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-                      <div className="p-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-800 dark:text-indigo-200">
+                      <div className="p-2 rounded-lg -emerald-/10 border border-emerald-500/20 text-emerald-800 dark:text-emerald-200">
                         <div className="font-semibold">This Device Edit:</div>
                         <div className="truncate font-mono text-[10px] mt-0.5">
                           {JSON.stringify(c.clientRecord)}
@@ -1190,7 +1190,7 @@ export default function SettingsPage() {
             {!googleUser && (
               <a
                 href="/api/auth/google/login"
-                className="flex items-center gap-1.5 text-xs px-3.5 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-semibold transition-colors"
+                className="flex items-center gap-1.5 text-xs px-3.5 py-2 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white font-semibold transition-colors"
               >
                 <Cloud className="h-3.5 w-3.5" />
                 <span>Sign in with Google</span>
@@ -1210,11 +1210,11 @@ export default function SettingsPage() {
                     placeholder="https://script.google.com/macros/s/.../exec"
                     value={apiUrl}
                     onChange={(e) => setApiUrl(e.target.value)}
-                    className="flex-1 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-3 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-indigo-500 transition-colors"
+                    className="flex-1 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-3 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-emerald-500 transition-colors"
                   />
                   <button
                     type="submit"
-                    className="px-5 py-3 rounded-2xl bg-indigo-500 hover:bg-indigo-600 text-white dark:text-white font-semibold text-xs transition-all cursor-pointer shrink-0"
+                    className="px-5 py-3 rounded-2xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white dark:text-white font-semibold text-xs transition-all cursor-pointer shrink-0"
                   >
                     Save Connection
                   </button>
@@ -1293,7 +1293,7 @@ export default function SettingsPage() {
                 <div>
                   <h3 className="text-sm font-bold text-slate-950 dark:text-white flex items-center gap-2">
                     <span>Google Sheet Full Synchronization</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-500/10 text-indigo-800 dark:text-indigo-400 border border-indigo-500/20">
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold -emerald-/10 text-emerald-800 dark:text-emerald-400 border border-emerald-500/20">
                       Cloud SOT
                     </span>
                   </h3>
@@ -1333,7 +1333,7 @@ export default function SettingsPage() {
                   type="button"
                   onClick={handleSetupTabs}
                   disabled={isSettingUpTabs}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white dark:text-white font-semibold text-xs shadow-md shadow-indigo-600/20 transition-all cursor-pointer disabled:opacity-50"
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white dark:text-white font-semibold text-xs shadow-md transition-all cursor-pointer disabled:opacity-50"
                 >
                   <Layers className={`h-3.5 w-3.5 ${isSettingUpTabs ? 'animate-spin' : ''}`} />
                   <span>{isSettingUpTabs ? 'Formatting Sheets...' : 'Setup Recurring & Installments Tabs'}</span>
@@ -1427,7 +1427,7 @@ export default function SettingsPage() {
                       type="button"
                       onClick={handleCreateDriveSnapshot}
                       disabled={isBackingUp}
-                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-800 dark:text-indigo-300 text-xs font-semibold transition-all cursor-pointer disabled:opacity-50"
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-500/30 -emerald-/10 -emerald-/20 text-emerald-800 dark:text-emerald-300 text-xs font-semibold transition-all cursor-pointer disabled:opacity-50"
                     >
                       <Archive className="h-3.5 w-3.5" />
                       <span>{isBackingUp ? 'Saving...' : 'Create Snapshot Now'}</span>
@@ -1497,7 +1497,7 @@ export default function SettingsPage() {
                               type="button"
                               onClick={() => handleTestRestoreBackup(snap.id, snap.name)}
                               disabled={isTestingRestoreId !== null || isRestoringBackupId !== null}
-                              className="px-2.5 py-1 rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-800 dark:text-indigo-300 border border-indigo-500/30 text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                              className="px-2.5 py-1 rounded-lg -emerald-/15 -emerald-/25 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
                             >
                               {isTestingRestoreId === snap.id ? 'Testing...' : 'Test Restore (Dry Run)'}
                             </button>
@@ -1563,7 +1563,7 @@ export default function SettingsPage() {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <div className="text-xs font-bold text-slate-950 dark:text-white flex items-center gap-1.5">
-                        <FileCheck2 className="h-3.5 w-3.5 text-indigo-800 dark:text-indigo-400" />
+                        <FileCheck2 className="h-3.5 w-3.5 text-emerald-800 dark:text-emerald-400" />
                         <span>Independent Offline Backup &amp; Data Integrity Verification</span>
                       </div>
                       <p className="text-[11px] text-slate-600 dark:text-zinc-400">
@@ -1584,7 +1584,7 @@ export default function SettingsPage() {
                         onClick={() => fileInputRef.current?.click()}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 text-xs font-semibold cursor-pointer"
                       >
-                        <Upload className="h-3.5 w-3.5 text-indigo-800 dark:text-indigo-400" />
+                        <Upload className="h-3.5 w-3.5 text-emerald-800 dark:text-emerald-400" />
                         <span>Import Offline Backup</span>
                       </button>
                       <input
@@ -1658,7 +1658,7 @@ export default function SettingsPage() {
                     <div className="p-4 rounded-2xl bg-white/90 dark:bg-zinc-950/80 border border-slate-200 dark:border-zinc-800 text-xs text-slate-700 dark:text-zinc-300 space-y-2 leading-relaxed">
                       <div className="font-bold text-slate-950 dark:text-white">Operational Setup &amp; Recovery Checklist (also in `RECOVERY_AND_SETUP.md`):</div>
                       <ol className="list-decimal list-inside space-y-1 text-[11px]">
-                        <li><strong>Deploy Apps Script:</strong> Copy <code className="text-indigo-800 dark:text-indigo-300">apps-script/Code.gs</code> and <code className="text-indigo-800 dark:text-indigo-300">apps-script/Backups.gs</code> into your Google Sheet’s Apps Script project and deploy a New Version.</li>
+                        <li><strong>Deploy Apps Script:</strong> Copy <code className="text-emerald-800 dark:text-emerald-300">apps-script/Code.gs</code> and <code className="text-emerald-800 dark:text-emerald-300">apps-script/Backups.gs</code> into your Google Sheet’s Apps Script project and deploy a New Version.</li>
                         <li><strong>Lock Endpoint Access Control:</strong> Enter a strong Secret API Key above and click <strong>Lock Endpoint with Key</strong>, and keep <strong>Authenticated Server Proxy Mode</strong> enabled.</li>
                         <li><strong>Verify Automated Backups:</strong> Click <strong>Enable Weekly Backup</strong> so Sunday 03:00 snapshots run automatically, and periodically export an <strong>Offline Backup (.json)</strong> to your device.</li>
                         <li><strong>Test Restore Safely:</strong> Use <strong>Test Restore (Dry Run)</strong> on any snapshot to prove recovery in an isolated temporary Sheet without touching live records.</li>
@@ -1713,7 +1713,7 @@ export default function SettingsPage() {
                                 type="button"
                                 onClick={() => handleRestorePhonePlans(item.storageKey, 'replace_all')}
                                 disabled={isRestoringPlan === item.storageKey}
-                                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white dark:text-white text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                                className="px-3 py-1.5 rounded-lg bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white dark:text-white text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
                               >
                                 Restore All Phone Plans
                               </button>
@@ -1751,14 +1751,14 @@ export default function SettingsPage() {
 
                           {item.differingRecords.length > 0 && (
                             <div className="text-[11px] text-slate-700 dark:text-zinc-300 space-y-1">
-                              <div className="text-[10px] uppercase tracking-wider text-indigo-800 dark:text-indigo-400 font-semibold">
+                              <div className="text-[10px] uppercase tracking-wider text-emerald-800 dark:text-emerald-400 font-semibold">
                                 Differing values between device backup & Sheet:
                               </div>
                               <div className="flex flex-wrap gap-1.5">
                                 {item.differingRecords.map(({ phoneRecord }: any, idx: number) => (
                                   <span
                                     key={phoneRecord.id || idx}
-                                    className="px-2 py-1 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-800 dark:text-indigo-200 text-[11px]"
+                                    className="px-2 py-1 rounded-lg -emerald-/10 border border-emerald-500/20 text-emerald-800 dark:text-emerald-200 text-[11px]"
                                   >
                                     {phoneRecord.name} (Device: {phoneRecord.currency || 'MYR'} {phoneRecord.amount ?? phoneRecord.monthlyAmount ?? 0})
                                   </span>
@@ -1807,7 +1807,7 @@ export default function SettingsPage() {
                   onClick={() => handleCurrencyChange(curr)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                     currency === curr
-                      ? 'bg-indigo-500 text-white dark:text-white shadow-sm'
+                      ? 'bg-[#0D6E52] dark:bg-emerald-500 text-white dark:text-white shadow-sm'
                       : 'text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white'
                   }`}
                 >
@@ -1847,7 +1847,7 @@ export default function SettingsPage() {
                     }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                       isSelected
-                        ? 'bg-indigo-500 text-white dark:text-white shadow-sm'
+                        ? 'bg-[#0D6E52] dark:bg-emerald-500 text-white dark:text-white shadow-sm'
                         : 'text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white'
                     }`}
                   >
@@ -1887,7 +1887,7 @@ export default function SettingsPage() {
 
         <div className="rounded-3xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 p-6 backdrop-blur-xl space-y-5 specular-card">
           <div className="flex items-start gap-3">
-            <div className="h-10 w-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
+            <div className="h-10 w-10 rounded-xl -emerald-/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
               <Smartphone className="h-5 w-5" />
             </div>
             <div className="space-y-1">
@@ -1901,19 +1901,19 @@ export default function SettingsPage() {
           </div>
 
           {/* Privacy & AI Disclosure */}
-          <div className="rounded-2xl border border-indigo-500/25 bg-indigo-500/5 p-3.5 text-xs text-slate-700 dark:text-zinc-300 space-y-1">
-            <div className="font-bold text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5">
+          <div className="rounded-2xl border border-emerald-500/25 -emerald-/5 p-3.5 text-xs text-slate-700 dark:text-zinc-300 space-y-1">
+            <div className="font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
               <ShieldCheck className="h-4 w-4 shrink-0" />
               隐私、密钥与第三方 AI 处理说明
             </div>
             <p className="leading-relaxed">
               • <strong>服务端密钥保护</strong>：请在部署环境变量设置 <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">KINOVA_SHORTCUT_TOKEN</code>（或复用 <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">KINOVA_PROXY_TOKEN</code>），在 iPhone 快捷指令的请求头传入 <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">x-shortcut-token</code>，切勿放入 URL 参数或前端代码。<br />
-              • <strong>截图发送去向</strong>：当使用背面轻点截图识别时，截图通过 HTTPS 仅发送至你的 Kinova 服务端 <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">/api/shortcuts/ingest</code>，再由服务端使用 <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">GEMINI_API_KEY</code> 调用 <strong>Google Gemini Vision API（多模型自愈容错：gemini-2.5-flash / gemini-3.5-flash）</strong> 解析商家、金额、币种、日期和分类。服务端不落盘保存截图，也不将任何财务内容写入日志。
+              • <strong>截图发送去向</strong>：当使用背面轻点截图识别时，截图通过 HTTPS 仅发送至你的 Kinova 服务端 <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">/api/shortcuts/ingest</code>，再由服务端使用 <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">GEMINI_API_KEY</code> 调用 <strong>Google Gemini Vision API（多模型自愈容错：gemini-3.5-flash-lite / gemini-flash-lite-latest / gemini-2.5-flash）</strong> 解析商家、金额、币种、日期和分类。服务端不落盘保存截图，也不将任何财务内容写入日志。
             </p>
           </div>
 
           {/* 1-Click Install Card */}
-          <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-indigo-500/10 via-purple-500/5 to-transparent p-5 space-y-4">
+          <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/[0.04] p-5 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <div className="font-bold text-slate-950 dark:text-white text-sm flex items-center gap-2">
@@ -1969,7 +1969,7 @@ export default function SettingsPage() {
                       : '/api/shortcuts/ingest'}
                   </div>
                 </div>
-                <span className="text-[10px] text-indigo-500 font-bold ml-2 shrink-0">
+                <span className="text-[10px] text-emerald-500 font-bold ml-2 shrink-0">
                   {copiedConfigKey === 'url' ? '已复制 ✓' : '复制'}
                 </span>
               </button>
@@ -1987,7 +1987,7 @@ export default function SettingsPage() {
                     x-shortcut-token
                   </div>
                 </div>
-                <span className="text-[10px] text-indigo-500 font-bold ml-2 shrink-0">
+                <span className="text-[10px] text-emerald-500 font-bold ml-2 shrink-0">
                   {copiedConfigKey === 'header' ? '已复制 ✓' : '复制'}
                 </span>
               </button>
@@ -1998,15 +1998,15 @@ export default function SettingsPage() {
                   onClick={() => {
                     copyTextToClipboard(googleUser.email, 'email', '你的绑定账号邮箱 (x-shortcut-email)');
                   }}
-                  className="p-2.5 rounded-xl border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50/50 dark:bg-indigo-950/30 hover:bg-indigo-100/60 dark:hover:bg-indigo-900/40 text-left flex items-center justify-between transition-colors cursor-pointer"
+                  className="p-2.5 rounded-xl border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/50 dark:bg-emerald-950/30 hover:bg-emerald-100/60 dark:hover:bg-emerald-900/40 text-left flex items-center justify-between transition-colors cursor-pointer"
                 >
                   <div>
-                    <div className="font-semibold text-indigo-900 dark:text-indigo-200 text-[11px]">👤 复制绑定账号邮箱</div>
-                    <div className="text-[10px] text-indigo-600 dark:text-indigo-400 truncate max-w-[180px] font-mono">
+                    <div className="font-semibold text-emerald-900 dark:text-emerald-200 text-[11px]">👤 复制绑定账号邮箱</div>
+                    <div className="text-[10px] text-emerald-600 dark:text-emerald-400 truncate max-w-[180px] font-mono">
                       {googleUser.email}
                     </div>
                   </div>
-                  <span className="text-[10px] text-indigo-600 font-bold ml-2 shrink-0">
+                  <span className="text-[10px] text-emerald-600 font-bold ml-2 shrink-0">
                     {copiedConfigKey === 'email' ? '已复制 ✓' : '复制'}
                   </span>
                 </button>
@@ -2018,7 +2018,7 @@ export default function SettingsPage() {
           <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-950/60 p-4 space-y-2.5">
             <div className="font-bold text-xs text-slate-900 dark:text-white flex items-center justify-between">
               <span>方案一：背面轻点两下截图 →「Kinova 快速记账」</span>
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-600 dark:text-indigo-400">支持快捷指令 iCloud 同步</span>
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full -emerald-/15 text-emerald-600 dark:text-emerald-400">支持快捷指令 iCloud 同步</span>
             </div>
             <ol className="list-decimal list-inside text-xs text-slate-600 dark:text-zinc-400 space-y-1.5 leading-relaxed">
               <li>打开 iPhone <strong>快捷指令 (Shortcuts)</strong> App，新建快捷指令并命名为 <strong>「Kinova 快速记账」</strong>。</li>
@@ -2038,7 +2038,7 @@ export default function SettingsPage() {
                   <li>头部 (Headers)：
                     <div className="pl-2 space-y-0.5 font-mono text-[10px] text-slate-700 dark:text-zinc-300">
                       <div>• <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">x-shortcut-token</code> = 你的服务端令牌</div>
-                      <div>• <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">x-shortcut-email</code> = <span className="text-indigo-600 dark:text-indigo-400 font-semibold">{googleUser?.email || '你的 Google 账号邮箱'}</span>（若 URL 中已带有 <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">?user=...</code> 则此 Header 可选）</div>
+                      <div>• <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">x-shortcut-email</code> = <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{googleUser?.email || '你的 Google 账号邮箱'}</span>（若 URL 中已带有 <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">?user=...</code> 则此 Header 可选）</div>
                     </div>
                   </li>
                   <li>JSON 字段：<code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">source</code> = <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">back_tap_screenshot</code>，<code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">imageBase64</code> = 「Base64 编码后的文本」，<code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">defaultCurrency</code> = <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">{currency}</code>{googleUser?.email ? <span>，<code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">userEmail</code> = <code className="px-1 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800">{googleUser.email}</code></span> : null}</li>

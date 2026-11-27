@@ -36,8 +36,8 @@ const CATEGORY_ICONS: Record<string, { icon: any; color: string }> = {
   'Family': { icon: Heart, color: 'text-rose-800 dark:text-rose-400 bg-rose-500/10 border-rose-500/20' },
   'Housing & Bills': { icon: Home, color: 'text-amber-800 dark:text-amber-400 bg-amber-500/10 border-amber-500/20' },
   'Bills': { icon: Wifi, color: 'text-cyan-800 dark:text-cyan-400 bg-cyan-500/10 border-cyan-500/20' },
-  'Transport': { icon: Car, color: 'text-indigo-800 dark:text-indigo-400 bg-indigo-500/10 border-indigo-500/20' },
-  'Entertainment': { icon: Film, color: 'text-violet-800 dark:text-purple-400 bg-purple-500/10 border-purple-500/20' },
+  'Transport': { icon: Car, color: 'text-emerald-800 dark:text-emerald-400 -emerald-/10 border-emerald-500/20' },
+  'Entertainment': { icon: Film, color: 'text-amber-800 dark:text-amber-400 bg-amber-600 -amber-/10 border-amber-500/20' },
   'Food & Dining': { icon: Coffee, color: 'text-orange-800 dark:text-orange-400 bg-orange-500/10 border-orange-500/20' },
   'Shopping': { icon: ShoppingBag, color: 'text-emerald-800 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20' },
   'Sport': { icon: Activity, color: 'text-sky-800 dark:text-sky-400 bg-sky-500/10 border-sky-500/20' },
@@ -350,27 +350,27 @@ export function RecurringCommitments() {
   if (!mounted) return null;
 
   return (
-    <div className="rounded-3xl border border-slate-200 dark:border-white/[0.08] bg-card/60 p-6 backdrop-blur-2xl shadow-xl space-y-5">
+    <div className="rounded-[22px] border border-black/[0.08] dark:border-white/[0.08] bg-card p-5 sm:p-6 shadow-[0_1px_2px_rgba(17,20,24,0.03)] space-y-5">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-black/[0.06] dark:border-white/[0.06] pb-4">
         <div>
           <div className="flex items-center gap-2">
-            <h3 className="text-base font-extrabold text-slate-950 dark:text-white tracking-tight flex items-center gap-2">
+            <h3 className="text-base font-semibold text-foreground tracking-tight flex items-center gap-2">
               <span>Monthly Recurring Commitments</span>
-              <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-indigo-500/20 text-indigo-800 dark:text-indigo-300 border border-indigo-500/30">
+              <span className="text-[10px] px-2.5 py-0.5 rounded-full font-semibold bg-emerald-500/12 text-emerald-800 dark:text-emerald-300 border border-emerald-500/25">
                 Auto-Record Active
               </span>
             </h3>
           </div>
-          <p className="text-xs text-slate-600 dark:text-zinc-400 mt-0.5">
+          <p className="text-xs text-muted-foreground mt-0.5">
             Auto-adds to your expenses on the due date • Historical records before rate changes stay untouched
           </p>
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
           <div className="text-right">
-            <span className="text-[10px] text-slate-600 dark:text-zinc-400 uppercase tracking-wider block">Monthly Total</span>
-            <span className="text-sm font-bold text-slate-950 dark:text-white font-mono tabular-nums whitespace-nowrap">
+            <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">Monthly Total</span>
+            <span className="text-sm font-bold text-foreground font-mono tabular-nums whitespace-nowrap">
               RM{'\u00A0'}{totalMonthlyCommitments.toFixed(2)}
             </span>
           </div>
@@ -378,7 +378,7 @@ export function RecurringCommitments() {
           <button
             type="button"
             onClick={openAddModal}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-indigo-500 hover:bg-indigo-600 text-white dark:text-white text-xs font-semibold shadow-md shadow-indigo-500/20 transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white text-xs font-semibold shadow-sm transition-colors cursor-pointer"
           >
             <Plus className="h-3.5 w-3.5" />
             <span>Add Commitment</span>
@@ -392,7 +392,7 @@ export function RecurringCommitments() {
           const earliestEffective = getCommitmentEarliestEffectiveMonth(item);
           const isScheduledFuture = !isCommitmentActiveInMonth(item, currentMonthStr);
           const currentRate = getCommitmentRateForMonth(item, currentMonthStr);
-          const iconConfig = CATEGORY_ICONS[item.category] || { icon: Shield, color: 'text-indigo-800 dark:text-indigo-400 bg-indigo-500/10 border-indigo-500/20' };
+          const iconConfig = CATEGORY_ICONS[item.category] || { icon: Shield, color: 'text-emerald-800 dark:text-emerald-400 -emerald-/10 border-emerald-500/20' };
           const IconComponent = iconConfig.icon;
 
           // Check if recorded for this month
@@ -418,14 +418,14 @@ export function RecurringCommitments() {
               data-commitment-card
               whileHover={{ y: -3, scale: 1.01 }}
               transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
-              className={`rounded-3xl border p-4 transition-all duration-300 specular-card shadow-sm hover:shadow-md ${
+              className={`rounded-2xl border p-4 transition-colors ${
                 isRecorded
-                  ? 'border-emerald-500/25 bg-gradient-to-br from-emerald-50/80 dark:from-emerald-950/20 via-slate-100 dark:via-zinc-900/60 to-white dark:to-zinc-950 hover:border-emerald-500/40'
+                  ? 'border-emerald-500/25 bg-emerald-500/[0.04] hover:border-emerald-500/40'
                   : isScheduledFuture
-                    ? 'border-slate-200 dark:border-zinc-800/80 bg-gradient-to-br from-slate-50/90 dark:from-zinc-900/70 via-slate-100 dark:via-zinc-900/50 to-white dark:to-zinc-950 hover:border-slate-300 dark:hover:border-zinc-700/80'
+                    ? 'border-black/[0.07] dark:border-white/[0.08] bg-black/[0.015] dark:bg-white/[0.02] hover:border-black/[0.15] dark:hover:border-white/[0.15]'
                     : isDueOrPast
-                      ? 'border-amber-500/25 bg-gradient-to-br from-amber-50/80 dark:from-amber-950/20 via-slate-100 dark:via-zinc-900/60 to-white dark:to-zinc-950 hover:border-amber-500/40'
-                      : 'border-slate-200 dark:border-zinc-800/80 bg-gradient-to-br from-slate-50/90 dark:from-zinc-900/70 via-slate-100 dark:via-zinc-900/50 to-white dark:to-zinc-950 hover:border-slate-300 dark:hover:border-zinc-700/80'
+                      ? 'border-amber-500/25 bg-amber-500/[0.04] hover:border-amber-500/40'
+                      : 'border-black/[0.07] dark:border-white/[0.08] bg-black/[0.015] dark:bg-white/[0.02] hover:border-black/[0.15] dark:hover:border-white/[0.15]'
               }`}
             >
               <div className="flex items-start justify-between gap-3">
@@ -475,8 +475,8 @@ export function RecurringCommitments() {
                       <span>Recorded for {currentMonthStr}</span>
                     </span>
                   ) : isScheduledFuture ? (
-                    <span className="text-indigo-700 dark:text-indigo-300 font-medium flex items-center gap-1.5">
-                      <Calendar className="h-4 w-4 text-indigo-500 dark:text-indigo-400" />
+                    <span className="text-emerald-700 dark:text-emerald-300 font-medium flex items-center gap-1.5">
+                      <Calendar className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                       <span>Starts {earliestEffective} ({effectiveDueDay}th) · Not due this month</span>
                     </span>
                   ) : isDueOrPast ? (
@@ -485,8 +485,8 @@ export function RecurringCommitments() {
                       <span>Due on {effectiveDueDay}th • Pending</span>
                     </span>
                   ) : (
-                    <span className="text-slate-600 dark:text-zinc-400 flex items-center gap-1.5 font-medium">
-                      <Calendar className="h-4 w-4 text-slate-500 dark:text-zinc-400 shrink-0" />
+                    <span className="text-muted-foreground flex items-center gap-1.5 font-medium">
+                      <Calendar className="h-4 w-4 shrink-0" />
                       <span>
                         {isFutureMonth
                           ? `Scheduled (${currentMonthStr}-${String(effectiveDueDay).padStart(2, '0')})`
@@ -497,8 +497,8 @@ export function RecurringCommitments() {
 
                   {/* Future rate note if scheduled */}
                   {futureRateChange && (
-                    <span className="text-[10px] text-indigo-800 dark:text-indigo-300 font-mono whitespace-nowrap tabular-nums block mt-1">
-                      📈 Increases to RM{'\u00A0'}{futureRateChange.amount.toFixed(2)} in {futureRateChange.effectiveFrom}
+                    <span className="text-[10px] text-amber-800 dark:text-amber-300 font-mono whitespace-nowrap tabular-nums block mt-1">
+                      Increases to RM{'\u00A0'}{futureRateChange.amount.toFixed(2)} in {futureRateChange.effectiveFrom}
                     </span>
                   )}
                 </div>
@@ -562,7 +562,7 @@ export function RecurringCommitments() {
                     placeholder="e.g. Monthly Insurance, Give Parents, Rent"
                     value={formName}
                     onChange={(e) => setFormName(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-3 text-xs text-slate-950 dark:text-white outline-none focus:border-indigo-500"
+                    className="w-full rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-3 text-xs text-slate-950 dark:text-white outline-none focus:border-emerald-500"
                   />
                 </div>
 
@@ -573,7 +573,7 @@ export function RecurringCommitments() {
                     <select
                       value={formCategory}
                       onChange={(e) => setFormCategory(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-3 text-xs text-slate-950 dark:text-white outline-none focus:border-indigo-500"
+                      className="w-full rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-3 text-xs text-slate-950 dark:text-white outline-none focus:border-emerald-500"
                     >
                       {AVAILABLE_CATEGORIES.map(cat => (
                         <option key={cat} value={cat}>{cat}</option>
@@ -591,7 +591,7 @@ export function RecurringCommitments() {
                       value={formDay}
                       onChange={(e) => setFormDay(e.target.value)}
                       onBlur={() => setFormDay(Math.min(31, Math.max(1, parseInt(String(formDay), 10) || 1)))}
-                      className="w-full rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-3 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-indigo-500"
+                      className="w-full rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-3 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-emerald-500"
                     />
                   </div>
                 </div>
@@ -606,7 +606,7 @@ export function RecurringCommitments() {
                     placeholder="0.00"
                     value={formAmount}
                     onChange={(e) => setFormAmount(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-3 text-sm font-bold text-slate-950 dark:text-white font-mono outline-none focus:border-indigo-500"
+                    className="w-full rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-3 text-sm font-bold text-slate-950 dark:text-white font-mono outline-none focus:border-emerald-500"
                   />
                   <MoneyCalculator
                     value={formAmount}
@@ -617,19 +617,19 @@ export function RecurringCommitments() {
                 </div>
 
                 {/* Effective Starting Month */}
-                <div className="space-y-1.5 p-3.5 rounded-2xl bg-white/90 dark:bg-zinc-900/40 border border-slate-200 dark:border-zinc-800/80">
+                <div className="space-y-1.5 p-3.5 rounded-xl bg-black/[0.02] dark:bg-white/[0.02] border border-black/[0.07] dark:border-white/[0.08]">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-semibold text-slate-800 dark:text-zinc-200 block">
+                    <label className="text-xs font-semibold text-foreground block">
                       Effective Starting Month
                     </label>
-                    <span className="text-[10px] text-indigo-800 dark:text-indigo-400 font-mono">Preserves Past Data</span>
+                    <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-mono">Preserves Past Data</span>
                   </div>
                   <input
                     type="text"
                     placeholder="YYYY-MM (e.g. 2026-09, 2027-01)"
                     value={formEffectiveMonth}
                     onChange={(e) => setFormEffectiveMonth(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-2.5 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-indigo-500"
+                    className="w-full rounded-xl border border-black/[0.1] dark:border-white/[0.1] bg-background p-2.5 text-xs text-foreground font-mono outline-none focus:border-emerald-600"
                   />
                   <div className="flex flex-wrap items-center gap-1.5 pt-1">
                     <button
@@ -637,8 +637,8 @@ export function RecurringCommitments() {
                       onClick={() => setFormEffectiveMonth(currentMonthStr)}
                       className={`text-[11px] px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
                         formEffectiveMonth === currentMonthStr
-                          ? 'bg-indigo-500 text-white dark:text-white font-bold'
-                          : 'bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300'
+                          ? 'bg-[#0D6E52] dark:bg-emerald-600 text-white font-semibold'
+                          : 'bg-black/[0.05] dark:bg-white/[0.06] hover:bg-black/[0.09] dark:hover:bg-white/[0.1] text-foreground'
                       }`}
                     >
                       Current Month ({currentMonthStr})
@@ -651,37 +651,37 @@ export function RecurringCommitments() {
                           : `${currentYear}-${String(currentMonthNum + 1).padStart(2, '0')}`;
                         setFormEffectiveMonth(nextM);
                       }}
-                      className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 transition-colors cursor-pointer"
+                      className="text-[11px] px-2.5 py-1 rounded-lg bg-black/[0.05] dark:bg-white/[0.06] hover:bg-black/[0.09] dark:hover:bg-white/[0.1] text-foreground transition-colors cursor-pointer"
                     >
                       Next Month
                     </button>
                   </div>
-                  <p className="text-[11px] text-slate-600 dark:text-zinc-400 mt-1 leading-relaxed">
-                    💡 If this amount changes in the future (e.g. increases in 2027-01), set that month here. All previous records will <strong>remain strictly unchanged</strong>.
+                  <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
+                    If this amount changes in the future (e.g. increases in 2027-01), set that month here. All previous records will <strong>remain strictly unchanged</strong>.
                   </p>
                 </div>
 
                 {/* Auto-record checkbox */}
-                <label className="flex items-center gap-2.5 p-3 rounded-2xl bg-white/90 dark:bg-zinc-900/40 border border-slate-200 dark:border-zinc-800/60 cursor-pointer">
+                <label className="flex items-center gap-2.5 p-3 rounded-xl bg-black/[0.02] dark:bg-white/[0.02] border border-black/[0.07] dark:border-white/[0.08] cursor-pointer">
                   <input
                     type="checkbox"
                     checked={formAutoRecord}
                     onChange={(e) => setFormAutoRecord(e.target.checked)}
-                    className="h-4 w-4 rounded accent-indigo-500"
+                    className="h-4 w-4 rounded accent-emerald-600"
                   />
                   <div className="text-xs text-left">
-                    <span className="font-semibold text-slate-800 dark:text-zinc-200 block">Auto-record on due day</span>
-                    <span className="text-[11px] text-slate-600 dark:text-zinc-400 block">
+                    <span className="font-semibold text-foreground block">Auto-record on due day</span>
+                    <span className="text-[11px] text-muted-foreground block">
                       Automatically writes to your Google Sheet on the {formDay}th of each month
                     </span>
                   </div>
                 </label>
 
                 {/* Full-width touch-friendly Buttons */}
-                <div className="pt-3 border-t border-slate-200 dark:border-zinc-800/80 space-y-2">
+                <div className="pt-3 border-t border-black/[0.06] dark:border-white/[0.06] space-y-2">
                   <button
                     type="submit"
-                    className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-indigo-500 via-indigo-600 to-purple-600 hover:from-indigo-600 hover:to-purple-700 active:scale-[0.98] text-white dark:text-white font-bold text-sm shadow-xl shadow-indigo-500/25 transition-all cursor-pointer flex items-center justify-center gap-2"
+                    className="w-full py-3 px-4 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 active:scale-[0.98] text-white font-semibold text-sm shadow-sm transition-all cursor-pointer flex items-center justify-center gap-2"
                   >
                     <Check className="h-4 w-4" />
                     <span>{editingItem ? 'Save Changes' : 'Create Commitment'}</span>

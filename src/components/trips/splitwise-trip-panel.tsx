@@ -284,7 +284,7 @@ export function SplitwiseTripPanel({
     }
     if (!parts.length) return null;
     return (
-      <p className="mt-0.5 text-[11px] font-mono tabular-nums text-indigo-800 dark:text-indigo-300">
+      <p className="mt-0.5 text-[11px] font-mono tabular-nums text-emerald-800 dark:text-emerald-300">
         {parts.join(' · ')}
       </p>
     );
@@ -292,12 +292,12 @@ export function SplitwiseTripPanel({
 
   return (
     <section
-      className="rounded-3xl border border-indigo-300/50 dark:border-indigo-400/15 bg-indigo-50/65 dark:bg-indigo-500/[0.045] p-4 sm:p-5 space-y-4"
+      className="rounded-3xl border border-emerald-300/50 dark:border-emerald-400/15 bg-emerald-50/65 -emerald-/[0.045] p-4 sm:p-5 space-y-4"
       aria-labelledby={`splitwise-heading-${domKey}`}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-3 min-w-0">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-500/10 text-indigo-700 dark:text-indigo-300">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl -emerald-/10 text-emerald-700 dark:text-emerald-300">
             <Link2 className="h-5 w-5" aria-hidden="true" />
           </span>
           <div>
@@ -314,7 +314,7 @@ export function SplitwiseTripPanel({
                     Linked · {connection.inviteCode}
                   </span>
                   {connection.includeInBudget !== false && (
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-800 dark:text-indigo-300 border border-indigo-500/25">
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full -emerald-/15 text-emerald-800 dark:text-emerald-300 border border-emerald-500/25">
                       ✓ Synced to Flow &amp; Overview
                     </span>
                   )}
@@ -368,7 +368,7 @@ export function SplitwiseTripPanel({
       {showUrlSettings && (
         <form
           onSubmit={handleSaveAppUrl}
-          className="rounded-2xl border border-indigo-300/60 dark:border-white/10 bg-white/80 dark:bg-zinc-950/60 p-3.5 space-y-2"
+          className="rounded-2xl border border-emerald-300/60 dark:border-white/10 bg-white/80 dark:bg-zinc-950/60 p-3.5 space-y-2"
         >
           <div className="flex items-center justify-between gap-2">
             <label
@@ -390,11 +390,11 @@ export function SplitwiseTripPanel({
               value={appUrlDraft}
               onChange={e => setAppUrlDraft(e.target.value)}
               placeholder="https://your-trixpense.vercel.app"
-              className="h-10 flex-1 rounded-xl border border-slate-300 dark:border-white/10 bg-white dark:bg-zinc-900 px-3 text-xs font-mono text-slate-950 dark:text-white outline-none focus:border-indigo-500/70"
+              className="h-10 flex-1 rounded-xl border border-slate-300 dark:border-white/10 bg-white dark:bg-zinc-900 px-3 text-xs font-mono text-slate-950 dark:text-white outline-none focus:border-emerald-500/70"
             />
             <button
               type="submit"
-              className="h-10 rounded-xl bg-slate-900 dark:bg-indigo-600 px-4 text-xs font-semibold text-white hover:opacity-90"
+              className="h-10 rounded-xl bg-slate-900 dark:bg-[#0D6E52] dark:bg-emerald-600 px-4 text-xs font-semibold text-white hover:opacity-90"
             >
               Save URL
             </button>
@@ -428,7 +428,7 @@ export function SplitwiseTripPanel({
             autoComplete="off"
             maxLength={8}
             aria-describedby={`splitwise-help-${domKey}`}
-            className="h-11 w-full rounded-xl border border-slate-300 dark:border-white/10 bg-white dark:bg-zinc-950/50 px-3.5 text-sm font-mono uppercase tracking-widest text-slate-950 dark:text-white outline-none focus:border-indigo-500/70 focus:ring-2 focus:ring-indigo-500/20"
+            className="h-11 w-full rounded-xl border border-slate-300 dark:border-white/10 bg-white dark:bg-zinc-950/50 px-3.5 text-sm font-mono uppercase tracking-widest text-slate-950 dark:text-white outline-none focus:border-emerald-500/70 focus:ring-2 focus:ring-emerald-500/20"
           />
           <p
             id={`splitwise-help-${domKey}`}
@@ -440,7 +440,7 @@ export function SplitwiseTripPanel({
         <button
           type="submit"
           disabled={loadState === 'loading' || codeDraft.trim().length !== 8}
-          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#0D6E52] dark:bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {loadState === 'loading' ? (
             <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -477,7 +477,7 @@ export function SplitwiseTripPanel({
       )}
 
       {snapshot && connection && (
-        <div className="space-y-4 border-t border-indigo-300/40 dark:border-white/[0.08] pt-4">
+        <div className="space-y-4 border-t border-emerald-300/40 dark:border-white/[0.08] pt-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <p className="text-sm font-bold text-slate-950 dark:text-white">
@@ -495,7 +495,7 @@ export function SplitwiseTripPanel({
                 href={linkToTrixpense}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-indigo-500/25 bg-white/70 dark:bg-white/[0.04] px-3 text-xs font-semibold text-indigo-800 dark:text-indigo-300 hover:bg-white dark:hover:bg-white/[0.08]"
+                className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-emerald-500/25 bg-white/70 dark:bg-white/[0.04] px-3 text-xs font-semibold text-emerald-800 dark:text-emerald-300 hover:bg-white dark:hover:bg-white/[0.08]"
               >
                 Open in Trixpense <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
               </a>
@@ -522,7 +522,7 @@ export function SplitwiseTripPanel({
                   setStorageWarning(!saveSplitwiseConnection(tripId, nextConnection));
                   onSyncUpdate?.();
                 }}
-                className="h-11 w-full rounded-xl border border-slate-300 dark:border-white/10 bg-white dark:bg-zinc-950/50 px-3.5 text-sm text-slate-950 dark:text-white outline-none focus:border-indigo-500/70 focus:ring-2 focus:ring-indigo-500/20"
+                className="h-11 w-full rounded-xl border border-slate-300 dark:border-white/10 bg-white dark:bg-zinc-950/50 px-3.5 text-sm text-slate-950 dark:text-white outline-none focus:border-emerald-500/70 focus:ring-2 focus:ring-emerald-500/20"
               >
                 <option value="">Select your name…</option>
                 {snapshot.members.map(member => (
@@ -546,7 +546,7 @@ export function SplitwiseTripPanel({
                   setStorageWarning(!saveSplitwiseConnection(tripId, nextConnection));
                   onSyncUpdate?.();
                 }}
-                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
               />
               <span>Include my share in Trip Budget progress</span>
             </label>
@@ -565,11 +565,11 @@ export function SplitwiseTripPanel({
                   {renderSecondaryEquivalent('groupTotal', memberSummary.groupTotal)}
                 </div>
 
-                <div className="rounded-2xl border border-indigo-500/30 bg-indigo-500/[0.08] dark:bg-indigo-500/[0.12] p-3">
-                  <p className="text-[11px] font-semibold text-indigo-900 dark:text-indigo-200">
+                <div className="rounded-2xl border border-emerald-500/30 -emerald-/[0.08] -emerald-/[0.12] p-3">
+                  <p className="text-[11px] font-semibold text-emerald-900 dark:text-emerald-200">
                     Your share
                   </p>
-                  <p className="mt-1 font-mono text-sm sm:text-base font-bold tabular-nums text-indigo-950 dark:text-white">
+                  <p className="mt-1 font-mono text-sm sm:text-base font-bold tabular-nums text-emerald-950 dark:text-white">
                     {formatSplitwiseMoney(memberSummary.memberShare, splitwiseBase)}
                   </p>
                   {renderSecondaryEquivalent('memberShare', memberSummary.memberShare)}
@@ -611,7 +611,7 @@ export function SplitwiseTripPanel({
 
               {/* Exact Paid Currency Breakdown (Zero FX Conversion Drift) */}
               {memberSummary.nativeByCurrency.length > 0 && (
-                <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.06] dark:bg-emerald-500/[0.08] p-3 space-y-2">
+                <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.06] -emerald-/[0.08] p-3 space-y-2">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <span className="text-[11px] font-bold text-emerald-950 dark:text-emerald-200">
                       💱 Exact Paid Currency Breakdown (Zero FX Conversion Error)
@@ -627,7 +627,7 @@ export function SplitwiseTripPanel({
                         className="rounded-xl border border-slate-200/80 dark:border-white/10 bg-white/80 dark:bg-zinc-950/60 p-2.5 text-xs space-y-1"
                       >
                         <div className="flex items-center justify-between">
-                          <span className="font-mono font-bold text-indigo-800 dark:text-indigo-300">
+                          <span className="font-mono font-bold text-emerald-800 dark:text-emerald-300">
                             Paid in {bucket.currency}
                           </span>
                           <span className="font-mono font-semibold text-slate-900 dark:text-white">
@@ -689,7 +689,7 @@ export function SplitwiseTripPanel({
                             {formatSplitwiseMoney(category.amount, splitwiseBase)}
                           </span>
                           {splitwiseBase !== normalizedTripCurr && (
-                            <span className="ml-1.5 text-[10px] font-mono text-indigo-800 dark:text-indigo-300">
+                            <span className="ml-1.5 text-[10px] font-mono text-emerald-800 dark:text-emerald-300">
                               (≈{' '}
                               {formatSplitwiseMoney(
                                 convertSplitwiseAmount(
@@ -737,7 +737,7 @@ export function SplitwiseTripPanel({
                               {formatSplitwiseMoney(expense.amount, expense.currency)})
                             </p>
                             {isForeignExpense && (
-                              <p className="mt-0.5 text-[10px] font-mono text-indigo-800 dark:text-indigo-300">
+                              <p className="mt-0.5 text-[10px] font-mono text-emerald-800 dark:text-emerald-300">
                                 Paid: {formatSplitwiseMoney(expense.amount, expense.currency)} →{' '}
                                 {formatSplitwiseMoney(expense.base_amount, splitwiseBase)}
                               </p>
@@ -748,7 +748,7 @@ export function SplitwiseTripPanel({
                               {formatSplitwiseMoney(myShareBase, splitwiseBase)}
                             </p>
                             {splitwiseBase !== normalizedTripCurr && myShareBase > 0 && (
-                              <p className="text-[10px] font-mono tabular-nums text-indigo-800 dark:text-indigo-300">
+                              <p className="text-[10px] font-mono tabular-nums text-emerald-800 dark:text-emerald-300">
                                 ≈{' '}
                                 {formatSplitwiseMoney(
                                   convertSplitwiseAmount(

@@ -1234,7 +1234,7 @@ export default function InvestmentsPage() {
                   setIsReinvested(false);
                   setIsAddTradeOpen(true);
                 }}
-                className="min-h-[40px] px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 active:scale-[0.97] text-white dark:text-white text-xs font-semibold shadow-lg shadow-indigo-500/20 flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation"
+                className="min-h-[40px] px-4 py-2 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 active:scale-[0.97] text-white text-xs font-semibold shadow-sm flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation"
               >
                 <ArrowUpRight className="h-3.5 w-3.5" />
                 <span>+ Buy</span>
@@ -1261,7 +1261,7 @@ export default function InvestmentsPage() {
                   setTargetCalcAsset(stockTargetOptions[0] || null);
                   setIsTargetCalcOpen(true);
                 }}
-                className="min-h-[40px] px-3.5 py-2 rounded-xl border border-indigo-500/35 bg-indigo-500/10 hover:bg-indigo-500/20 active:scale-[0.97] text-indigo-800 dark:text-indigo-300 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation"
+                className="min-h-[40px] px-3.5 py-2 rounded-xl border border-amber-500/35 bg-amber-500/10 hover:bg-amber-500/20 active:scale-[0.97] text-amber-800 dark:text-amber-300 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer touch-manipulation"
               >
                 <Target className="h-3.5 w-3.5" />
                 <span>Target Price</span>
@@ -1272,15 +1272,15 @@ export default function InvestmentsPage() {
       />
 
       {/* Monthly Investment & Savings Execution Goal Bar */}
-      <div className="p-4 sm:p-5 rounded-3xl border border-indigo-500/20 bg-gradient-to-br from-indigo-50/90 dark:from-indigo-950/20 via-white/80 dark:via-zinc-900/60 to-purple-50/80 dark:to-purple-950/20 backdrop-blur-xl shadow-sm space-y-3">
+      <div className="p-4 sm:p-5 rounded-[20px] border border-black/[0.08] dark:border-white/[0.08] bg-card shadow-[0_1px_2px_rgba(17,20,24,0.03)] space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <Sparkles className="h-4 w-4 text-indigo-500 shrink-0" />
-            <span className="text-xs font-bold text-slate-900 dark:text-white">
+            <Sparkles className="h-4 w-4 text-emerald-700 dark:text-emerald-400 shrink-0" />
+            <span className="text-xs font-semibold text-foreground">
               Monthly Wealth Building Plan ({allocation.savingsTargetPct + allocation.investmentTargetPct}% of RM{'\u00A0'}{allocation.baselineIncome.toLocaleString()} Income)
             </span>
           </div>
-          <span className="text-xs font-mono font-bold whitespace-nowrap tabular-nums text-indigo-700 dark:text-indigo-300">
+          <span className="text-xs font-mono font-bold whitespace-nowrap tabular-nums text-emerald-700 dark:text-emerald-400">
             RM{'\u00A0'}{(allocation.actualInvestedThisMonth + allocation.actualSavedThisMonth).toFixed(0)} / RM{'\u00A0'}{(allocation.targetInvestmentAmount + allocation.targetSavingsAmount).toLocaleString()} achieved
           </span>
         </div>
@@ -1298,7 +1298,7 @@ export default function InvestmentsPage() {
             </div>
             <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-zinc-700">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-purple-600 transition-all duration-500"
+                className="h-full rounded-full bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 transition-all duration-500"
                 style={{
                   width: `${Math.min(100, allocation.targetInvestmentAmount > 0 ? (allocation.actualInvestedThisMonth / allocation.targetInvestmentAmount) * 100 : 0)}%`,
                 }}
@@ -1345,14 +1345,14 @@ export default function InvestmentsPage() {
       <div className="flex items-center justify-between col-span-full">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-slate-500 dark:text-zinc-400">Cost Basis Method:</span>
-          <div className="inline-flex rounded-xl bg-slate-100 dark:bg-zinc-800/80 p-0.5 border border-slate-200 dark:border-zinc-700/60 text-xs">
+          <div className="inline-flex rounded-xl bg-black/[0.04] dark:bg-white/[0.05] p-0.5 border border-black/[0.07] dark:border-white/[0.07] text-xs">
             <button
               type="button"
               onClick={() => setCostBasisMethod('fifo')}
               className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
                 costBasisMethod === 'fifo'
-                  ? 'bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                  : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                  ? 'bg-card text-emerald-700 dark:text-emerald-400 shadow-sm font-semibold'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               FIFO
@@ -1362,8 +1362,8 @@ export default function InvestmentsPage() {
               onClick={() => setCostBasisMethod('weighted')}
               className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
                 costBasisMethod === 'weighted'
-                  ? 'bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                  : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                  ? 'bg-card text-emerald-700 dark:text-emerald-400 shadow-sm font-semibold'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               Weighted Avg
@@ -1372,25 +1372,25 @@ export default function InvestmentsPage() {
         </div>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
-        {/* Total Market Value */}
+        {/* Total Market Value — Obsidian & Jade Atelier Feature Card */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          whileHover={{ y: -4, scale: 1.01 }}
+          whileHover={{ y: -3 }}
           transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
-          className="p-4 sm:p-5 rounded-3xl border border-indigo-500/30 bg-gradient-to-br from-indigo-950/40 via-slate-100 dark:via-zinc-900/60 to-black backdrop-blur-xl shadow-lg hover:border-indigo-500/50 transition-colors specular-card"
+          className="p-4 sm:p-5 rounded-[20px] border border-emerald-500/25 bg-gradient-to-br from-[#0E1513] via-[#101C18] to-[#0A0F0D] text-[#F5F4EF] shadow-lg transition-colors"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] sm:text-xs uppercase tracking-wider text-slate-600 dark:text-zinc-400 font-semibold">Portfolio Value</span>
-            <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-800 dark:text-indigo-400 border border-indigo-500/20 shadow-sm">
+            <span className="text-[11px] sm:text-xs uppercase tracking-wider text-emerald-300/80 font-semibold">Portfolio Value</span>
+            <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-xl bg-emerald-400/12 flex items-center justify-center text-emerald-400 border border-emerald-400/25">
               <Activity className="h-4 w-4" />
             </div>
           </div>
           <div className="mt-2.5 sm:mt-3">
-            <div className="text-xl sm:text-2xl lg:text-3xl font-black tracking-tight text-slate-950 dark:text-white font-mono">
+            <div className="text-xl sm:text-2xl lg:text-3xl font-extrabold tracking-tight text-[#F5F4EF] font-mono">
               <AnimatedNumber value={totalMarketValue} animateOnMount />
             </div>
-            <p className="text-[11px] text-indigo-800/80 dark:text-indigo-400/80 mt-1 font-medium truncate">Live market valuation</p>
+            <p className="text-[11px] text-[#9AA6A1] mt-1 font-medium truncate">Live market valuation</p>
           </div>
         </motion.div>
 
@@ -1456,11 +1456,11 @@ export default function InvestmentsPage() {
           animate={{ opacity: 1, y: 0 }}
           whileHover={{ y: -4, scale: 1.01 }}
           transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
-          className="p-4 sm:p-5 rounded-3xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 backdrop-blur-xl shadow-lg hover:border-purple-500/40 transition-colors specular-card"
+          className="p-4 sm:p-5 rounded-3xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 backdrop-blur-xl shadow-lg hover:border-amber-500/40 transition-colors specular-card"
         >
           <div className="flex items-center justify-between">
             <span className="text-[11px] sm:text-xs uppercase tracking-wider text-slate-600 dark:text-zinc-400 font-semibold">Capital Invested</span>
-            <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-xl bg-purple-500/10 flex items-center justify-center text-violet-800 dark:text-purple-400 border border-purple-500/20 shadow-sm">
+            <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-xl bg-amber-600 -amber-/10 flex items-center justify-center text-amber-800 dark:text-amber-400 border border-amber-500/20 shadow-sm">
               <DollarSign className="h-4 w-4" />
             </div>
           </div>
@@ -1468,7 +1468,7 @@ export default function InvestmentsPage() {
             <div className="text-xl sm:text-2xl lg:text-3xl font-black tracking-tight text-slate-950 dark:text-white font-mono">
               <AnimatedNumber value={totalCostBasis} animateOnMount />
             </div>
-            <p className="text-[11px] text-violet-800/80 dark:text-purple-400/80 mt-1 font-medium truncate">Active capital deployed</p>
+            <p className="text-[11px] text-amber-800/80 dark:text-amber-400/80 mt-1 font-medium truncate">Active capital deployed</p>
           </div>
         </motion.div>
 
@@ -1502,7 +1502,7 @@ export default function InvestmentsPage() {
             onClick={() => setActiveTab('holdings')}
             className={`relative z-10 min-h-[40px] px-4 py-2 rounded-xl text-sm font-semibold transition-colors cursor-pointer touch-manipulation select-none active:scale-[0.96] ${
               activeTab === 'holdings'
-                ? 'text-indigo-800 dark:text-indigo-200'
+                ? 'text-emerald-800 dark:text-emerald-200'
                 : 'text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200'
             }`}
           >
@@ -1519,7 +1519,7 @@ export default function InvestmentsPage() {
             onClick={() => setActiveTab('trades')}
             className={`relative z-10 min-h-[40px] px-4 py-2 rounded-xl text-sm font-semibold transition-colors cursor-pointer touch-manipulation select-none active:scale-[0.96] ${
               activeTab === 'trades'
-                ? 'text-indigo-800 dark:text-indigo-200'
+                ? 'text-emerald-800 dark:text-emerald-200'
                 : 'text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200'
             }`}
           >
@@ -1549,7 +1549,7 @@ export default function InvestmentsPage() {
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white bg-white/90 dark:bg-zinc-900/90 hover:bg-slate-100 dark:hover:bg-zinc-800 border border-slate-200 dark:border-white/[0.08] shadow-sm transition-all active:scale-95 cursor-pointer touch-manipulation disabled:opacity-50"
             title="Force refresh live quotes"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${isPortfolioLoading ? 'animate-spin text-indigo-800 dark:text-indigo-400' : 'text-slate-600 dark:text-zinc-400'}`} />
+            <RefreshCw className={`h-3.5 w-3.5 ${isPortfolioLoading ? 'animate-spin text-emerald-800 dark:text-emerald-400' : 'text-slate-600 dark:text-zinc-400'}`} />
             <span>Refresh Live Quotes</span>
           </button>
         </div>
@@ -1561,7 +1561,7 @@ export default function InvestmentsPage() {
           {/* Holdings Allocation and Breakdown */}
           {holdings.length > 0 && allocationData.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="p-5 rounded-3xl border border-slate-200 dark:border-white/[0.08] bg-card/60 backdrop-blur-2xl shadow-xl flex flex-col items-center justify-center">
+              <div className="p-5 rounded-3xl border border-black/[0.08] dark:border-white/[0.08] bg-card  shadow-[0_1px_2px_rgba(17,20,24,0.03)] flex flex-col items-center justify-center">
                 <h3 className="text-xs uppercase font-semibold tracking-wider text-slate-700 dark:text-zinc-300 mb-2">Asset Allocation</h3>
                 <div className="h-44 w-full">
                   <ResponsiveContainer width="100%" height="100%">
@@ -1589,7 +1589,7 @@ export default function InvestmentsPage() {
                 </div>
               </div>
 
-              <div className="md:col-span-2 p-5 rounded-3xl border border-slate-200 dark:border-white/[0.08] bg-card/60 backdrop-blur-2xl shadow-xl flex flex-col justify-center gap-3">
+              <div className="md:col-span-2 p-5 rounded-3xl border border-black/[0.08] dark:border-white/[0.08] bg-card  shadow-[0_1px_2px_rgba(17,20,24,0.03)] flex flex-col justify-center gap-3">
                 <h3 className="text-xs uppercase font-semibold tracking-wider text-slate-600 dark:text-zinc-400">Class Distribution</h3>
                 <div className="space-y-2.5">
                   {allocationData.map((item) => {
@@ -1622,7 +1622,7 @@ export default function InvestmentsPage() {
                 onClick={() => setHoldingFilter('active')}
                 className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
                   holdingFilter === 'active'
-                    ? 'bg-indigo-600 text-white shadow-sm'
+                    ? 'bg-[#0D6E52] dark:bg-emerald-600 text-white shadow-sm'
                     : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
@@ -1633,7 +1633,7 @@ export default function InvestmentsPage() {
                 onClick={() => setHoldingFilter('closed')}
                 className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
                   holdingFilter === 'closed'
-                    ? 'bg-indigo-600 text-white shadow-sm'
+                    ? 'bg-[#0D6E52] dark:bg-emerald-600 text-white shadow-sm'
                     : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
@@ -1644,7 +1644,7 @@ export default function InvestmentsPage() {
                 onClick={() => setHoldingFilter('all')}
                 className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
                   holdingFilter === 'all'
-                    ? 'bg-indigo-600 text-white shadow-sm'
+                    ? 'bg-[#0D6E52] dark:bg-emerald-600 text-white shadow-sm'
                     : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
@@ -1661,7 +1661,7 @@ export default function InvestmentsPage() {
           {/* Holdings Table */}
           {displayedPositions.length === 0 ? (
             <div className="py-16 text-center rounded-3xl border border-dashed border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/20 p-8">
-              <div className="h-12 w-12 rounded-2xl bg-indigo-500/10 text-indigo-800 dark:text-indigo-400 mx-auto flex items-center justify-center mb-3">
+              <div className="h-12 w-12 rounded-2xl -emerald-/10 text-emerald-800 dark:text-emerald-400 mx-auto flex items-center justify-center mb-3">
                 <TrendingUp className="h-6 w-6" />
               </div>
               <h3 className="text-base font-semibold text-slate-950 dark:text-white">
@@ -1694,7 +1694,7 @@ export default function InvestmentsPage() {
                       <div className="flex items-center justify-between">
                         <div>
                           <div className="flex items-center gap-2">
-                            <span className="font-bold text-base text-slate-950 dark:text-white group-hover:text-indigo-800 dark:group-hover:text-indigo-300 transition-colors">{h.ticker}</span>
+                            <span className="font-bold text-base text-slate-950 dark:text-white group-hover:text-emerald-800 dark:group-hover:text-emerald-300 transition-colors">{h.ticker}</span>
                             <span className="px-2 py-0.5 rounded-md text-[10px] font-medium bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300">
                               {h.type}
                             </span>
@@ -1809,7 +1809,7 @@ export default function InvestmentsPage() {
                         >
                           <td className="p-4">
                             <div className="flex items-center gap-1.5">
-                              <span className="font-bold text-slate-950 dark:text-white group-hover:text-indigo-800 dark:group-hover:text-indigo-300 transition-colors">{h.ticker}</span>
+                              <span className="font-bold text-slate-950 dark:text-white group-hover:text-emerald-800 dark:group-hover:text-emerald-300 transition-colors">{h.ticker}</span>
                               {isClosed && (
                                 <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">Closed</span>
                               )}
@@ -1915,7 +1915,7 @@ export default function InvestmentsPage() {
         <div className="space-y-4">
           {trades.length === 0 ? (
             <div className="py-16 text-center rounded-3xl border border-dashed border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/20 p-8">
-              <div className="h-12 w-12 rounded-2xl bg-indigo-500/10 text-indigo-800 dark:text-indigo-400 mx-auto flex items-center justify-center mb-3">
+              <div className="h-12 w-12 rounded-2xl -emerald-/10 text-emerald-800 dark:text-emerald-400 mx-auto flex items-center justify-center mb-3">
                 <History className="h-6 w-6" />
               </div>
               <h3 className="text-base font-semibold text-slate-950 dark:text-white">No Trades Logged Yet</h3>
@@ -1938,7 +1938,7 @@ export default function InvestmentsPage() {
                       <div className="flex items-center gap-3">
                         <span className={`px-2.5 py-1 rounded-xl text-xs font-bold ${
                           t.action === 'BUY'
-                            ? 'bg-indigo-500/20 text-indigo-800 dark:text-indigo-300'
+                            ? '-emerald-/20 text-emerald-800 dark:text-emerald-300'
                             : t.action === 'SELL'
                             ? 'bg-rose-500/20 text-rose-800 dark:text-rose-300'
                             : (t.action === 'REINVEST' || t.isReinvested || t.notes.toLowerCase().includes('reinvest'))
@@ -1948,7 +1948,7 @@ export default function InvestmentsPage() {
                           {t.action === 'REINVEST' || t.isReinvested || t.notes.toLowerCase().includes('reinvest') ? 'REINVEST' : t.action}
                         </span>
                         <div>
-                          <div className="font-bold text-sm text-slate-950 dark:text-white group-hover:text-indigo-800 dark:group-hover:text-indigo-300 transition-colors">{t.ticker}</div>
+                          <div className="font-bold text-sm text-slate-950 dark:text-white group-hover:text-emerald-800 dark:group-hover:text-emerald-300 transition-colors">{t.ticker}</div>
                           <div className="text-[11px] text-slate-600 dark:text-zinc-400 font-mono">{t.date} • {t.quantity} @ {formatAssetCurrency(t.price, t.currency)}</div>
                           {t.action === 'SELL' && realized && (
                             <div className={`text-[11px] font-bold font-mono mt-0.5 ${
@@ -1963,7 +1963,7 @@ export default function InvestmentsPage() {
                         <div>
                           <div className="font-bold text-sm text-slate-950 dark:text-white font-mono">{formatAssetCurrency(t.netTotal, t.currency)}</div>
                           {t.currency !== 'MYR' && (
-                            <div className="text-[11px] text-indigo-800 dark:text-indigo-300 font-mono">RM{'\u00A0'}{t.costInMyr.toFixed(2)}</div>
+                            <div className="text-[11px] text-emerald-800 dark:text-emerald-300 font-mono">RM{'\u00A0'}{t.costInMyr.toFixed(2)}</div>
                           )}
                           {t.notes && <div className="text-[10px] text-slate-500 dark:text-zinc-400 truncate max-w-[100px]">{t.notes}</div>}
                         </div>
@@ -2004,7 +2004,7 @@ export default function InvestmentsPage() {
                           <td className="p-4">
                             <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
                               t.action === 'BUY'
-                                ? 'bg-indigo-500/20 text-indigo-800 dark:text-indigo-300'
+                                ? '-emerald-/20 text-emerald-800 dark:text-emerald-300'
                                 : t.action === 'SELL'
                                 ? 'bg-rose-500/20 text-rose-800 dark:text-rose-300'
                                 : (t.action === 'REINVEST' || t.isReinvested || t.notes.toLowerCase().includes('reinvest'))
@@ -2015,7 +2015,7 @@ export default function InvestmentsPage() {
                             </span>
                           </td>
                           <td className="p-4 font-bold text-slate-950 dark:text-white">
-                            <span className="group-hover:text-indigo-800 dark:group-hover:text-indigo-300 transition-colors">{t.ticker}</span>
+                            <span className="group-hover:text-emerald-800 dark:group-hover:text-emerald-300 transition-colors">{t.ticker}</span>
                             {t.name && <span className="text-xs text-slate-600 dark:text-zinc-400 font-normal ml-2">{t.name}</span>}
                           </td>
                           <td className="p-4 text-right text-slate-800 dark:text-zinc-200 font-mono">{t.quantity}</td>
@@ -2024,7 +2024,7 @@ export default function InvestmentsPage() {
                           <td className="p-4 text-right font-mono text-slate-700 dark:text-zinc-300">
                             {t.currency === 'MYR' ? `RM ${t.netTotal.toFixed(2)}` : (
                               <div>
-                                <div className="text-indigo-800 dark:text-indigo-300 font-semibold">RM{'\u00A0'}{t.costInMyr.toFixed(2)}</div>
+                                <div className="text-emerald-800 dark:text-emerald-300 font-semibold">RM{'\u00A0'}{t.costInMyr.toFixed(2)}</div>
                                 <div className="text-[10px] text-slate-500 dark:text-zinc-400 font-normal">Rate: {t.rateToMyr ? t.rateToMyr.toFixed(4) : '—'}</div>
                               </div>
                             )}
@@ -2054,7 +2054,7 @@ export default function InvestmentsPage() {
                           <td className="p-4 text-xs text-slate-600 dark:text-zinc-400">{t.notes || '—'}</td>
                           <td className="p-4 text-right">
                             <div className="flex justify-end gap-1">
-                              <button type="button" title="Edit trade" onClick={(e) => { e.stopPropagation(); openTradeEditor(t); }} className="p-1.5 text-slate-500 dark:text-zinc-400 hover:text-indigo-800 dark:hover:text-indigo-400 cursor-pointer"><Edit2 className="h-4 w-4" /></button>
+                              <button type="button" title="Edit trade" onClick={(e) => { e.stopPropagation(); openTradeEditor(t); }} className="p-1.5 text-slate-500 dark:text-zinc-400 hover:text-emerald-800 dark:hover:text-emerald-400 cursor-pointer"><Edit2 className="h-4 w-4" /></button>
                               <button type="button" title="Delete trade" onClick={(e) => { e.stopPropagation(); void handleDeleteTrade(t); }} className="p-1.5 text-slate-500 dark:text-zinc-400 hover:text-rose-800 dark:hover:text-rose-400 cursor-pointer"><Trash2 className="h-4 w-4" /></button>
                             </div>
                           </td>
@@ -2130,7 +2130,7 @@ export default function InvestmentsPage() {
                         {tradeAction === 'SELL' ? 'Select holding to sell' : 'Quick select from holdings'}
                       </span>
                       {activeHoldingForTicker && (
-                        <span className="text-[11px] font-mono text-indigo-800 dark:text-indigo-300 font-semibold">
+                        <span className="text-[11px] font-mono text-emerald-800 dark:text-emerald-300 font-semibold">
                           Held: {activeHoldingForTicker.units} units
                         </span>
                       )}
@@ -2147,8 +2147,8 @@ export default function InvestmentsPage() {
                               isSelected
                                 ? tradeAction === 'SELL'
                                   ? 'bg-rose-500/20 border-rose-500/50 text-rose-800 dark:text-rose-300'
-                                  : 'bg-indigo-500/20 border-indigo-500/50 text-indigo-800 dark:text-indigo-300'
-                                : 'bg-white/80 dark:bg-zinc-900/60 border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-indigo-500/40'
+                                  : '-emerald-/20 border-emerald-500/50 text-emerald-800 dark:text-emerald-300'
+                                : 'bg-white/80 dark:bg-zinc-900/60 border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-emerald-500/40'
                             }`}
                           >
                             <span>{h.ticker}</span>
@@ -2205,7 +2205,7 @@ export default function InvestmentsPage() {
                         Ticker / Symbol
                       </label>
                       {isSearchingStock && (
-                        <span className="text-[10px] text-indigo-800 dark:text-indigo-400 flex items-center gap-1">
+                        <span className="text-[10px] text-emerald-800 dark:text-emerald-400 flex items-center gap-1">
                           <Loader2 className="h-3 w-3 animate-spin" />
                         </span>
                       )}
@@ -2223,7 +2223,7 @@ export default function InvestmentsPage() {
                           if (stockSearchResults.length > 0) setShowStockDropdown(true);
                         }}
                         required
-                        className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-2.5 text-sm text-slate-950 dark:text-white font-mono uppercase outline-none focus:border-indigo-500"
+                        className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-2.5 text-sm text-slate-950 dark:text-white font-mono uppercase outline-none focus:border-emerald-500"
                       />
                     </div>
 
@@ -2245,11 +2245,11 @@ export default function InvestmentsPage() {
                             key={item.symbol}
                             type="button"
                             onClick={() => selectStockItem(item)}
-                            className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left hover:bg-indigo-500/20 transition-colors group cursor-pointer"
+                            className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left -emerald-/20 transition-colors group cursor-pointer"
                           >
                             <div className="min-w-0 pr-2">
                               <div className="flex items-center gap-1.5">
-                                <span className="font-mono font-bold text-xs text-slate-950 dark:text-white group-hover:text-indigo-800 dark:group-hover:text-indigo-300">
+                                <span className="font-mono font-bold text-xs text-slate-950 dark:text-white group-hover:text-emerald-800 dark:group-hover:text-emerald-300">
                                   {item.symbol}
                                 </span>
                                 {item.exchange && (
@@ -2284,7 +2284,7 @@ export default function InvestmentsPage() {
                           if (!price || parseFloat(price) <= 0) setPrice('1.00');
                         }
                       }}
-                      className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-2.5 text-sm text-slate-950 dark:text-white outline-none focus:border-indigo-500"
+                      className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-2.5 text-sm text-slate-950 dark:text-white outline-none focus:border-emerald-500"
                     >
                       <option value="US Stock">US Stock</option>
                       <option value="MY Stock">MY Stock (Bursa)</option>
@@ -2304,7 +2304,7 @@ export default function InvestmentsPage() {
                     placeholder="e.g. Apple Inc. / Maybank"
                     value={assetName}
                     onChange={(e) => setAssetName(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-2.5 text-sm text-slate-950 dark:text-white outline-none focus:border-indigo-500"
+                    className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-2.5 text-sm text-slate-950 dark:text-white outline-none focus:border-emerald-500"
                   />
                 </div>
 
@@ -2336,7 +2336,7 @@ export default function InvestmentsPage() {
                       value={quantity}
                       onChange={(e) => setQuantity(e.target.value)}
                       required
-                      className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-2.5 text-sm text-slate-950 dark:text-white font-mono outline-none focus:border-indigo-500"
+                      className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-2.5 text-sm text-slate-950 dark:text-white font-mono outline-none focus:border-emerald-500"
                     />
                   </div>
                   <div>
@@ -2353,7 +2353,7 @@ export default function InvestmentsPage() {
                           type="button"
                           disabled={isFetchingQuote}
                           onClick={() => selectStockItem({ symbol: ticker, name: assetName, exchange: '', type: assetType })}
-                          className="text-[10px] text-indigo-800 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                          className="text-[10px] text-emerald-800 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 flex items-center gap-1 cursor-pointer disabled:opacity-50"
                         >
                           {isFetchingQuote ? <Loader2 className="h-3 w-3 animate-spin" /> : <Activity className="h-3 w-3" />}
                           <span>Live</span>
@@ -2367,7 +2367,7 @@ export default function InvestmentsPage() {
                       value={price}
                       onChange={(e) => setPrice(e.target.value)}
                       required
-                      className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-2.5 text-sm text-slate-950 dark:text-white font-mono outline-none focus:border-indigo-500"
+                      className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-2.5 text-sm text-slate-950 dark:text-white font-mono outline-none focus:border-emerald-500"
                     />
                   </div>
                 </div>
@@ -2395,7 +2395,7 @@ export default function InvestmentsPage() {
                       placeholder="0.00"
                       value={fees}
                       onChange={(e) => setFees(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-2.5 text-sm text-slate-950 dark:text-white font-mono outline-none focus:border-indigo-500"
+                      className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-2.5 text-sm text-slate-950 dark:text-white font-mono outline-none focus:border-emerald-500"
                     />
                   </div>
                   <div>
@@ -2404,7 +2404,7 @@ export default function InvestmentsPage() {
                         {tradeAction === 'BUY' ? `Net Total Paid (${currency})` : `Net Proceeds (${currency})`}
                       </label>
                     </div>
-                    <div className="w-full rounded-xl border border-indigo-500/30 bg-indigo-500/10 dark:bg-indigo-950/20 p-2.5 text-sm text-indigo-900 dark:text-indigo-300 font-mono font-bold flex items-center justify-between">
+                    <div className="w-full rounded-xl border border-emerald-500/30 -emerald-/10 dark:bg-emerald-950/20 p-2.5 text-sm text-emerald-900 dark:text-emerald-300 font-mono font-bold flex items-center justify-between">
                       <span>{currency}</span>
                       <span>
                         {(() => {
@@ -2439,7 +2439,7 @@ export default function InvestmentsPage() {
                         setRateToMyr(r.toFixed(4));
                         setManualCostEdited(false);
                       }}
-                      className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-2.5 text-sm text-slate-950 dark:text-white outline-none focus:border-indigo-500"
+                      className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-2.5 text-sm text-slate-950 dark:text-white outline-none focus:border-emerald-500"
                     >
                       <option value="USD">USD ($)</option>
                       <option value="MYR">MYR (RM)</option>
@@ -2456,17 +2456,17 @@ export default function InvestmentsPage() {
                       value={date}
                       onChange={(e) => setDate(e.target.value)}
                       required
-                      className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-2.5 text-sm text-slate-950 dark:text-white outline-none focus:border-indigo-500"
+                      className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-2.5 text-sm text-slate-950 dark:text-white outline-none focus:border-emerald-500"
                     />
                   </div>
                 </div>
 
                 {/* Real-time FX & MYR Historical Cost Basis */}
                 {currency !== 'MYR' && (
-                  <div className="p-3 rounded-2xl bg-indigo-950/30 border border-indigo-500/25 space-y-2.5">
+                  <div className="p-3 rounded-2xl bg-emerald-950/30 border border-emerald-500/25 space-y-2.5">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-indigo-800 dark:text-indigo-300 flex items-center gap-1.5">
-                        <Sparkles className="h-3.5 w-3.5 text-indigo-800 dark:text-indigo-400" />
+                      <span className="text-xs font-semibold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                        <Sparkles className="h-3.5 w-3.5 text-emerald-800 dark:text-emerald-400" />
                         Live FX & MYR {tradeAction === 'SELL' ? 'Proceeds' : 'Cost'}
                       </span>
                       <span className="text-[11px] text-slate-600 dark:text-zinc-400 font-mono">
@@ -2485,7 +2485,7 @@ export default function InvestmentsPage() {
                           placeholder="4.10"
                           value={rateToMyr}
                           onChange={(e) => handleRateChange(e.target.value)}
-                          className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/80 p-2.5 text-sm text-slate-950 dark:text-white font-mono outline-none focus:border-indigo-500"
+                          className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/80 p-2.5 text-sm text-slate-950 dark:text-white font-mono outline-none focus:border-emerald-500"
                         />
                       </div>
 
@@ -2501,7 +2501,7 @@ export default function InvestmentsPage() {
                             placeholder="0.00"
                             value={costInMyr}
                             onChange={(e) => handleCostInMyrChange(e.target.value)}
-                            className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/80 p-2.5 pl-10 text-sm text-slate-950 dark:text-white font-mono outline-none focus:border-indigo-500"
+                            className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/80 p-2.5 pl-10 text-sm text-slate-950 dark:text-white font-mono outline-none focus:border-emerald-500"
                           />
                         </div>
                       </div>
@@ -2524,7 +2524,7 @@ export default function InvestmentsPage() {
                     placeholder="e.g. Dividend reinvestment / DCA"
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-2.5 text-sm text-slate-950 dark:text-white outline-none focus:border-indigo-500"
+                    className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 p-2.5 text-sm text-slate-950 dark:text-white outline-none focus:border-emerald-500"
                   />
                 </div>
 
@@ -2532,7 +2532,7 @@ export default function InvestmentsPage() {
                 <button
                   type="submit"
                   disabled={addTradeMutation.isPending || updateTradeMutation.isPending}
-                  className="w-full py-3 rounded-2xl bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 text-white dark:text-white font-semibold text-sm shadow-lg shadow-indigo-500/25 transition-all flex items-center justify-center gap-2 cursor-pointer mt-2"
+                  className="w-full py-3 rounded-2xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 disabled:opacity-50 text-white dark:text-white font-semibold text-sm shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer mt-2"
                 >
                   {addTradeMutation.isPending || updateTradeMutation.isPending ? (
                     <>
@@ -2571,7 +2571,7 @@ export default function InvestmentsPage() {
               <div className="text-center py-2">
                 <div className={`text-3xl sm:text-4xl font-black font-mono tracking-tight ${
                   selectedTrade.action === 'BUY'
-                    ? 'text-indigo-800 dark:text-indigo-400'
+                    ? 'text-emerald-800 dark:text-emerald-400'
                     : selectedTrade.action === 'SELL'
                     ? 'text-rose-800 dark:text-rose-400'
                     : (selectedTrade.action === 'REINVEST' || selectedTrade.isReinvested || selectedTrade.notes.toLowerCase().includes('reinvest'))
@@ -2581,7 +2581,7 @@ export default function InvestmentsPage() {
                   {formatAssetCurrency(selectedTrade.netTotal, selectedTrade.currency)}
                 </div>
                 {selectedTrade.currency !== 'MYR' && (
-                  <p className="text-xs text-indigo-800 dark:text-indigo-300 font-mono mt-1 font-semibold">
+                  <p className="text-xs text-emerald-800 dark:text-emerald-300 font-mono mt-1 font-semibold">
                     Cost: RM{'\u00A0'}{selectedTrade.costInMyr.toFixed(2)} (@ {selectedTrade.rateToMyr.toFixed(4)})
                   </p>
                 )}
@@ -2654,7 +2654,7 @@ export default function InvestmentsPage() {
                     </div>
                     <div>
                       <span className="text-slate-500 dark:text-zinc-400 block mb-0.5 font-medium">Total Cost / Value (MYR)</span>
-                      <span className="font-semibold text-indigo-800 dark:text-indigo-400 font-mono">RM{'\u00A0'}{selectedTrade.costInMyr.toFixed(2)}</span>
+                      <span className="font-semibold text-emerald-800 dark:text-emerald-400 font-mono">RM{'\u00A0'}{selectedTrade.costInMyr.toFixed(2)}</span>
                     </div>
                   </div>
                 )}
@@ -2677,7 +2677,7 @@ export default function InvestmentsPage() {
                     setSelectedTrade(null);
                     openTradeEditor(tr);
                   }}
-                  className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-indigo-500 via-indigo-600 to-purple-600 hover:from-indigo-600 hover:to-purple-700 active:scale-[0.98] text-white dark:text-white font-bold text-sm shadow-xl shadow-indigo-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full py-3 px-4 rounded-2xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 active:scale-[0.98] text-white dark:text-white font-bold text-sm shadow-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Edit2 className="h-4 w-4" />
                   <span>Edit Trade</span>
@@ -2847,7 +2847,7 @@ export default function InvestmentsPage() {
                       selectHoldingForTrade(h, 'BUY');
                       setIsAddTradeOpen(true);
                     }}
-                    className="py-2.5 px-4 rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 active:scale-[0.98] text-white dark:text-white font-semibold text-xs shadow-lg shadow-indigo-500/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    className="py-2.5 px-4 rounded-2xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 active:scale-[0.98] text-white dark:text-white font-semibold text-xs shadow-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <ArrowUpRight className="h-4 w-4" />
                     <span>Buy More</span>
@@ -2884,7 +2884,7 @@ export default function InvestmentsPage() {
                     setTargetCalcAsset(found);
                     setIsTargetCalcOpen(true);
                   }}
-                  className="w-full py-2.5 px-4 rounded-2xl border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 active:scale-[0.98] text-indigo-800 dark:text-indigo-300 font-semibold text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full py-2.5 px-4 rounded-2xl border border-emerald-500/30 -emerald-/10 -emerald-/20 active:scale-[0.98] text-emerald-800 dark:text-emerald-300 font-semibold text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Target className="h-4 w-4" />
                   <span>Target Cost Price Calculator</span>

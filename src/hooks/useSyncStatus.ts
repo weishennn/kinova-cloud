@@ -69,7 +69,16 @@ export function useSyncStatus() {
         void flushAllPending().catch(() => {});
       }
     };
+    const handleForegroundResume = () => {
+      if (document.visibilityState === 'hidden') return;
+      update();
+      if (getApiUrl() && navigator.onLine && getSyncStatus().pendingCount > 0) {
+        void flushAllPending().catch(() => {});
+      }
+    };
     window.addEventListener('online', handleOnline);
+    window.addEventListener('focus', handleForegroundResume);
+    document.addEventListener('visibilitychange', handleForegroundResume);
     window.addEventListener('cashflow_api_url_changed', handleConnectionChanged);
 
     // If mounted while online with pending items, flush immediately
@@ -91,6 +100,8 @@ export function useSyncStatus() {
       window.removeEventListener('online', update);
       window.removeEventListener('offline', update);
       window.removeEventListener('online', handleOnline);
+      window.removeEventListener('focus', handleForegroundResume);
+      document.removeEventListener('visibilitychange', handleForegroundResume);
       window.removeEventListener('cashflow_api_url_changed', handleConnectionChanged);
       clearInterval(interval);
     };

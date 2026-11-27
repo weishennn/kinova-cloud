@@ -574,7 +574,7 @@ export default function InvoicesPage() {
               onClick={() => setActiveTab(tab)}
               className={`relative flex items-center gap-2 min-h-[38px] px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-colors duration-300 cursor-pointer touch-manipulation select-none active:scale-[0.96] whitespace-nowrap ${
                 activeTab === tab
-                  ? 'text-indigo-800 dark:text-indigo-200'
+                  ? 'text-emerald-800 dark:text-emerald-200'
                   : 'text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white'
               }`}
             >
@@ -588,9 +588,9 @@ export default function InvoicesPage() {
               {tab === 'tax' ? (
                 <ShieldCheck className={`h-4 w-4 ${activeTab === tab ? 'text-emerald-800 dark:text-emerald-400' : ''}`} />
               ) : tab === 'calendar' ? (
-                <CalendarIcon className={`h-4 w-4 ${activeTab === tab ? 'text-indigo-800 dark:text-indigo-400' : ''}`} />
+                <CalendarIcon className={`h-4 w-4 ${activeTab === tab ? 'text-emerald-800 dark:text-emerald-400' : ''}`} />
               ) : (
-                <FileText className={`h-4 w-4 ${activeTab === tab ? 'text-violet-800 dark:text-purple-400' : ''}`} />
+                <FileText className={`h-4 w-4 ${activeTab === tab ? 'text-amber-800 dark:text-amber-400' : ''}`} />
               )}
               <span className="relative z-10">
                 {tab === 'tax'
@@ -666,7 +666,7 @@ export default function InvoicesPage() {
                         step="1"
                         value={taxRateInput}
                         onChange={(e) => setTaxRateInput(e.target.value)}
-                        className="w-16 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2.5 py-1 text-xs text-slate-950 dark:text-white outline-none focus:border-indigo-500 font-mono"
+                        className="w-16 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2.5 py-1 text-xs text-slate-950 dark:text-white outline-none focus:border-emerald-500 font-mono"
                       />
                       <button
                         type="submit"
@@ -699,7 +699,7 @@ export default function InvoicesPage() {
                   <select
                     value={selectedTaxYear}
                     onChange={(e) => setSelectedTaxYear(e.target.value)}
-                    className="min-h-[40px] flex-1 min-w-0 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/90 px-3 py-1.5 text-xs font-semibold text-slate-950 dark:text-white outline-none focus:border-indigo-500 cursor-pointer transition-colors font-mono text-center truncate"
+                    className="min-h-[40px] flex-1 min-w-0 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/90 px-3 py-1.5 text-xs font-semibold text-slate-950 dark:text-white outline-none focus:border-emerald-500 cursor-pointer transition-colors font-mono text-center truncate"
                   >
                     {availableTaxYears.map((yr) => (
                       <option key={yr} value={yr} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono">
@@ -725,7 +725,7 @@ export default function InvoicesPage() {
                 <motion.div
                   whileHover={{ y: -4, scale: 1.01 }}
                   transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
-                  className="rounded-3xl border border-slate-200 dark:border-white/[0.08] bg-card/60 p-6 text-center backdrop-blur-2xl flex flex-col justify-between shadow-xl hover:border-indigo-500/40 transition-colors specular-card"
+                  className="rounded-3xl border border-black/[0.08] dark:border-white/[0.08] bg-card p-6 text-center  flex flex-col justify-between shadow-[0_1px_2px_rgba(17,20,24,0.03)] hover:border-emerald-500/40 transition-colors specular-card"
                 >
                   <div className="relative mx-auto h-48 w-48">
                     <svg className="h-full w-full" viewBox="0 0 100 100">
@@ -887,7 +887,7 @@ export default function InvoicesPage() {
                         setVaultFilter('tax');
                         setActiveTab('vault');
                       }}
-                      className="text-indigo-800 dark:text-indigo-300 hover:text-indigo-800 dark:hover:text-indigo-200 font-semibold cursor-pointer underline underline-offset-2"
+                      className="text-emerald-800 dark:text-emerald-300 hover:text-emerald-800 dark:hover:text-emerald-200 font-semibold cursor-pointer underline underline-offset-2"
                     >
                       View All Tax Receipts in Vault →
                     </button>
@@ -904,7 +904,7 @@ export default function InvoicesPage() {
               </div>
 
               {/* Official Malaysia LHDN e-Filing (Form BE) Income, PCB & Refund/Extra Tax Estimator Card */}
-              <div className="rounded-3xl border border-slate-200 dark:border-white/[0.08] bg-card/60 p-5 sm:p-6 backdrop-blur-2xl shadow-xl space-y-4">
+              <div className="rounded-3xl border border-black/[0.08] dark:border-white/[0.08] bg-card p-5 sm:p-6  shadow-[0_1px_2px_rgba(17,20,24,0.03)] space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h3 className="text-xs sm:text-sm font-extrabold text-slate-950 dark:text-white uppercase tracking-wider flex items-center gap-2">
@@ -921,7 +921,7 @@ export default function InvoicesPage() {
                       ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/40'
                       : taxReliefSummary.settlementStatus === 'pay_extra'
                       ? 'bg-rose-500/20 text-rose-800 dark:text-rose-300 border border-rose-500/40'
-                      : 'bg-indigo-500/20 text-indigo-800 dark:text-indigo-300 border border-indigo-500/40'
+                      : '-emerald-/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/40'
                   }`}>
                     {taxReliefSummary.settlementStatus === 'refund'
                       ? `🎉 Est. Tax Refund: +RM\u00A0${taxReliefSummary.refundAmount.toFixed(2)}`
@@ -970,7 +970,7 @@ export default function InvoicesPage() {
                               className="p-1.5 rounded-lg text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
                               title="Set or override Annual Gross Taxable Income (Pendapatan Tahunan)"
                             >
-                              <Edit2 className="h-3.5 w-3.5 text-indigo-800 dark:text-indigo-400" />
+                              <Edit2 className="h-3.5 w-3.5 text-emerald-800 dark:text-emerald-400" />
                             </button>
                           </div>
                         </div>
@@ -983,7 +983,7 @@ export default function InvoicesPage() {
                             placeholder="Annual RM"
                             value={annualIncomeInput}
                             onChange={(e) => setAnnualIncomeInput(e.target.value)}
-                            className="w-full rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2 py-1 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-indigo-500"
+                            className="w-full rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2 py-1 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-emerald-500"
                           />
                           <button type="submit" className="p-1 rounded-lg bg-emerald-500 text-white dark:text-white cursor-pointer">
                             <Check className="h-3.5 w-3.5" />
@@ -1052,7 +1052,7 @@ export default function InvoicesPage() {
                                 setPayslipEpfInput(String(taxReliefSummary.effectivePayslipEpf));
                                 setIsEditingPayslipEpf(true);
                               }}
-                              className="text-indigo-800 dark:text-indigo-400 hover:text-slate-950 dark:hover:text-white cursor-pointer"
+                              className="text-emerald-800 dark:text-emerald-400 hover:text-slate-950 dark:hover:text-white cursor-pointer"
                               title="Enter total mandatory EPF deducted on your payslips for the year (capped at RM 4,000 sub-limit; auto-deduplicated against standalone EPF records)"
                             >
                               <Edit2 className="h-3 w-3" />
@@ -1104,7 +1104,7 @@ export default function InvoicesPage() {
                                 setPayslipSocsoInput(String(taxReliefSummary.effectivePayslipSocso));
                                 setIsEditingPayslipSocso(true);
                               }}
-                              className="text-indigo-800 dark:text-indigo-400 hover:text-slate-950 dark:hover:text-white cursor-pointer"
+                              className="text-emerald-800 dark:text-emerald-400 hover:text-slate-950 dark:hover:text-white cursor-pointer"
                               title="Enter total SOCSO & EIS (PERKESO) deducted on your payslips for the year (capped at RM 350; auto-deduplicated against standalone SOCSO records)"
                             >
                               <Edit2 className="h-3 w-3" />
@@ -1156,7 +1156,7 @@ export default function InvoicesPage() {
                                 setOtherReliefsInput(String(taxReliefSummary.additionalReliefs));
                                 setIsEditingOtherReliefs(true);
                               }}
-                              className="text-indigo-800 dark:text-indigo-400 hover:text-slate-950 dark:hover:text-white cursor-pointer"
+                              className="text-emerald-800 dark:text-emerald-400 hover:text-slate-950 dark:hover:text-white cursor-pointer"
                               title="Add other Form BE reliefs such as Spouse Relief (RM 4,000), Child Relief (RM 2,000–8,000), Disabled Relief, or Approved Donations"
                             >
                               <Edit2 className="h-3 w-3" />
@@ -1196,7 +1196,7 @@ export default function InvoicesPage() {
                         <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-zinc-400">
                           3. Estimated LHDN Tax
                         </span>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-800 dark:text-indigo-300 font-mono">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded -emerald-/15 text-emerald-800 dark:text-emerald-300 font-mono">
                           {taxReliefSummary.effectiveMarginalTaxRate}% Bracket
                         </span>
                       </div>
@@ -1236,7 +1236,7 @@ export default function InvoicesPage() {
                                 setOtherRebatesInput(String(taxReliefSummary.additionalRebates));
                                 setIsEditingOtherRebates(true);
                               }}
-                              className="text-indigo-800 dark:text-indigo-400 hover:text-slate-950 dark:hover:text-white cursor-pointer"
+                              className="text-emerald-800 dark:text-emerald-400 hover:text-slate-950 dark:hover:text-white cursor-pointer"
                               title="Enter Zakat / Fitrah paid or Spouse Tax Rebate (RM 400 when chargeable income ≤ RM 35,000). Deducted 1-for-1 directly from LHDN tax!"
                             >
                               <Edit2 className="h-3 w-3" />
@@ -1288,7 +1288,7 @@ export default function InvoicesPage() {
 
                       {!isEditingPcbPaid ? (
                         <div className="mt-1 flex items-center justify-between gap-1">
-                          <span className="text-lg font-black text-indigo-800 dark:text-indigo-300 font-mono tabular-nums">
+                          <span className="text-lg font-black text-emerald-800 dark:text-emerald-300 font-mono tabular-nums">
                             RM{'\u00A0'}{taxReliefSummary.totalPcbPaid.toFixed(2)}
                           </span>
                           <div className="flex items-center gap-1">
@@ -1311,7 +1311,7 @@ export default function InvoicesPage() {
                               className="p-1.5 rounded-lg text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
                               title="Enter total PCB / MTD already deducted from your salary in this year"
                             >
-                              <Edit2 className="h-3.5 w-3.5 text-indigo-800 dark:text-indigo-400" />
+                              <Edit2 className="h-3.5 w-3.5 text-emerald-800 dark:text-emerald-400" />
                             </button>
                           </div>
                         </div>
@@ -1324,7 +1324,7 @@ export default function InvoicesPage() {
                             placeholder="Total PCB RM"
                             value={pcbPaidInput}
                             onChange={(e) => setPcbPaidInput(e.target.value)}
-                            className="w-full rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2 py-1 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-indigo-500"
+                            className="w-full rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2 py-1 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-emerald-500"
                           />
                           <button type="submit" className="p-1 rounded-lg bg-emerald-500 text-white dark:text-white cursor-pointer">
                             <Check className="h-3.5 w-3.5" />
@@ -1354,7 +1354,7 @@ export default function InvoicesPage() {
                     ? 'border-emerald-500/35 bg-emerald-950/20'
                     : taxReliefSummary.settlementStatus === 'pay_extra'
                     ? 'border-rose-500/35 bg-rose-950/20'
-                    : 'border-indigo-500/25 bg-indigo-950/15'
+                    : 'border-emerald-500/25 bg-emerald-950/15'
                 }`}>
                   <div className="space-y-0.5 flex-1 min-w-[240px]">
                     <div className="text-xs font-extrabold text-slate-950 dark:text-white">
@@ -1367,7 +1367,7 @@ export default function InvoicesPage() {
                           ⚠️ Estimated Extra Tax to Pay LHDN: RM{'\u00A0'}{taxReliefSummary.extraTaxToPay.toFixed(2)}
                         </span>
                       ) : taxReliefSummary.annualTaxableIncome === 0 ? (
-                        <span className="text-indigo-800 dark:text-indigo-200">
+                        <span className="text-emerald-800 dark:text-emerald-200">
                           💡 Tap ✏️ on &quot;1. Annual Income&quot; and &quot;4. PCB Already Paid&quot; above (or record Salary) to estimate your Refund or Extra Tax!
                         </span>
                       ) : (
@@ -1412,7 +1412,7 @@ export default function InvoicesPage() {
                         onClick={() => setTaxViewFilter(f.id)}
                         className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
                           taxViewFilter === f.id
-                            ? 'bg-indigo-500/20 text-indigo-800 dark:text-indigo-300 border border-indigo-500/30'
+                            ? '-emerald-/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30'
                             : 'text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white'
                         }`}
                       >
@@ -1428,7 +1428,7 @@ export default function InvoicesPage() {
                     <button
                       type="button"
                       onClick={() => setTaxViewFilter('all')}
-                      className="mt-2 text-xs text-indigo-800 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 font-semibold underline cursor-pointer"
+                      className="mt-2 text-xs text-emerald-800 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 font-semibold underline cursor-pointer"
                     >
                       Show all 10 Malaysia LHDN categories
                     </button>
@@ -1446,7 +1446,7 @@ export default function InvoicesPage() {
                           missingReceiptCount > 0
                             ? 'border-amber-500/35 bg-amber-950/15'
                             : isMaxedOut
-                            ? 'border-indigo-500/35 bg-indigo-950/15'
+                            ? 'border-emerald-500/35 bg-emerald-950/15'
                             : totalSpent > 0
                             ? 'border-emerald-500/30 bg-emerald-950/10'
                             : 'border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40'
@@ -1465,7 +1465,7 @@ export default function InvoicesPage() {
                             </span>
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                               isMaxedOut
-                                ? 'bg-indigo-500/20 text-indigo-800 dark:text-indigo-300'
+                                ? '-emerald-/20 text-emerald-800 dark:text-emerald-300'
                                 : percentUsed > 70
                                 ? 'bg-amber-500/20 text-amber-800 dark:text-amber-300'
                                 : totalSpent > 0
@@ -1506,7 +1506,7 @@ export default function InvoicesPage() {
                                   type="number"
                                   value={taxCapInput}
                                   onChange={(e) => setTaxCapInput(e.target.value)}
-                                  className="w-20 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2 py-1 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-indigo-500"
+                                  className="w-20 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2 py-1 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-emerald-500"
                                 />
                                 <button
                                   type="button"
@@ -1535,7 +1535,7 @@ export default function InvoicesPage() {
                           <div
                             className={`h-full rounded-full transition-all duration-500 ${
                               isMaxedOut
-                                ? 'bg-indigo-500'
+                                ? 'bg-[#0D6E52] dark:bg-emerald-500'
                                 : percentUsed > 75
                                 ? 'bg-amber-400'
                                 : 'bg-emerald-500'
@@ -1548,7 +1548,7 @@ export default function InvoicesPage() {
                         <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-zinc-400 pt-0.5">
                           <div>
                             {isMaxedOut ? (
-                              <span className="text-indigo-800 dark:text-indigo-300 font-semibold">
+                              <span className="text-emerald-800 dark:text-emerald-300 font-semibold">
                                 Max RM{'\u00A0'}{cap.toFixed(0)} relief reached! (Spent RM{'\u00A0'}{totalSpent.toFixed(2)})
                               </span>
                             ) : (
@@ -1569,7 +1569,7 @@ export default function InvoicesPage() {
                             <button
                               type="button"
                               onClick={() => setExpandedTaxCatId(isExpanded ? null : cat.id)}
-                              className="inline-flex items-center gap-1 text-indigo-800 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 font-semibold cursor-pointer"
+                              className="inline-flex items-center gap-1 text-emerald-800 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 font-semibold cursor-pointer"
                             >
                               <span>{isExpanded ? 'Hide Details' : 'What Qualifies & Receipts'}</span>
                               {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
@@ -1662,13 +1662,13 @@ export default function InvoicesPage() {
                                                   }
                                                   className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 text-[11px] font-semibold transition-colors cursor-pointer"
                                                 >
-                                                  <Eye className="h-3 w-3 text-indigo-800 dark:text-indigo-400" />
+                                                  <Eye className="h-3 w-3 text-emerald-800 dark:text-emerald-400" />
                                                   <span>View Receipt</span>
                                                 </button>
                                                 <button
                                                   type="button"
                                                   onClick={() => downloadReceiptFile(tx.receiptUrl!, claimFileName)}
-                                                  className="p-1.5 rounded-lg bg-slate-100 dark:bg-zinc-800 hover:bg-indigo-500/20 text-slate-700 dark:text-zinc-300 hover:text-indigo-800 dark:hover:text-indigo-300 transition-colors cursor-pointer"
+                                                  className="p-1.5 rounded-lg bg-slate-100 dark:bg-zinc-800 -emerald-/20 text-slate-700 dark:text-zinc-300 hover:text-emerald-800 dark:hover:text-emerald-300 transition-colors cursor-pointer"
                                                   title="Download Receipt"
                                                 >
                                                   <Download className="h-3.5 w-3.5" />
@@ -1732,10 +1732,10 @@ export default function InvoicesPage() {
                     fileInputRef.current?.click();
                   }
                 }}
-                className="group relative flex cursor-pointer flex-col items-center justify-center rounded-3xl border-2 border-dashed border-slate-200 dark:border-zinc-800/60 bg-white/90 dark:bg-zinc-900/30 backdrop-blur-sm py-10 transition-all hover:border-indigo-500/40 hover:bg-indigo-500/5 overflow-hidden"
+                className="group relative flex cursor-pointer flex-col items-center justify-center rounded-3xl border-2 border-dashed border-slate-200 dark:border-zinc-800/60 bg-white/90 dark:bg-zinc-900/30 backdrop-blur-sm py-10 transition-all hover:border-emerald-500/40 -emerald-/5 overflow-hidden"
               >
                 {/* Subtle particle/sparkle effect background on hover */}
-                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-700 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-indigo-500/10 via-transparent to-transparent" />
+                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-700 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-emerald-500/10 via-transparent to-transparent" />
                 
                 <motion.div 
                   variants={{
@@ -1744,9 +1744,9 @@ export default function InvoicesPage() {
                   className="mb-4 rounded-2xl bg-slate-100 dark:bg-zinc-800/80 p-4 transition-transform group-hover:scale-110 shadow-lg shadow-black/20 ring-1 ring-white/5"
                 >
                   {isUploading ? (
-                    <Loader2 className="h-8 w-8 text-indigo-800 dark:text-indigo-400 animate-spin" />
+                    <Loader2 className="h-8 w-8 text-emerald-800 dark:text-emerald-400 animate-spin" />
                   ) : (
-                    <UploadCloud className="h-8 w-8 text-indigo-800 dark:text-indigo-400" />
+                    <UploadCloud className="h-8 w-8 text-emerald-800 dark:text-emerald-400" />
                   )}
                 </motion.div>
                 <h3 className="text-sm font-bold text-slate-950 dark:text-white relative z-10">Tap to upload receipt or invoice</h3>
@@ -1758,13 +1758,13 @@ export default function InvoicesPage() {
               {/* Search bar, Tax Filter Pill & Range Download Action */}
               <div className="flex flex-wrap items-center gap-3">
                 <div className="relative flex-1 min-w-[220px] group">
-                  <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 dark:text-zinc-400 group-focus-within:text-indigo-800 dark:group-focus-within:text-indigo-400 transition-colors" />
+                  <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 dark:text-zinc-400 group-focus-within:text-emerald-800 dark:group-focus-within:text-emerald-400 transition-colors" />
                   <input
                     type="text"
                     placeholder="Search invoices by vendor, date (e.g. 2026-09), or title..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 backdrop-blur-sm py-2.5 pl-10 pr-4 text-sm text-slate-950 dark:text-white placeholder-zinc-500 outline-none focus:border-indigo-500/50 focus:bg-white/90 dark:focus:bg-zinc-900/80 transition-all shadow-sm"
+                    className="w-full rounded-2xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 backdrop-blur-sm py-2.5 pl-10 pr-4 text-sm text-slate-950 dark:text-white placeholder-zinc-500 outline-none focus:border-emerald-500/50 focus:bg-white/90 dark:focus:bg-zinc-900/80 transition-all shadow-sm"
                   />
                 </div>
 
@@ -1800,7 +1800,7 @@ export default function InvoicesPage() {
                   onClick={() => handleOpenRangeDownload(undefined, undefined, vaultFilter === 'tax')}
                   className="flex items-center gap-1.5 px-4 py-2.5 rounded-2xl bg-white/90 dark:bg-zinc-900/80 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white border border-slate-200 dark:border-zinc-800/80 backdrop-blur-sm text-xs font-semibold transition-all shadow-sm cursor-pointer"
                 >
-                  <CalendarIcon className="h-3.5 w-3.5 text-indigo-800 dark:text-indigo-400" />
+                  <CalendarIcon className="h-3.5 w-3.5 text-emerald-800 dark:text-emerald-400" />
                   <span>Filter by Date Range</span>
                 </motion.button>
               </div>
@@ -1852,7 +1852,7 @@ export default function InvoicesPage() {
                       <motion.div
                         key={inv.id}
                         variants={gridItem}
-                        className="group relative overflow-hidden rounded-2xl border border-slate-200 dark:border-zinc-800/60 bg-white/90 dark:bg-zinc-900/30 backdrop-blur-sm hover:border-indigo-500/30 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-indigo-500/10 hover:bg-white/90 dark:hover:bg-zinc-900/60 flex flex-col"
+                        className="group relative overflow-hidden rounded-2xl border border-slate-200 dark:border-zinc-800/60 bg-white/90 dark:bg-zinc-900/30 backdrop-blur-sm hover:border-emerald-500/30 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-emerald-500/10 hover:bg-white/90 dark:hover:bg-zinc-900/60 flex flex-col"
                       >
                         {/* Thumbnail / Preview Area */}
                         <div 
@@ -1869,7 +1869,7 @@ export default function InvoicesPage() {
                               }}
                             />
                           ) : (
-                            <FileText className="h-10 w-10 text-slate-600 dark:text-zinc-300 group-hover:text-indigo-800 dark:group-hover:text-indigo-400 group-hover:scale-110 transition-all duration-500 ease-out" />
+                            <FileText className="h-10 w-10 text-slate-600 dark:text-zinc-300 group-hover:text-emerald-800 dark:group-hover:text-emerald-400 group-hover:scale-110 transition-all duration-500 ease-out" />
                           )}
                           {invTaxCat && (
                             <span className="absolute top-2 left-2 z-10 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-950/90 border border-emerald-500/40 text-emerald-800 dark:text-emerald-300 text-[10px] font-bold shadow-md backdrop-blur-sm">
@@ -1902,7 +1902,7 @@ export default function InvoicesPage() {
                               {/* Download Button */}
                               <button
                                 onClick={() => downloadReceiptFile(inv.url, claimFileName)}
-                                className="p-1.5 rounded-lg text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white hover:bg-indigo-500/20 hover:text-indigo-800 dark:hover:text-indigo-300 transition-colors cursor-pointer"
+                                className="p-1.5 rounded-lg text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white -emerald-/20 hover:text-emerald-800 dark:hover:text-emerald-300 transition-colors cursor-pointer"
                                 title="Download for Claim"
                               >
                                 <Download className="h-3.5 w-3.5" />
@@ -2104,7 +2104,7 @@ export default function InvoicesPage() {
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                     onClick={() => downloadReceiptFile(selectedPreview.url, selectedPreview.filename)}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white dark:text-white text-xs font-bold transition-colors cursor-pointer shadow-lg shadow-indigo-500/25"
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white dark:text-white text-xs font-bold transition-colors cursor-pointer shadow-lg"
                   >
                     <Download className="h-3.5 w-3.5" />
                     <span>Download</span>

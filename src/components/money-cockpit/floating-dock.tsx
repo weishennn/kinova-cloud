@@ -115,7 +115,7 @@ export function FloatingDock() {
           <ArrowLeftRight size={19} aria-hidden="true" /><span>Flow</span>
         </Link>
         {addMenuOpen && !isInvestmentRoute && (
-          <div className="absolute bottom-20 left-1/2 -translate-x-1/2 flex flex-col gap-1 p-1.5 rounded-2xl bg-slate-900/95 dark:bg-zinc-900/95 border border-white/15 shadow-2xl backdrop-blur-xl z-50 text-xs min-w-[140px] animate-in fade-in zoom-in-95 duration-150">
+          <div className="absolute bottom-20 left-1/2 -translate-x-1/2 flex flex-col gap-1 p-1.5 rounded-2xl bg-[#0E1513]/95 border border-emerald-500/20 shadow-2xl backdrop-blur-xl z-50 text-xs min-w-[152px] animate-in fade-in zoom-in-95 duration-150">
             <button
               type="button"
               onClick={() => { setAddMenuOpen(false); quickAdd('expense'); }}

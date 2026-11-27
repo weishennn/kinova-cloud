@@ -1,4 +1,4 @@
-import { getAdminEmail, isAdminEmail } from './google-auth';
+import { getAdminEmail, isAdminEmail } from './admin-email-policy.ts';
 
 export const ADMIN_REGISTRY_SETTING_KEY = 'kinova_admin_user_registry';
 export const ACTIVE_SHORTCUT_OWNER_SETTING_KEY = 'kinova_active_shortcut_owner_v1';
@@ -41,7 +41,7 @@ interface RegistryCache {
 
 let memoryRegistryCache: RegistryCache | null = null;
 let memoryShortcutOwner: ActiveShortcutOwnerState | null = null;
-const CACHE_TTL_MS = 15_000;
+const CACHE_TTL_MS = 60_000;
 
 export function getAdminAppsScriptEndpoint(): { targetUrl: string; apiKey: string } | null {
   const targetUrl = (
@@ -123,13 +123,16 @@ export async function fetchAdminAppsScript(
   }
 }
 
-export async function getAdminUserRegistry(forceFresh = false): Promise<Record<string, RegisteredUser>> {
+export async function getAdminUserRegistry(
+  forceFresh = false,
+  timeoutMs = 15000
+): Promise<Record<string, RegisteredUser>> {
   const now = Date.now();
   if (!forceFresh && memoryRegistryCache && now - memoryRegistryCache.fetchedAt < CACHE_TTL_MS) {
     return memoryRegistryCache.users;
   }
 
-  const res = (await fetchAdminAppsScript('GET', 'getSettings')) as {
+  const res = (await fetchAdminAppsScript('GET', 'getSettings', {}, timeoutMs)) as {
     success?: boolean;
     data?: Record<string, string>;
   } | null;
@@ -341,16 +344,9 @@ export async function isUserBlocked(email?: string | null): Promise<boolean> {
   return record?.status === 'blocked';
 }
 
-export async function recordUserAiCall(email: string): Promise<{ allowed: boolean }> {
-  const normalizedEmail = email.trim().toLowerCase();
-  const users = await getAdminUserRegistry(false);
-  const existing = users[normalizedEmail];
-
-  if (existing?.status === 'blocked' && !isAdminEmail(normalizedEmail)) {
-    return { allowed: false };
-  }
-
+function incrementAndSaveAiCall(users: Record<string, RegisteredUser>, normalizedEmail: string): void {
   const nowIso = new Date().toISOString();
+  const existing = users[normalizedEmail];
   const updated: RegisteredUser = existing
     ? {
         ...existing,
@@ -371,6 +367,42 @@ export async function recordUserAiCall(email: string): Promise<{ allowed: boolea
   users[normalizedEmail] = updated;
   // Fire-and-forget write so AI response latency stays minimal
   void saveAdminUserRegistry(users);
+}
+
+export async function recordUserAiCall(email: string): Promise<{ allowed: boolean }> {
+  const normalizedEmail = email.trim().toLowerCase();
+  const isAdmin = isAdminEmail(normalizedEmail);
+
+  // Admin can never be blocked; never stall an AI request waiting on Apps Script cold starts.
+  if (isAdmin) {
+    if (memoryRegistryCache && Date.now() - memoryRegistryCache.fetchedAt < CACHE_TTL_MS) {
+      incrementAndSaveAiCall(memoryRegistryCache.users, normalizedEmail);
+    } else {
+      void getAdminUserRegistry(false, 4_000)
+        .then((users) => incrementAndSaveAiCall(users, normalizedEmail))
+        .catch(() => {});
+    }
+    return { allowed: true };
+  }
+
+  // Use cached registry if present (stale-while-revalidate) or a short 2.5s cap on cold start
+  // so an Apps Script hiccup never pushes downstream AI calls into a timeout.
+  let users: Record<string, RegisteredUser>;
+  if (memoryRegistryCache) {
+    users = memoryRegistryCache.users;
+    if (Date.now() - memoryRegistryCache.fetchedAt >= CACHE_TTL_MS) {
+      void getAdminUserRegistry(false, 4_000).catch(() => {});
+    }
+  } else {
+    users = await getAdminUserRegistry(false, 2_500);
+  }
+
+  const existing = users[normalizedEmail];
+  if (existing?.status === 'blocked') {
+    return { allowed: false };
+  }
+
+  incrementAndSaveAiCall(users, normalizedEmail);
   return { allowed: true };
 }
 

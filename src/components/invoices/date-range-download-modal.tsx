@@ -306,7 +306,7 @@ export function DateRangeDownloadModal({
           className="relative w-full max-w-2xl max-h-[calc(100dvh-1.5rem)] overflow-y-auto overscroll-contain touch-pan-y [-webkit-overflow-scrolling:touch] custom-scrollbar rounded-3xl border border-slate-200 dark:border-white/[0.12] bg-white/95 dark:bg-[#090d16]/95 p-4 sm:p-6 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.85),0_0_40px_rgba(99,102,241,0.12)] z-10 backdrop-blur-3xl space-y-4"
         >
           {/* Animated gradient border container */}
-          <div className="absolute inset-0 z-[-1] opacity-40 mix-blend-overlay pointer-events-none rounded-3xl bg-[radial-gradient(circle_at_50%_0%,_var(--tw-gradient-stops))] from-indigo-500/30 via-slate-100 dark:via-zinc-950/5 to-white dark:to-zinc-950/50" />
+          <div className="absolute inset-0 z-[-1] opacity-40 mix-blend-overlay pointer-events-none rounded-3xl bg-[radial-gradient(circle_at_50%_0%,_var(--tw-gradient-stops))] from-emerald-500/30 via-slate-100 dark:via-zinc-950/5 to-white dark:to-zinc-950/50" />
 
             {/* Download Progress Bar */}
             <AnimatePresence>
@@ -319,7 +319,7 @@ export function DateRangeDownloadModal({
                 >
                   <div className="h-1.5 w-full bg-white dark:bg-zinc-900 overflow-hidden rounded-t-3xl relative">
                     <motion.div
-                      className="absolute inset-y-0 left-0 bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400"
+                      className="absolute inset-y-0 left-0 bg-emerald-500/[0.04]-400"
                       initial={{ width: 0 }}
                       animate={{ width: `${(downloadProgress.current / downloadProgress.total) * 100}%` }}
                       transition={{ ease: 'easeOut', duration: 0.3 }}
@@ -369,7 +369,7 @@ export function DateRangeDownloadModal({
                         onClick={() => applyPreset(preset)}
                         className={`px-2.5 py-1 rounded-lg text-[10px] sm:text-[11px] font-medium transition-all cursor-pointer ${
                           isActive
-                            ? 'bg-indigo-500/20 text-indigo-800 dark:text-indigo-300 border border-indigo-500/50 shadow-[0_0_10px_rgba(99,102,241,0.2)] font-semibold'
+                            ? '-emerald-/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/50 shadow-[0_0_10px_rgba(99,102,241,0.2)] font-semibold'
                             : 'bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white border border-transparent'
                         }`}
                       >
@@ -390,7 +390,7 @@ export function DateRangeDownloadModal({
                     type="date"
                     value={dateFrom}
                     onChange={(e) => handleDateFromChange(e.target.value)}
-                    className="w-full min-w-0 max-w-full block appearance-none [-webkit-appearance:none] rounded-xl border border-slate-300 dark:border-zinc-700 bg-white/90 dark:bg-zinc-950/60 px-3 py-2 text-xs text-slate-950 dark:text-white outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 transition-all font-mono [color-scheme:dark] box-border"
+                    className="w-full min-w-0 max-w-full block appearance-none [-webkit-appearance:none] rounded-xl border border-slate-300 dark:border-zinc-700 bg-white/90 dark:bg-zinc-950/60 px-3 py-2 text-xs text-slate-950 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/50 transition-all font-mono [color-scheme:dark] box-border"
                   />
                 </div>
 
@@ -402,7 +402,7 @@ export function DateRangeDownloadModal({
                     type="date"
                     value={dateTo}
                     onChange={(e) => handleDateToChange(e.target.value)}
-                    className="w-full min-w-0 max-w-full block appearance-none [-webkit-appearance:none] rounded-xl border border-slate-300 dark:border-zinc-700 bg-white/90 dark:bg-zinc-950/60 px-3 py-2 text-xs text-slate-950 dark:text-white outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 transition-all font-mono [color-scheme:dark] box-border"
+                    className="w-full min-w-0 max-w-full block appearance-none [-webkit-appearance:none] rounded-xl border border-slate-300 dark:border-zinc-700 bg-white/90 dark:bg-zinc-950/60 px-3 py-2 text-xs text-slate-950 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/50 transition-all font-mono [color-scheme:dark] box-border"
                   />
                 </div>
               </div>
@@ -421,7 +421,7 @@ export function DateRangeDownloadModal({
                   <motion.div
                     layout
                     className={`h-4 w-4 rounded-md border flex items-center justify-center transition-colors ${
-                      allSelected ? 'bg-indigo-500 border-indigo-500 text-white dark:text-white' : 'border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-900'
+                      allSelected ? 'bg-[#0D6E52] dark:bg-emerald-500 border-emerald-500 text-white dark:text-white' : 'border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-900'
                     }`}
                   >
                     {allSelected && <Check className="h-3 w-3" />}
@@ -464,9 +464,9 @@ export function DateRangeDownloadModal({
                       <div
                         key={inv.id}
                         onClick={() => toggleSelectOne(inv.id)}
-                        className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 hover:shadow-lg hover:shadow-indigo-500/10 active:scale-[0.99] ${
+                        className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 hover:shadow-lg hover:shadow-emerald-500/10 active:scale-[0.99] ${
                           isChecked
-                            ? 'border-indigo-500/50 bg-indigo-500/10 shadow-[0_0_15px_rgba(99,102,241,0.15)]'
+                            ? 'border-emerald-500/50 -emerald-/10 shadow-[0_0_15px_rgba(99,102,241,0.15)]'
                             : 'border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 hover:bg-white/90 dark:hover:bg-zinc-900/80'
                         }`}
                       >
@@ -474,7 +474,7 @@ export function DateRangeDownloadModal({
                           {/* Animated Checkbox */}
                           <div
                             className={`h-4 w-4 rounded-md border shrink-0 flex items-center justify-center transition-colors ${
-                              isChecked ? 'bg-indigo-500 border-indigo-500 text-white dark:text-white shadow-[0_0_8px_rgba(99,102,241,0.5)]' : 'border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-900'
+                              isChecked ? 'bg-[#0D6E52] dark:bg-emerald-500 border-emerald-500 text-white dark:text-white shadow-[0_0_8px_rgba(99,102,241,0.5)]' : 'border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-900'
                             }`}
                           >
                             {isChecked && <Check className="h-3 w-3" />}
@@ -577,7 +577,7 @@ export function DateRangeDownloadModal({
                 type="button"
                 onClick={handleStartDownload}
                 disabled={selectedInvoices.length === 0 || isDownloading || isDeletingFromDrive}
-                className="order-1 sm:order-2 w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-3 sm:py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-400 hover:to-purple-400 disabled:opacity-50 text-white dark:text-white text-sm font-bold shadow-lg shadow-indigo-500/25 transition-all cursor-pointer relative overflow-hidden"
+                className="order-1 sm:order-2 w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-3 sm:py-2.5 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 disabled:opacity-50 text-white dark:text-white text-sm font-bold shadow-lg transition-all cursor-pointer relative overflow-hidden"
               >
                 {isDownloading ? (
                   <>

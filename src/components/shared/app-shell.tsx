@@ -291,7 +291,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (!isKinovaAIOpen) return;
     const themeColorMetas = Array.from(document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]'));
     const previousColors = themeColorMetas.map((meta) => [meta, meta.getAttribute('content')] as const);
-    themeColorMetas.forEach((meta) => meta.setAttribute('content', '#0c0d1e'));
+    themeColorMetas.forEach((meta) => meta.setAttribute('content', '#090B0D'));
     return () => {
       previousColors.forEach(([meta, color]) => {
         if (color === null) meta.removeAttribute('content');
@@ -410,7 +410,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [queryClient]);
 
   return (
-    <div className="relative min-h-screen bg-background text-foreground selection:bg-indigo-500/30 overflow-x-clip antialiased money-cockpit-shell">
+    <div className="relative min-h-screen bg-background text-foreground selection:-emerald-/30 overflow-x-clip antialiased money-cockpit-shell">
       {/* Background Layer: Kinova AI & Pull-down Pill (Inspired by Ryt Bank) */}
       {!isReceiptPriceSearchPage && (
         <div
@@ -425,11 +425,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           >
             <div className={`px-4 py-2 rounded-full border backdrop-blur-2xl text-xs font-semibold flex items-center gap-2 transition-all duration-200 shadow-2xl ${
               isPastThreshold
-                ? 'bg-indigo-600/70 border-indigo-400 text-white shadow-[0_0_25px_rgba(99,102,241,0.6)] scale-105'
-                : 'bg-white/10 border-white/20 text-white/90'
+                ? 'bg-emerald-950/90 border-emerald-400/70 text-emerald-100 shadow-[0_0_24px_rgba(45,212,160,0.4)] scale-105'
+                : 'bg-[#0F1614]/85 border-white/15 text-white/90'
             }`}>
-              <Sparkles className={`w-3.5 h-3.5 text-indigo-300 ${isPastThreshold ? 'animate-spin' : ''}`} />
-              <span>{isPastThreshold ? 'Release for ✨ Kinova AI' : 'Pull down for Kinova AI'}</span>
+              <Sparkles className={`w-3.5 h-3.5 text-emerald-400 ${isPastThreshold ? 'animate-spin' : ''}`} />
+              <span>{isPastThreshold ? 'Release for Kinova AI' : 'Pull down for Kinova AI'}</span>
             </div>
           </motion.div>
 

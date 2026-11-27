@@ -1014,19 +1014,19 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
   };
 
   return (
-    <div className="fixed inset-0 z-30 flex flex-col justify-between text-white overflow-hidden bg-gradient-to-b from-[#12132d] via-[#0c0d1e] to-[#070814]">
-      {/* Ambient glowing radial gradients */}
-      <div 
-        className="pointer-events-none absolute inset-x-0 top-0 h-[400px] bg-[radial-gradient(ellipse_80%_60%_at_50%_-10%,rgba(99,102,241,0.3),transparent_70%)]" 
-        aria-hidden="true" 
+    <div className="fixed inset-0 z-30 flex flex-col justify-between text-[#F5F4EF] overflow-hidden bg-gradient-to-b from-[#0C1210] via-[#090D0C] to-[#060807]">
+      {/* Atelier Emerald & Warm Gold Ambient Glow */}
+      <div
+        className="pointer-events-none absolute inset-x-0 top-0 h-[400px] bg-[radial-gradient(ellipse_80%_60%_at_50%_-10%,rgba(45,212,160,0.22),transparent_70%)]"
+        aria-hidden="true"
       />
-      <div 
-        className="pointer-events-none absolute inset-x-0 bottom-0 h-[300px] bg-[radial-gradient(circle_at_50%_100%,rgba(139,92,246,0.18),transparent_60%)]" 
-        aria-hidden="true" 
+      <div
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-[300px] bg-[radial-gradient(circle_at_50%_100%,rgba(229,184,92,0.12),transparent_60%)]"
+        aria-hidden="true"
       />
 
       {/* Top Header */}
-      <header className="relative z-10 shrink-0 h-14 sm:h-16 flex items-center justify-between px-4 sm:px-6 pt-safe border-b border-white/10 bg-[#12132d]/80 backdrop-blur-xl">
+      <header className="relative z-10 shrink-0 h-14 sm:h-16 flex items-center justify-between px-4 sm:px-6 pt-safe border-b border-white/10 bg-[#0C1210]/85 backdrop-blur-xl">
         {onClose ? (
           <button
             type="button"
@@ -1047,11 +1047,11 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
         )}
 
         {/* Center Pill Badge */}
-        <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/10 border border-white/15 backdrop-blur-md shadow-inner">
-          <Sparkles size={14} className="text-indigo-400" />
+        <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.06] border border-white/12 backdrop-blur-md shadow-inner">
+          <Sparkles size={14} className="text-emerald-400" />
           <span className="font-semibold text-sm tracking-tight text-white">Kinova AI</span>
-          <span className="px-1.5 py-0.5 rounded-md bg-indigo-500/30 text-indigo-300 font-mono text-[10px] uppercase font-bold tracking-wider">
-            intelligence
+          <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 font-mono text-[10px] uppercase font-bold tracking-wider">
+            Atelier
           </span>
         </div>
 
@@ -1076,8 +1076,8 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
         {query.trim().length === 0 ? (
           /* Welcome Screen */
           <div className="flex-1 flex flex-col items-center justify-center text-center max-w-md mx-auto py-8">
-            <div className="w-16 h-16 rounded-3xl bg-indigo-500/20 border border-indigo-400/30 backdrop-blur-xl flex items-center justify-center text-indigo-300 shadow-[0_0_32px_rgba(99,102,241,0.35)] mb-5 animate-pulse">
-              <Sparkles size={32} strokeWidth={1.8} />
+            <div className="w-16 h-16 rounded-2xl bg-[#11221D] border border-emerald-400/30 backdrop-blur-xl flex items-center justify-center text-emerald-300 shadow-[0_0_32px_rgba(45,212,160,0.22)] mb-5">
+              <Sparkles size={28} strokeWidth={1.8} />
             </div>
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white mb-2">
               有什么可以帮你的？
@@ -1111,17 +1111,17 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
           /* Inquiry Results Area */
           <div className="w-full max-w-2xl mx-auto flex flex-col gap-4 py-2">
             {/* User Query Bubble */}
-            <div className="self-end max-w-[85%] rounded-2xl rounded-br-sm bg-gradient-to-r from-indigo-600 to-violet-600 text-white px-4 py-2.5 text-sm font-medium shadow-lg backdrop-blur-md border border-white/15">
+            <div className="self-end max-w-[85%] rounded-2xl rounded-br-sm bg-gradient-to-r from-[#0D6E52] to-[#118C68] text-white px-4 py-2.5 text-sm font-medium shadow-lg border border-emerald-400/25">
               {query}
             </div>
 
             {/* 1. Spending Analytics Result Card */}
             {activeIntent === 'analytics' && analyticsResult && (
-              <div className="rounded-3xl bg-white/[0.07] border border-white/15 backdrop-blur-2xl p-5 sm:p-6 shadow-2xl flex flex-col gap-5">
+              <div className="rounded-3xl bg-white/[0.05] border border-white/12 backdrop-blur-2xl p-5 sm:p-6 shadow-2xl flex flex-col gap-5">
                 {/* Header */}
                 <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
                   <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl bg-indigo-500/25 border border-indigo-400/30 flex items-center justify-center text-indigo-300">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-300">
                       <PieChart size={18} />
                     </div>
                     <div>
@@ -1208,8 +1208,8 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                 )}
 
                 {/* Natural language summary */}
-                <div className="p-3.5 rounded-2xl bg-indigo-500/15 border border-indigo-400/25 text-xs sm:text-sm text-indigo-100 leading-relaxed">
-                  💬 {analyticsResult.conversationalSummary}
+                <div className="p-3.5 rounded-2xl bg-emerald-500/12 border border-emerald-400/25 text-xs sm:text-sm text-emerald-100 leading-relaxed">
+                  {analyticsResult.conversationalSummary}
                 </div>
 
                 {/* Matching Transactions Preview */}
@@ -1221,7 +1221,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                         <button
                           type="button"
                           onClick={() => setShowAllAnalyticsTx(!showAllAnalyticsTx)}
-                          className="text-[11px] text-indigo-300 hover:text-white flex items-center gap-1 cursor-pointer"
+                          className="text-[11px] text-emerald-300 hover:text-white flex items-center gap-1 cursor-pointer"
                         >
                           <span>{showAllAnalyticsTx ? '收起' : '展开全部'}</span>
                           {showAllAnalyticsTx ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
@@ -1253,7 +1253,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                             <div className="text-xs font-bold font-mono text-emerald-400">
                               {formatPrice(tx.currency, tx.amount)}
                             </div>
-                            <div className="text-[10px] text-indigo-300 flex items-center gap-0.5 justify-end mt-0.5">
+                            <div className="text-[10px] text-emerald-300 flex items-center gap-0.5 justify-end mt-0.5">
                               <ReceiptText size={10} />
                               <span>详情</span>
                             </div>
@@ -1272,10 +1272,10 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                       setActiveIntent('copilot');
                       void fetchCopilot(query);
                     }}
-                    className="px-3.5 py-2 rounded-xl bg-indigo-500/25 hover:bg-indigo-500/40 border border-indigo-400/35 text-xs font-semibold text-indigo-100 inline-flex items-center gap-1.5 cursor-pointer transition-all"
+                    className="px-3.5 py-2 rounded-xl bg-emerald-500/25 hover:bg-emerald-500/40 border border-emerald-400/35 text-xs font-semibold text-emerald-100 inline-flex items-center gap-1.5 cursor-pointer transition-all"
                   >
                     <Sparkles size={13} />
-                    <span>✨ 让 Kinova AI 给建议</span>
+                    <span>让 Kinova AI 给建议</span>
                   </button>
                 </div>
               </div>
@@ -1283,11 +1283,11 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
 
             {/* 2. Stock / Investment Advisory Card */}
             {activeIntent === 'stock' && (
-              <div className="rounded-3xl bg-white/[0.07] border border-white/15 backdrop-blur-2xl p-5 sm:p-6 shadow-2xl flex flex-col gap-4">
+              <div className="rounded-3xl bg-white/[0.05] border border-white/12 backdrop-blur-2xl p-5 sm:p-6 shadow-2xl flex flex-col gap-4">
                 {/* Header */}
                 <div className="flex items-center justify-between border-b border-white/10 pb-3">
                   <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl bg-violet-500/25 border border-violet-400/30 flex items-center justify-center text-violet-300">
+                    <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-400/30 flex items-center justify-center text-amber-300">
                       <TrendingUp size={18} />
                     </div>
                     <div>
@@ -1296,7 +1296,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                     </div>
                   </div>
 
-                  <span className="px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-300 border border-violet-400/30 text-[10px] font-bold uppercase tracking-wider">
+                  <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/30 text-[10px] font-bold uppercase tracking-wider">
                     Google Grounded
                   </span>
                 </div>
@@ -1333,7 +1333,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                 {/* Loading State */}
                 {stockInsight.status === 'loading' && (
                   <div className="flex flex-col items-center justify-center py-10 gap-3">
-                    <LoaderCircle size={28} className="animate-spin text-indigo-400" />
+                    <LoaderCircle size={28} className="animate-spin text-emerald-400" />
                     <span className="text-xs text-white/70 font-medium animate-pulse">
                       正在综合实时行情与大模型，为您整理极简通俗建议...
                     </span>
@@ -1371,7 +1371,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                           return (
                             <div
                               key={pIdx}
-                              className="rounded-2xl bg-indigo-500/15 border border-indigo-400/30 p-3.5 text-indigo-100 font-medium text-xs sm:text-sm leading-relaxed shadow-sm"
+                              className="rounded-2xl bg-amber-500/12 border border-amber-400/30 p-3.5 text-amber-100 font-medium text-xs sm:text-sm leading-relaxed shadow-sm"
                             >
                               {trimmed.split('\n').map((line, lIdx) => (
                                 <p key={lIdx} className={lIdx > 0 ? 'mt-1' : ''}>
@@ -1419,7 +1419,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                             href={src.uri}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 text-indigo-200 text-[11px] font-medium transition-colors"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 text-emerald-200 text-[11px] font-medium transition-colors"
                           >
                             <span className="truncate max-w-[150px]">{src.title}</span>
                             <ExternalLink size={11} className="shrink-0" />
@@ -1448,21 +1448,21 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
 
             {/* Kinova Assistant conversational reasoning */}
             {activeIntent === 'copilot' && (
-              <div className="rounded-3xl bg-white/[0.07] border border-white/15 backdrop-blur-2xl p-5 sm:p-6 shadow-2xl flex flex-col gap-5">
+              <div className="rounded-3xl bg-white/[0.05] border border-white/12 backdrop-blur-2xl p-5 sm:p-6 shadow-2xl flex flex-col gap-5">
                 {/* Assistant Header */}
                 <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
                   <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-violet-500 border border-indigo-400/30 flex items-center justify-center text-white shadow-md">
+                    <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-[#0D6E52] to-[#2DD4A0] border border-emerald-400/30 flex items-center justify-center text-white shadow-md">
                       <Sparkles size={18} />
                     </div>
                     <div>
-                      <div className="text-xs font-semibold text-indigo-300">Kinova Assistant · 个性化财务助手</div>
+                      <div className="text-xs font-semibold text-emerald-300">Kinova Assistant · 个性化财务助手</div>
                       <div className="text-sm font-bold text-white tracking-tight">
                         {copilotState.headline || '深度财务与小票推理'}
                       </div>
                     </div>
                   </div>
-                  <span className="px-2.5 py-1 rounded-full bg-indigo-500/20 text-indigo-200 border border-indigo-400/30 text-[10px] font-bold uppercase tracking-wider">
+                  <span className="px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-200 border border-emerald-400/30 text-[10px] font-bold uppercase tracking-wider">
                     Kinova AI
                   </span>
                 </div>
@@ -1470,7 +1470,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                 {/* Loading */}
                 {copilotState.status === 'loading' && (
                   <div className="flex flex-col items-center justify-center py-10 gap-3">
-                    <LoaderCircle size={28} className="animate-spin text-indigo-400" />
+                    <LoaderCircle size={28} className="animate-spin text-emerald-400" />
                     <span className="text-xs text-white/70 font-medium animate-pulse">
                       Kinova 正在结合你的账本和个人设置思考...
                     </span>
@@ -1503,9 +1503,9 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                     {/* Multi-turn context trail (previous turns if continuing conversation) */}
                     {conversationHistory.length > 2 && (
                       <div className="space-y-1.5 max-h-36 overflow-y-auto px-3 py-2 rounded-2xl bg-black/25 border border-white/10 text-[11px] text-white/70">
-                        <div className="text-[10px] uppercase tracking-wider text-indigo-300 font-semibold">Earlier context</div>
+                        <div className="text-[10px] uppercase tracking-wider text-emerald-300 font-semibold">Earlier context</div>
                         {conversationHistory.slice(0, -2).map((turn, idx) => (
-                          <div key={idx} className={turn.role === 'user' ? 'text-indigo-200 font-medium' : 'text-white/65'}>
+                          <div key={idx} className={turn.role === 'user' ? 'text-emerald-200 font-medium' : 'text-white/65'}>
                             {turn.role === 'user' ? `You: ${turn.text}` : `Kinova: ${turn.text}`}
                           </div>
                         ))}
@@ -1542,7 +1542,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                             key={opt}
                             type="button"
                             onClick={() => submitInquiry(opt)}
-                            className="px-3 py-1.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/35 border border-indigo-400/35 text-indigo-100 text-xs font-semibold cursor-pointer transition-all"
+                            className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/35 border border-emerald-400/35 text-emerald-100 text-xs font-semibold cursor-pointer transition-all"
                           >
                             {opt}
                           </button>
@@ -1552,7 +1552,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
 
                     {/* Interactive Proposed Action Button */}
                     {copilotState.proposedAction && (
-                      <div className="flex flex-wrap items-center justify-between gap-2.5 p-3.5 rounded-2xl bg-indigo-500/15 border border-indigo-400/30 text-indigo-100 text-xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2.5 p-3.5 rounded-2xl bg-amber-500/12 border border-amber-400/30 text-amber-100 text-xs">
                         <div className="flex items-center gap-2 min-w-0 flex-1">
                           <span className="text-base shrink-0">💡</span>
                           <span className="leading-snug">{copilotState.proposedAction.label}</span>
@@ -1564,7 +1564,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                           className={`shrink-0 px-3.5 py-2 rounded-xl font-semibold text-xs inline-flex items-center gap-1.5 transition-all cursor-pointer ${
                             copilotState.proposedActionApplied
                               ? 'bg-emerald-500/25 border border-emerald-400/40 text-emerald-200'
-                              : 'bg-indigo-500 hover:bg-indigo-400 text-white shadow-md'
+                              : 'bg-[#0D6E52] hover:bg-[#118C68] text-white shadow-md'
                           } disabled:opacity-60`}
                         >
                           {applyingAction ? (
@@ -1632,7 +1632,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                           className="w-full flex items-center justify-between p-3.5 text-xs font-semibold text-white/90 hover:bg-white/[0.06] transition-colors cursor-pointer"
                         >
                           <div className="flex items-center gap-2">
-                            <ReceiptText size={14} className="text-indigo-400" />
+                            <ReceiptText size={14} className="text-emerald-400" />
                             <span>查看相关账目记录 ({copilotMatchingTransactions.length} 笔)</span>
                           </div>
                           <ChevronDown size={14} className={`text-white/60 transition-transform ${showCopilotMatchingTxs ? 'rotate-180' : ''}`} />
@@ -1667,8 +1667,8 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
 
                     {/* Action Tip (only if not already shown as interactive proposedAction) */}
                     {copilotState.actionTip && !copilotState.proposedAction && (
-                      <div className="p-3.5 rounded-2xl bg-indigo-500/15 border border-indigo-400/30 text-indigo-100 text-xs flex items-center gap-2.5">
-                        <span className="text-base">💡</span>
+                      <div className="p-3.5 rounded-2xl bg-amber-500/12 border border-amber-400/25 text-amber-100 text-xs flex items-center gap-2.5">
+                        <Sparkles size={14} className="text-amber-300 shrink-0" />
                         <span>{copilotState.actionTip}</span>
                       </div>
                     )}
@@ -1695,7 +1695,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
             {activeIntent === 'price' && (
               <div className="flex flex-col gap-3">
                 <div className="flex items-center gap-2 text-xs font-semibold text-white/80 pt-1">
-                  <div className="w-6 h-6 rounded-lg bg-indigo-500/30 border border-indigo-400/40 flex items-center justify-center text-indigo-300">
+                  <div className="w-6 h-6 rounded-lg bg-emerald-500/25 border border-emerald-400/35 flex items-center justify-center text-emerald-300">
                     <Sparkles size={14} />
                   </div>
                   <span>小票与支出记录查询结果</span>
@@ -1705,7 +1705,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                     </span>
                   )}
                   {historyQuery.isFetching && (
-                    <LoaderCircle size={14} className="animate-spin text-indigo-400 ml-auto" />
+                    <LoaderCircle size={14} className="animate-spin text-emerald-400 ml-auto" />
                   )}
                 </div>
 
@@ -1792,14 +1792,14 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                         type="button"
                         onClick={() => void searchMarketPriceOnline(displayItemName)}
                         disabled={isGeneralLoading}
-                        className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 active:scale-95 text-white font-semibold text-xs flex items-center gap-2 shadow-lg cursor-pointer transition-all disabled:opacity-50"
+                        className="px-4 py-2.5 rounded-xl bg-[#0D6E52] hover:bg-[#118C68] active:scale-95 text-white font-semibold text-xs flex items-center gap-2 shadow-lg cursor-pointer transition-all disabled:opacity-50"
                       >
                         {isGeneralLoading ? (
                           <LoaderCircle size={15} className="animate-spin" />
                         ) : (
                           <Globe2 size={15} />
                         )}
-                        <span>🌐 全网参考价格</span>
+                        <span>全网参考价格</span>
                       </button>
 
                       <button
@@ -1808,10 +1808,10 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                           setActiveIntent('copilot');
                           void fetchCopilot(query);
                         }}
-                        className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 active:scale-95 text-indigo-300 font-semibold text-xs flex items-center gap-2 border border-white/15 cursor-pointer transition-all"
+                        className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 active:scale-95 text-emerald-300 font-semibold text-xs flex items-center gap-2 border border-white/15 cursor-pointer transition-all"
                       >
                         <Sparkles size={15} />
-                        <span>✨ Ask Kinova Assistant</span>
+                        <span>Ask Kinova Assistant</span>
                       </button>
                     </div>
                   </div>
@@ -1837,7 +1837,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                             href={source.uri}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 text-indigo-200 text-[11px] font-medium transition-colors"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 text-emerald-200 text-[11px] font-medium transition-colors"
                           >
                             <span className="truncate max-w-[150px]">{source.title}</span>
                             <ExternalLink size={11} className="shrink-0" />
@@ -1869,7 +1869,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0 flex-1">
                           {item.brand && (
-                            <span className="inline-block px-2 py-0.5 rounded-md bg-indigo-500/25 border border-indigo-400/30 text-indigo-200 text-[11px] font-semibold mb-1">
+                            <span className="inline-block px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-400/30 text-emerald-200 text-[11px] font-semibold mb-1">
                               {item.brand}
                             </span>
                           )}
@@ -1919,11 +1919,11 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                       {/* Metadata Row */}
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-white/65 pt-2 border-t border-white/10">
                         <span className="flex items-center gap-1.5">
-                          <Store size={14} className="text-indigo-400 shrink-0" />
+                          <Store size={14} className="text-emerald-400 shrink-0" />
                           <span className="truncate max-w-[150px]">{merchant}</span>
                         </span>
                         <span className="flex items-center gap-1.5">
-                          <CalendarDays size={14} className="text-indigo-400 shrink-0" />
+                          <CalendarDays size={14} className="text-emerald-400 shrink-0" />
                           <time dateTime={transaction.date}>{transaction.date}</time>
                         </span>
                       </div>
@@ -1943,10 +1943,10 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                           type="button"
                           onClick={() => void compareOnline(item)}
                           disabled={Boolean(loadingKey) || online?.status === 'loading' || online?.status === 'ready'}
-                          className="px-3 py-1.5 rounded-xl bg-indigo-500/30 hover:bg-indigo-500/50 active:scale-95 text-indigo-200 hover:text-white text-xs font-semibold border border-indigo-400/30 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-60 disabled:cursor-wait"
+                          className="px-3 py-1.5 rounded-xl bg-emerald-500/25 hover:bg-emerald-500/40 active:scale-95 text-emerald-200 hover:text-white text-xs font-semibold border border-emerald-400/30 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-60 disabled:cursor-wait"
                         >
                           {online?.status === 'loading' ? (
-                            <LoaderCircle size={13} className="animate-spin text-indigo-300" />
+                            <LoaderCircle size={13} className="animate-spin text-emerald-300" />
                           ) : (
                             <Globe2 size={13} />
                           )}
@@ -1972,7 +1972,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                                   href={source.uri}
                                   target="_blank"
                                   rel="noreferrer"
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 text-indigo-200 text-[11px] font-medium transition-colors"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 text-emerald-200 text-[11px] font-medium transition-colors"
                                 >
                                   <span className="truncate max-w-[140px]">{source.title}</span>
                                   <ExternalLink size={11} className="shrink-0" />
@@ -1996,14 +1996,14 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
         )}
       </main>
 
-      {/* Bottom Floating Composer & Ryt-Bank Swipe Up Dock */}
-      <footer className="relative z-20 shrink-0 flex flex-col border-t border-white/10 bg-[#0c0d1e]/95 backdrop-blur-2xl">
+      {/* Bottom Floating Composer & Swipe Up Dock */}
+      <footer className="relative z-20 shrink-0 flex flex-col border-t border-white/10 bg-[#090D0C]/95 backdrop-blur-2xl">
         <div className="w-full max-w-2xl mx-auto px-4 sm:px-6 pt-3 pb-2">
           <form
             onSubmit={handleAskSubmit}
-            className="flex items-center gap-2.5 px-4 py-2 rounded-2xl bg-white/[0.09] hover:bg-white/[0.12] focus-within:bg-white/[0.14] border border-white/20 focus-within:border-indigo-400/60 backdrop-blur-2xl shadow-xl transition-all"
+            className="flex items-center gap-2.5 px-4 py-2 rounded-2xl bg-white/[0.08] hover:bg-white/[0.11] focus-within:bg-white/[0.13] border border-white/15 focus-within:border-emerald-400/50 backdrop-blur-2xl shadow-xl transition-all"
           >
-            <Sparkles size={18} className="text-indigo-400 shrink-0" />
+            <Sparkles size={18} className="text-emerald-400 shrink-0" />
             <input
               ref={inputRef}
               type="text"
@@ -2029,7 +2029,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
             <button
               type="submit"
               disabled={!draftQuery.trim()}
-              className="w-9 h-9 rounded-xl bg-indigo-500 hover:bg-indigo-400 active:scale-95 text-white flex items-center justify-center transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-md shrink-0 cursor-pointer"
+              className="w-9 h-9 rounded-xl bg-[#0D6E52] hover:bg-[#118C68] active:scale-95 text-white flex items-center justify-center transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-md shrink-0 cursor-pointer"
               aria-label="Send query"
             >
               <ArrowUp size={18} />
@@ -2037,7 +2037,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
           </form>
         </div>
 
-        {/* Bottom Swipe-Up Dock (Inspired by Ryt Bank) */}
+        {/* Bottom Swipe-Up Dock */}
         {onClose && (
           <div
             onClick={onClose}
@@ -2054,7 +2054,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
             }}
             className="w-full py-3 pb-safe flex flex-col items-center justify-center gap-1 cursor-pointer select-none bg-black/40 hover:bg-black/60 active:bg-black/80 border-t border-white/5 transition-all group"
           >
-            <ChevronUp size={18} className="text-indigo-400 group-hover:-translate-y-1 transition-transform animate-bounce" />
+            <ChevronUp size={18} className="text-emerald-400 group-hover:-translate-y-1 transition-transform animate-bounce" />
             <span className="text-[11px] font-semibold text-white/80 tracking-wider">
               向上轻划或点击返回主页 (Swipe up to return)
             </span>

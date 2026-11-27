@@ -1041,6 +1041,7 @@ async function executeApiRequest<T>(options: ApiRequestOptions): Promise<T> {
           await new Promise((r) => setTimeout(r, 1200));
           return await runDirectRequest(targetEndpointUrl, activeKey);
         }
+        if (!fresh) { await new Promise((r) => setTimeout(r, 650)); return await runDirectRequest(targetEndpointUrl, activeKey); }
         throw firstErr;
       }
     };

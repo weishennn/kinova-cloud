@@ -400,16 +400,16 @@ function TransactionDetailContent({
                 isIncome
                   ? 'text-emerald-800 dark:text-emerald-400'
                   : isInvestment
-                  ? 'text-indigo-800 dark:text-indigo-400'
+                  ? 'text-emerald-800 dark:text-emerald-400'
                   : isInstallment
-                  ? 'text-violet-800 dark:text-purple-400'
+                  ? 'text-amber-800 dark:text-amber-400'
                   : 'text-rose-800 dark:text-rose-400'
               }`}
             >
               {isIncome ? '+' : '-'}{transaction.currency === 'USD' ? '$' : transaction.currency === 'CNY' ? '¥' : transaction.currency === 'SGD' ? 'S$' : (transaction.currency || 'MYR') + ' '}{transaction.amount.toFixed(2)}
             </div>
             {transaction.currency && transaction.currency !== 'MYR' && (
-              <p className="text-xs text-indigo-800 dark:text-indigo-400 font-mono mt-1 font-semibold">
+              <p className="text-xs text-emerald-800 dark:text-emerald-400 font-mono mt-1 font-semibold">
                 {transaction.notes && transaction.notes.includes('Cost: RM')
                   ? transaction.notes.match(/Cost:\s*RM\s*[\d.]+/)?.[0]
                   : `Original Currency: ${transaction.currency}`}
@@ -437,14 +437,14 @@ function TransactionDetailContent({
 
           {/* Installment Badge Banner */}
           {isInstallment && (
-            <div className="p-3 rounded-2xl bg-purple-500/10 border border-purple-500/25 flex items-center justify-between">
+            <div className="p-3 rounded-2xl bg-amber-600 -amber-/10 border border-amber-500/25 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <CreditCard className="h-4 w-4 text-violet-800 dark:text-purple-400" />
-                <span className="text-xs font-bold text-violet-800 dark:text-purple-300 uppercase tracking-wider">
+                <CreditCard className="h-4 w-4 text-amber-800 dark:text-amber-400" />
+                <span className="text-xs font-bold text-amber-800 dark:text-amber-300 uppercase tracking-wider">
                   {installmentMatch ? `Installment ${installmentMatch[1]} of ${installmentMatch[2]}` : 'Installment Plan'}
                 </span>
               </div>
-              <span className="text-[11px] font-semibold text-violet-800 dark:text-purple-400 bg-purple-500/15 px-2 py-0.5 rounded-full border border-purple-500/30">
+              <span className="text-[11px] font-semibold text-amber-800 dark:text-amber-400 bg-amber-600 -amber-/15 px-2 py-0.5 rounded-full border border-amber-500/30">
                 Monthly Commitment
               </span>
             </div>
@@ -497,7 +497,7 @@ function TransactionDetailContent({
                 <select
                   value={currentTrip}
                   onChange={(e) => handleTripChange(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-xs text-slate-950 dark:text-white outline-none focus:border-indigo-500 cursor-pointer"
+                  className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-xs text-slate-950 dark:text-white outline-none focus:border-emerald-500 cursor-pointer"
                 >
                   <option value="">No trip (Everyday expense)</option>
                   {trips.map((trip) => (
@@ -527,7 +527,7 @@ function TransactionDetailContent({
                 <select
                   value={currentTaxCatId}
                   onChange={(e) => handleTaxCategoryChange(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-xs text-slate-950 dark:text-white outline-none focus:border-indigo-500 cursor-pointer"
+                  className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-xs text-slate-950 dark:text-white outline-none focus:border-emerald-500 cursor-pointer"
                 >
                   <option value="none">Not Tax Deductible (Standard Expense)</option>
                   {LHDN_TAX_CATEGORIES.map((c) => (
@@ -564,7 +564,7 @@ function TransactionDetailContent({
                         ? 'bg-rose-500'
                         : categoryBudgetStatus.spentPercentBefore > 80
                         ? 'bg-amber-400'
-                        : 'bg-indigo-500'
+                        : 'bg-[#0D6E52] dark:bg-emerald-500'
                     }`}
                     style={{ width: `${Math.min(100, categoryBudgetStatus.spentPercentBefore)}%` }}
                   />
@@ -608,7 +608,7 @@ function TransactionDetailContent({
                     href={transaction.receiptUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex-1 flex items-center justify-between p-2.5 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 text-indigo-800 dark:text-indigo-300 transition-colors"
+                    className="flex-1 flex items-center justify-between p-2.5 rounded-xl -emerald-/10 -emerald-/20 border border-emerald-500/20 text-emerald-800 dark:text-emerald-300 transition-colors"
                   >
                     <div className="flex items-center gap-2">
                       <Receipt className="h-4 w-4" />
@@ -644,7 +644,7 @@ function TransactionDetailContent({
               <a
                 href="/trips"
                 onClick={() => onClose()}
-                className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-600 to-indigo-600 hover:from-emerald-600 hover:to-indigo-700 text-white font-bold text-sm shadow-xl shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-600 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white font-bold text-sm shadow-xl shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Plane className="h-4 w-4" />
                 <span>Manage Shared Trip in Trip Tracker</span>
@@ -656,7 +656,7 @@ function TransactionDetailContent({
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={handleOpenPlanEdit}
-                className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 hover:from-purple-500 hover:to-indigo-500 text-white dark:text-white font-bold text-sm shadow-xl shadow-purple-500/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-amber-600 via-emerald-600 to-amber-700 hover:from-amber-500 hover:to-emerald-500 text-white dark:text-white font-bold text-sm shadow-xl shadow-amber-500/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 <CreditCard className="h-4 w-4" />
                 <span>Edit Installment Plan (Reschedule/Shift)</span>
@@ -702,7 +702,7 @@ function TransactionDetailContent({
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={handleEdit}
-                className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-indigo-500 via-indigo-600 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white dark:text-white font-bold text-sm shadow-xl shadow-indigo-500/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full py-3 px-4 rounded-2xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white dark:text-white font-bold text-sm shadow-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Edit2 className="h-4 w-4" />
                 <span>Edit Transaction</span>

@@ -265,7 +265,7 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
       <div className="rounded-3xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 p-5 backdrop-blur-xl space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-2xl bg-indigo-500/15 border border-indigo-500/20 flex items-center justify-center text-indigo-800 dark:text-indigo-400 shrink-0">
+            <div className="h-10 w-10 rounded-2xl -emerald-/15 border border-emerald-500/20 flex items-center justify-center text-emerald-800 dark:text-emerald-400 shrink-0">
               <CalendarIcon className="h-5 w-5" />
             </div>
             <div>
@@ -281,7 +281,7 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
                     const [y, m] = e.target.value.split('-').map(Number);
                     changeMonth(y, m - 1);
                   }}
-                  className="rounded-xl border border-slate-300 dark:border-zinc-700/80 bg-slate-100 dark:bg-zinc-800/90 px-2.5 py-1 text-xs font-bold text-indigo-800 dark:text-indigo-300 hover:text-slate-950 dark:hover:text-white outline-none focus:border-indigo-500 cursor-pointer shadow-sm hover:bg-slate-200 dark:hover:bg-zinc-700 transition-all"
+                  className="rounded-xl border border-slate-300 dark:border-zinc-700/80 bg-slate-100 dark:bg-zinc-800/90 px-2.5 py-1 text-xs font-bold text-emerald-800 dark:text-emerald-300 hover:text-slate-950 dark:hover:text-white outline-none focus:border-emerald-500 cursor-pointer shadow-sm hover:bg-slate-200 dark:hover:bg-zinc-700 transition-all"
                 >
                   {availableMonths.map((mKey) => {
                     const [y, m] = mKey.split('-').map(Number);
@@ -346,9 +346,9 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
             </span>
           </div>
 
-          <div className="p-3 rounded-2xl bg-indigo-950/20 border border-indigo-500/20 flex flex-wrap items-center justify-between gap-2">
+          <div className="p-3 rounded-2xl bg-emerald-950/20 border border-emerald-500/20 flex flex-wrap items-center justify-between gap-2">
             <div>
-              <span className="text-[11px] font-semibold text-indigo-800 dark:text-indigo-300 uppercase tracking-wider block">
+              <span className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider block">
                 Claim Receipts
               </span>
               <span className="text-xl font-black text-slate-950 dark:text-white mt-1 block">
@@ -368,7 +368,7 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
                 className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-100 dark:bg-zinc-800/90 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 text-xs font-semibold transition-all cursor-pointer"
                 title="Download receipts for a custom date range"
               >
-                <CalendarIcon className="h-3.5 w-3.5 text-indigo-800 dark:text-indigo-400" />
+                <CalendarIcon className="h-3.5 w-3.5 text-emerald-800 dark:text-emerald-400" />
                 <span>Date Range</span>
               </button>
 
@@ -376,7 +376,7 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
                 <button
                   type="button"
                   onClick={handleDownloadAllMonthClaims}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white dark:text-white text-xs font-semibold shadow-md transition-all cursor-pointer"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white dark:text-white text-xs font-semibold shadow-md transition-all cursor-pointer"
                   title="Download all claim receipts for this month"
                 >
                   <Download className="h-3.5 w-3.5" />
@@ -426,17 +426,17 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
                   onClick={() => setSelectedDateStr(dateStr)}
                   className={`min-h-[64px] sm:min-h-[72px] p-1.5 sm:p-2 rounded-2xl border text-left flex flex-col justify-between transition-all cursor-pointer select-none ${
                     isSelected
-                      ? 'border-indigo-500 bg-indigo-500/20 shadow-lg shadow-indigo-500/15 scale-[1.02] z-10'
+                      ? 'border-emerald-500 -emerald-/20 shadow-lg scale-[1.02] z-10'
                       : isToday
                       ? 'border-slate-400 dark:border-zinc-600 bg-white/90 dark:bg-zinc-900/90 shadow-sm'
                       : hasReceipt
-                      ? 'border-indigo-500/30 bg-white/90 dark:bg-zinc-950/60 hover:bg-white/90 dark:hover:bg-zinc-900/70 hover:border-indigo-500/50'
+                      ? 'border-emerald-500/30 bg-white/90 dark:bg-zinc-950/60 hover:bg-white/90 dark:hover:bg-zinc-900/70 hover:border-emerald-500/50'
                       : 'border-slate-200 dark:border-zinc-800/60 bg-white/90 dark:bg-zinc-950/40 hover:bg-white/90 dark:hover:bg-zinc-900/60 hover:border-slate-300 dark:hover:border-zinc-700'
                   }`}
                 >
                   <div className="flex items-start justify-between w-full leading-none">
                     <span className={`text-xs font-bold ${
-                      isSelected ? 'text-indigo-800 dark:text-indigo-300' : isToday ? 'text-slate-950 dark:text-white underline decoration-indigo-400 font-extrabold' : 'text-slate-600 dark:text-zinc-400'
+                      isSelected ? 'text-emerald-800 dark:text-emerald-300' : isToday ? 'text-slate-950 dark:text-white underline decoration-emerald-400 font-extrabold' : 'text-slate-600 dark:text-zinc-400'
                     }`}>
                       {dayNum}
                     </span>
@@ -449,7 +449,7 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
                       {hasReceipt && (
                         <span
                           title={`${dayData.receiptCount} receipt${dayData.receiptCount > 1 ? 's' : ''} attached`}
-                          className="inline-flex items-center justify-center h-4 min-w-[16px] px-1 rounded-full bg-indigo-500/25 text-indigo-800 dark:text-indigo-300 border border-indigo-500/40 text-[9px] font-bold font-mono shadow-[0_0_8px_rgba(99,102,241,0.25)]"
+                          className="inline-flex items-center justify-center h-4 min-w-[16px] px-1 rounded-full -emerald-/25 text-emerald-800 dark:text-emerald-300 border border-emerald-500/40 text-[9px] font-bold font-mono shadow-[0_0_8px_rgba(99,102,241,0.25)]"
                         >
                           <Receipt className="h-2.5 w-2.5" />
                           {dayData.receiptCount > 1 && <span className="ml-0.5">{dayData.receiptCount}</span>}
@@ -482,7 +482,7 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
           <div className="space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-zinc-800/60">
               <div>
-                <span className="text-xs font-bold text-indigo-800 dark:text-indigo-400 uppercase tracking-wider block">
+                <span className="text-xs font-bold text-emerald-800 dark:text-emerald-400 uppercase tracking-wider block">
                   Selected Date
                 </span>
                 <h3 className="text-base md:text-lg font-bold text-slate-950 dark:text-white mt-0.5">
@@ -506,7 +506,7 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
                   <button
                     type="button"
                     onClick={() => onOpenRangeDownload?.(selectedDateStr, selectedDateStr)}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-800 dark:text-indigo-300 border border-indigo-500/30 text-[11px] font-semibold transition-colors cursor-pointer"
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg -emerald-/20 -emerald-/30 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold transition-colors cursor-pointer"
                     title="Download receipts for this day"
                   >
                     <Download className="h-3 w-3" />
@@ -528,7 +528,7 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
                   <button
                     type="button"
                     onClick={handleAddOnSelectedDate}
-                    className="mt-1 px-3 py-1.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-800 dark:text-indigo-300 border border-indigo-500/30 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                    className="mt-1 px-3 py-1.5 rounded-xl -emerald-/20 -emerald-/30 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
                     <Plus className="h-3.5 w-3.5" />
                     <span>Record on {selectedDateStr}</span>
@@ -547,7 +547,7 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
                       onClick={() => setSelectedTx(t)}
                       className={`p-3.5 sm:p-4 rounded-2xl border transition-all cursor-pointer group shadow-sm hover:shadow-md ${
                         hasReceipt
-                          ? 'border-indigo-500/35 bg-gradient-to-br from-indigo-950/20 via-slate-100 dark:via-zinc-900/70 to-white dark:to-zinc-950/90 hover:border-indigo-500/50'
+                          ? 'border-emerald-500/35 bg-emerald-500/[0.04] hover:border-emerald-500/50'
                           : 'border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-950/60 hover:bg-white/90 dark:hover:bg-zinc-900/60 hover:border-slate-300 dark:hover:border-zinc-700'
                       }`}
                     >
@@ -563,12 +563,12 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5">
-                              <p className="text-xs sm:text-sm font-bold text-slate-950 dark:text-white truncate group-hover:text-indigo-800 dark:group-hover:text-indigo-300 transition-colors">
+                              <p className="text-xs sm:text-sm font-bold text-slate-950 dark:text-white truncate group-hover:text-emerald-800 dark:group-hover:text-emerald-300 transition-colors">
                                 {t.description || t.category}
                               </p>
                               {hasReceipt && (
-                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-indigo-500/20 text-indigo-800 dark:text-indigo-300 border border-indigo-500/30 text-[9px] font-bold shrink-0">
-                                  <CheckCircle2 className="h-2.5 w-2.5 text-indigo-800 dark:text-indigo-400" />
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md -emerald-/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30 text-[9px] font-bold shrink-0">
+                                  <CheckCircle2 className="h-2.5 w-2.5 text-emerald-800 dark:text-emerald-400" />
                                   <span>Receipt</span>
                                 </span>
                               )}
@@ -611,13 +611,13 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
                                   (e.target as HTMLElement).style.display = 'none';
                                 }}
                               />
-                              <Receipt className="absolute h-4 w-4 text-indigo-800/80 dark:text-indigo-400/80 pointer-events-none" />
+                              <Receipt className="absolute h-4 w-4 text-emerald-800/80 dark:text-emerald-400/80 pointer-events-none" />
                             </div>
                             <div className="min-w-0 flex-1">
                               <p className="text-xs font-semibold text-slate-900 dark:text-zinc-100 truncate">
                                 Tax Invoice / Receipt
                               </p>
-                              <p className="text-[10px] text-indigo-800/90 dark:text-indigo-300/90 font-mono truncate">
+                              <p className="text-[10px] text-emerald-800/90 dark:text-emerald-300/90 font-mono truncate">
                                 Ready for Claim • Tap to view
                               </p>
                             </div>
@@ -642,7 +642,7 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
                               onClick={() => {
                                 downloadReceiptFile(t.receiptUrl!, claimFileName);
                               }}
-                              className="min-h-[36px] px-2.5 py-1.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-800 dark:text-indigo-300 hover:text-indigo-800 dark:hover:text-indigo-200 text-xs font-semibold flex items-center gap-1.5 border border-indigo-500/30 transition-colors cursor-pointer active:scale-[0.96]"
+                              className="min-h-[36px] px-2.5 py-1.5 rounded-xl -emerald-/20 -emerald-/30 text-emerald-800 dark:text-emerald-300 hover:text-emerald-800 dark:hover:text-emerald-200 text-xs font-semibold flex items-center gap-1.5 border border-emerald-500/30 transition-colors cursor-pointer active:scale-[0.96]"
                               title="Download receipt for claim"
                             >
                               <Download className="h-3.5 w-3.5" />
@@ -691,7 +691,7 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
                 <div className="flex items-center gap-2 shrink-0">
                   <button
                     onClick={() => downloadReceiptFile(previewItem.url, previewItem.filename)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white dark:text-white text-xs font-semibold transition-colors cursor-pointer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white dark:text-white text-xs font-semibold transition-colors cursor-pointer"
                   >
                     <Download className="h-3.5 w-3.5" />
                     <span>Download</span>
@@ -727,7 +727,7 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
                   }}
                 />
                 <div className="hidden flex-col items-center justify-center p-8 text-center space-y-3">
-                  <FileText className="h-12 w-12 text-indigo-800/80 dark:text-indigo-400/80" />
+                  <FileText className="h-12 w-12 text-emerald-800/80 dark:text-emerald-400/80" />
                   <div>
                     <p className="text-sm font-semibold text-slate-950 dark:text-white">Receipt Document</p>
                     <p className="text-xs text-slate-600 dark:text-zinc-400 mt-1">Direct preview not supported for this format.</p>
@@ -736,7 +736,7 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
                     href={previewItem.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-4 py-2 rounded-xl bg-indigo-500 text-white dark:text-white text-xs font-semibold inline-flex items-center gap-1.5"
+                    className="px-4 py-2 rounded-xl bg-[#0D6E52] dark:bg-emerald-500 text-white dark:text-white text-xs font-semibold inline-flex items-center gap-1.5"
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
                     <span>Open in Google Drive</span>

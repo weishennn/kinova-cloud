@@ -582,7 +582,7 @@ export function getPendingMutations(): PendingMutation[] {
       const coalesced = coalescePendingMutations(parsed);
       if (coalesced.length !== parsed.length) {
         try {
-          localStorage.setItem(CACHE_KEYS.PENDING_QUEUE, JSON.stringify(coalesced));
+          setStorageItemWithQuotaSelfHeal(CACHE_KEYS.PENDING_QUEUE, JSON.stringify(coalesced));
         } catch {}
       }
       return coalesced;
@@ -613,12 +613,22 @@ function noteUnreadableQueue(message: string): void {
   } catch {}
 }
 
+function setStorageItemWithQuotaSelfHeal(key: string, serializedValue: string): void {
+  try {
+    localStorage.setItem(key, serializedValue);
+  } catch {
+    clearDisposableReadCaches();
+    pruneExpiredCache();
+    localStorage.setItem(key, serializedValue);
+  }
+}
+
 export function savePendingMutations(list: PendingMutation[]): void {
   if (typeof window === 'undefined') return;
   try {
     assertQueueReadable(CACHE_KEYS.PENDING_QUEUE, 'Offline transaction');
     const coalesced = coalescePendingMutations(list);
-    localStorage.setItem(CACHE_KEYS.PENDING_QUEUE, JSON.stringify(coalesced));
+    setStorageItemWithQuotaSelfHeal(CACHE_KEYS.PENDING_QUEUE, JSON.stringify(coalesced));
     dispatchSyncStatus();
     broadcastCrossTabEvent('MUTATION_QUEUED', { pendingCount: coalesced.length });
   } catch (err) {
@@ -662,7 +672,7 @@ export function enqueuePendingSettingMutation(key: string, value: string): Pendi
     assertQueueReadable(CACHE_KEYS.PENDING_SETTINGS_QUEUE, 'Offline settings');
     const current = getPendingSettingMutations().filter((m) => m.key !== key);
     current.push(item);
-    localStorage.setItem(CACHE_KEYS.PENDING_SETTINGS_QUEUE, JSON.stringify(current));
+    setStorageItemWithQuotaSelfHeal(CACHE_KEYS.PENDING_SETTINGS_QUEUE, JSON.stringify(current));
     dispatchSyncStatus();
     broadcastCrossTabEvent('SETTINGS_UPDATED', { key });
   } catch (err) {
@@ -688,7 +698,7 @@ export function markPendingSettingMutationFailed(key: string, errorMsg: string):
       }
       return m;
     });
-    localStorage.setItem(CACHE_KEYS.PENDING_SETTINGS_QUEUE, JSON.stringify(current));
+    setStorageItemWithQuotaSelfHeal(CACHE_KEYS.PENDING_SETTINGS_QUEUE, JSON.stringify(current));
     dispatchSyncStatus();
   } catch (err) {
     console.error('[CacheManager] Failed to update pending setting status:', err);
@@ -716,7 +726,7 @@ export function removePendingSettingMutations(
       }
       return false;
     });
-    localStorage.setItem(CACHE_KEYS.PENDING_SETTINGS_QUEUE, JSON.stringify(current));
+    setStorageItemWithQuotaSelfHeal(CACHE_KEYS.PENDING_SETTINGS_QUEUE, JSON.stringify(current));
     dispatchSyncStatus();
   } catch (err) {
     console.error('[CacheManager] Failed to remove pending settings:', err);

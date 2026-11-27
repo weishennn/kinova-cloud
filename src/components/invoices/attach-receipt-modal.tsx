@@ -281,7 +281,7 @@ export function AttachReceiptModal({
                 className="h-12 w-12 rounded-xl object-cover border border-slate-200 dark:border-white/10 shrink-0"
               />
             ) : (
-              <div className="h-12 w-12 rounded-xl bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-indigo-800 dark:text-indigo-400 shrink-0">
+              <div className="h-12 w-12 rounded-xl -emerald-/15 border border-emerald-500/30 flex items-center justify-center text-emerald-800 dark:text-emerald-400 shrink-0">
                 <FileText className="h-6 w-6" />
               </div>
             )}
@@ -300,7 +300,7 @@ export function AttachReceiptModal({
               onClick={() => setMode('attach')}
               className={`min-h-[38px] rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                 mode === 'attach'
-                  ? 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white dark:text-white shadow-md'
+                  ? 'bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white dark:text-white shadow-md'
                   : 'text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white'
               }`}
             >
@@ -312,7 +312,7 @@ export function AttachReceiptModal({
               onClick={() => setMode('new')}
               className={`min-h-[38px] rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                 mode === 'new'
-                  ? 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white dark:text-white shadow-md'
+                  ? 'bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white dark:text-white shadow-md'
                   : 'text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white'
               }`}
             >
@@ -328,7 +328,7 @@ export function AttachReceiptModal({
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5">
-                    <CalendarIcon className="h-3.5 w-3.5 text-indigo-800 dark:text-indigo-400" />
+                    <CalendarIcon className="h-3.5 w-3.5 text-emerald-800 dark:text-emerald-400" />
                     <span className="text-[11px] font-semibold text-slate-700 dark:text-zinc-300">Transaction Date:</span>
                   </div>
                   <div className="flex items-center gap-1.5">
@@ -337,7 +337,7 @@ export function AttachReceiptModal({
                       onClick={() => setFilterAllDates(!filterAllDates)}
                       className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border transition-all cursor-pointer ${
                         filterAllDates
-                          ? 'bg-indigo-500/20 text-indigo-800 dark:text-indigo-200 border-indigo-500/40'
+                          ? '-emerald-/20 text-emerald-800 dark:text-emerald-200 border-emerald-500/40'
                           : 'bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 border-slate-200 dark:border-zinc-800 hover:text-slate-950 dark:hover:text-white'
                       }`}
                     >
@@ -352,7 +352,7 @@ export function AttachReceiptModal({
                       type="date"
                       value={filterDate}
                       onChange={(e) => setFilterDate(e.target.value)}
-                      className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 text-xs text-slate-950 dark:text-white outline-none focus:border-indigo-500 transition-colors"
+                      className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 text-xs text-slate-950 dark:text-white outline-none focus:border-emerald-500 transition-colors"
                     />
                   )}
                   <div className={`relative ${filterAllDates ? 'sm:col-span-2' : ''}`}>
@@ -362,7 +362,7 @@ export function AttachReceiptModal({
                       placeholder="Search description or amount..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 pl-8 pr-3 text-xs text-slate-950 dark:text-white placeholder-zinc-500 outline-none focus:border-indigo-500 transition-colors"
+                      className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 pl-8 pr-3 text-xs text-slate-950 dark:text-white placeholder-zinc-500 outline-none focus:border-emerald-500 transition-colors"
                     />
                   </div>
                 </div>
@@ -384,7 +384,7 @@ export function AttachReceiptModal({
                       <button
                         type="button"
                         onClick={() => setFilterAllDates(true)}
-                        className="text-[11px] text-indigo-800 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 font-semibold underline underline-offset-2 cursor-pointer"
+                        className="text-[11px] text-emerald-800 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 font-semibold underline underline-offset-2 cursor-pointer"
                       >
                         Show recent transactions across all dates
                       </button>
@@ -401,14 +401,14 @@ export function AttachReceiptModal({
                           onClick={() => setSelectedTxId(tx.id)}
                           className={`flex items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer touch-manipulation ${
                             isSelected
-                              ? 'bg-indigo-500/15 border-indigo-500/50 shadow-md ring-1 ring-indigo-500/30'
+                              ? '-emerald-/15 border-emerald-500/50 shadow-md ring-1 ring-emerald-500/30'
                               : 'bg-white/90 dark:bg-zinc-900/50 border-slate-200 dark:border-white/[0.06] hover:bg-white dark:hover:bg-zinc-900 hover:border-slate-300 dark:hover:border-zinc-700'
                           }`}
                         >
                           <div className="flex items-center gap-2.5 min-w-0 pr-2">
                             <div className={`h-5 w-5 rounded-full flex items-center justify-center shrink-0 border ${
                               isSelected
-                                ? 'bg-indigo-500 border-indigo-400 text-white dark:text-white'
+                                ? 'bg-[#0D6E52] dark:bg-emerald-500 border-emerald-400 text-white dark:text-white'
                                 : 'border-slate-300 dark:border-zinc-700 bg-slate-100 dark:bg-zinc-800 text-transparent'
                             }`}>
                               <Check className="h-3 w-3 stroke-[3]" />
@@ -459,7 +459,7 @@ export function AttachReceiptModal({
                     type="date"
                     value={newDate}
                     onChange={(e) => setNewDate(e.target.value)}
-                    className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 text-xs text-slate-950 dark:text-white outline-none focus:border-indigo-500 transition-colors"
+                    className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 text-xs text-slate-950 dark:text-white outline-none focus:border-emerald-500 transition-colors"
                   />
                 </div>
                 <div className="space-y-1">
@@ -469,7 +469,7 @@ export function AttachReceiptModal({
                     placeholder="e.g. Shell Petrol, Starbucks"
                     value={newVendor}
                     onChange={(e) => setNewVendor(e.target.value)}
-                    className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 text-xs text-slate-950 dark:text-white outline-none focus:border-indigo-500 transition-colors"
+                    className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 text-xs text-slate-950 dark:text-white outline-none focus:border-emerald-500 transition-colors"
                   />
                 </div>
                 <div className="space-y-1">
@@ -480,7 +480,7 @@ export function AttachReceiptModal({
                     placeholder="0.00"
                     value={newAmount}
                     onChange={(e) => setNewAmount(e.target.value)}
-                    className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 font-mono font-bold text-xs text-emerald-800 dark:text-emerald-400 outline-none focus:border-indigo-500 transition-colors"
+                    className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 font-mono font-bold text-xs text-emerald-800 dark:text-emerald-400 outline-none focus:border-emerald-500 transition-colors"
                   />
                 </div>
                 <div className="space-y-1">
@@ -488,7 +488,7 @@ export function AttachReceiptModal({
                   <select
                     value={newCategory}
                     onChange={(e) => setNewCategory(e.target.value)}
-                    className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-2.5 text-xs text-slate-950 dark:text-white outline-none focus:border-indigo-500 transition-colors"
+                    className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-2.5 text-xs text-slate-950 dark:text-white outline-none focus:border-emerald-500 transition-colors"
                   >
                     {EXPENSE_CATEGORIES.map((cat) => (
                       <option key={cat} value={cat}>{cat}</option>
@@ -504,7 +504,7 @@ export function AttachReceiptModal({
                   placeholder="e.g. Project allowance claim"
                   value={newNotes}
                   onChange={(e) => setNewNotes(e.target.value)}
-                  className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 text-xs text-slate-950 dark:text-white outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 text-xs text-slate-950 dark:text-white outline-none focus:border-emerald-500 transition-colors"
                 />
               </div>
             </div>
@@ -525,7 +525,7 @@ export function AttachReceiptModal({
               type="button"
               onClick={handleUploadAndSave}
               disabled={isUploading || (mode === 'attach' && !selectedTxId) || (mode === 'new' && (!newAmount || (parseFloat(newAmount) || 0) <= 0))}
-              className="inline-flex min-h-[42px] items-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-500 via-indigo-600 to-purple-600 px-5 py-2 text-xs font-bold text-white dark:text-white shadow-lg shadow-indigo-500/25 hover:from-indigo-400 hover:to-purple-500 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex min-h-[42px] items-center gap-2 rounded-2xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 px-5 py-2 text-xs font-bold text-white dark:text-white shadow-lg active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isUploading ? (
                 <>

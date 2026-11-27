@@ -158,7 +158,8 @@ Return strictly a valid JSON object matching this schema:
       thinkingBudget: 2048,
       temperature: 0.4,
       maxOutputTokens: 4096,
-      timeoutMs: 45_000,
+      timeoutMs: 20_000,
+      totalTimeoutMs: 35_000,
     });
 
     const parsed = JSON.parse(result.text);

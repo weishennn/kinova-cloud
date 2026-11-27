@@ -261,7 +261,7 @@ test('6. Gemini Vision OCR self-healing retry logic: normal 200, timeout failove
     },
   });
   assert.equal(timeoutHealedRes.attempts, 2);
-  assert.equal(timeoutHealedRes.modelUsed, 'gemini-3.5-flash');
+  assert.equal(timeoutHealedRes.modelUsed, 'gemini-3.5-flash-lite');
   assert.equal(timeoutHealedRes.parsedOcr.amount, 18.0);
   assert.equal(timeoutHealedRes.healed, true);
 
@@ -311,7 +311,7 @@ test('6. Gemini Vision OCR self-healing retry logic: normal 200, timeout failove
     },
   });
   assert.equal(fallback404Res.attempts, 2);
-  assert.equal(fallback404Res.modelUsed, 'gemini-3.5-flash');
+  assert.equal(fallback404Res.modelUsed, 'gemini-3.5-flash-lite');
   assert.equal(fallback404Res.parsedOcr.amount, 32.0);
   assert.equal(fallback404Res.healed, true);
 

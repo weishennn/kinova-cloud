@@ -83,7 +83,7 @@ export function ConfirmDialog() {
                   ? 'bg-rose-500/15 text-rose-800 dark:text-rose-400 border-rose-500/30 shadow-[0_0_24px_rgba(244,63,94,0.25)]'
                   : isWarning
                   ? 'bg-amber-500/15 text-amber-800 dark:text-amber-400 border-amber-500/30 shadow-[0_0_24px_rgba(245,158,11,0.25)]'
-                  : 'bg-indigo-500/15 text-indigo-800 dark:text-indigo-400 border-indigo-500/30 shadow-[0_0_24px_rgba(99,102,241,0.25)]'
+                  : '-emerald-/15 text-emerald-800 dark:text-emerald-400 border-emerald-500/30 shadow-[0_0_24px_rgba(99,102,241,0.25)]'
               }`}>
                 {options.icon === 'alert' || isWarning ? (
                   <AlertTriangle className="h-7 w-7" />
@@ -123,7 +123,7 @@ export function ConfirmDialog() {
                     ? 'bg-gradient-to-r from-rose-500 via-rose-600 to-red-600 hover:from-rose-600 hover:to-red-700 shadow-rose-500/25'
                     : isWarning
                     ? 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 shadow-amber-500/25'
-                    : 'bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 shadow-indigo-500/25'
+                    : 'bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500'
                 }`}
               >
                 {options.confirmText || 'Confirm'}

@@ -322,26 +322,26 @@ export default function TransactionsPage() {
         whileTap={{ scale: 0.99 }}
         transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
         onClick={() => setSelectedTx(t)}
-        className={`flex cursor-pointer items-center justify-between p-3.5 sm:p-4 rounded-2xl border transition-all group shadow-sm hover:shadow-md focus-visible:ring-2 focus-visible:ring-indigo-400 ${
+        className={`flex cursor-pointer items-center justify-between p-3.5 sm:p-4 rounded-2xl border transition-all group shadow-[0_1px_2px_rgba(17,20,24,0.03)] focus-visible:ring-2 focus-visible:ring-emerald-500 ${
           isIncome || isSell
-            ? 'border-slate-200 dark:border-white/[0.06] bg-white/90 dark:bg-zinc-900/60 hover:bg-slate-100 dark:hover:bg-zinc-800/80 hover:border-emerald-500/40'
+            ? 'border-black/[0.07] dark:border-white/[0.07] bg-card hover:border-emerald-500/40'
             : isInvestment
-            ? 'border-slate-200 dark:border-white/[0.06] bg-white/90 dark:bg-zinc-900/60 hover:bg-slate-100 dark:hover:bg-zinc-800/80 hover:border-indigo-500/40'
+            ? 'border-black/[0.07] dark:border-white/[0.07] bg-card hover:border-amber-500/40'
             : isInst
-            ? 'border-slate-200 dark:border-white/[0.06] bg-white/90 dark:bg-zinc-900/60 hover:bg-slate-100 dark:hover:bg-zinc-800/80 hover:border-purple-500/40'
-            : 'border-slate-200 dark:border-white/[0.06] bg-white/90 dark:bg-zinc-900/60 hover:bg-slate-100 dark:hover:bg-zinc-800/80 hover:border-rose-500/40'
+            ? 'border-black/[0.07] dark:border-white/[0.07] bg-card hover:border-amber-500/40'
+            : 'border-black/[0.07] dark:border-white/[0.07] bg-card hover:border-rose-500/35'
         }`}
       >
         {/* Left: Icon */}
         <div className="flex items-center gap-3.5 min-w-0 flex-1">
-          <div className={`flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-2xl border ${
+          <div className={`flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-xl border ${
             isIncome || isSell
-              ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-400 border-emerald-500/25 shadow-[0_0_12px_rgba(16,185,129,0.15)]'
+              ? 'bg-emerald-500/12 text-emerald-800 dark:text-emerald-400 border-emerald-500/25'
               : isInvestment
-              ? 'bg-indigo-500/15 text-indigo-800 dark:text-indigo-400 border-indigo-500/25 shadow-[0_0_12px_rgba(99,102,241,0.15)]'
+              ? 'bg-amber-500/12 text-amber-800 dark:text-amber-400 border-amber-500/25'
               : isInst
-              ? 'bg-purple-500/15 text-violet-800 dark:text-purple-400 border-purple-500/25 shadow-[0_0_12px_rgba(168,85,247,0.15)]'
-              : 'bg-rose-500/15 text-rose-800 dark:text-rose-400 border-rose-500/25 shadow-[0_0_12px_rgba(244,63,94,0.15)]'
+              ? 'bg-amber-500/12 text-amber-800 dark:text-amber-300 border-amber-500/25'
+              : 'bg-rose-500/12 text-rose-800 dark:text-rose-400 border-rose-500/25'
           }`}>
             {isIncome || isSell ? <ArrowDownRight className="h-5 w-5" /> : isInvestment ? <TrendingUp className="h-5 w-5" /> : isInst ? <CreditCard className="h-5 w-5" /> : <ArrowUpRight className="h-5 w-5" />}
           </div>
@@ -358,7 +358,7 @@ export default function TransactionsPage() {
                 </span>
               )}
               {t.receiptUrl ? (
-                <span className="shrink-0 inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-indigo-500/15 text-indigo-800 dark:text-indigo-300 border border-indigo-500/20 font-medium">
+                <span className="shrink-0 inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-emerald-500/12 text-emerald-800 dark:text-emerald-300 border border-emerald-500/20 font-medium">
                   <Receipt className="h-3 w-3" />
                   <span className="hidden xs:inline">Receipt</span>
                 </span>
@@ -397,16 +397,16 @@ export default function TransactionsPage() {
                 </span>
               )}
               {isInst && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-500/15 text-violet-800 dark:text-purple-300 border border-purple-500/20 text-[11px] font-semibold">
-                  💳 {instMatch ? `Installment ${instMatch[1]}` : 'Installment'}
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/12 text-amber-800 dark:text-amber-300 border border-amber-500/20 text-[11px] font-semibold">
+                  {instMatch ? `Installment ${instMatch[1]}` : 'Installment'}
                 </span>
               )}
               {t.account && t.account !== 'Cash' && t.account !== 'Default' && t.account !== '-' && !isTrixpense && (
-                <span className="text-[11px] text-slate-600 dark:text-zinc-400 hidden xs:inline">• {t.account}</span>
+                <span className="text-[11px] text-muted-foreground hidden xs:inline">• {t.account}</span>
               )}
               {t.tripTag && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-500/15 text-violet-800 dark:text-purple-300 border border-purple-500/20 text-[11px] font-medium">
-                  ✈️ {t.tripTag}
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-teal-500/12 text-teal-800 dark:text-teal-300 border border-teal-500/20 text-[11px] font-medium">
+                  {t.tripTag}
                 </span>
               )}
             </div>
@@ -423,7 +423,7 @@ export default function TransactionsPage() {
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <div className="text-right">
             <div className={`text-sm sm:text-base font-bold font-mono tabular-nums whitespace-nowrap tracking-tight ${
-              isIncome || isSell ? 'text-emerald-800 dark:text-emerald-400' : isInvestment ? 'text-indigo-800 dark:text-indigo-400' : isInst ? 'text-violet-800 dark:text-purple-300' : 'text-slate-900 dark:text-zinc-100'
+              isIncome || isSell ? 'text-emerald-700 dark:text-emerald-400' : isInvestment ? 'text-amber-700 dark:text-amber-400' : isInst ? 'text-amber-700 dark:text-amber-300' : 'text-foreground'
             }`}>
               {isIncome || isSell ? '+' : '-'}{t.currency === 'USD' ? '$' : t.currency === 'CNY' ? '¥' : t.currency === 'SGD' ? 'S$' : ((t.currency === 'MYR' || !t.currency) ? 'RM\u00A0' : `${t.currency}\u00A0`)}{t.amount.toFixed(2)}
             </div>
@@ -443,7 +443,7 @@ export default function TransactionsPage() {
             <div className="hidden sm:flex items-center gap-1">
               <button
                 onClick={(e) => { e.stopPropagation(); openEdit(t); }}
-                className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-slate-600 dark:text-zinc-400 hover:text-indigo-800 dark:hover:text-indigo-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer focus-visible:ring-2 focus-visible:ring-indigo-400"
+                className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-muted-foreground hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-black/[0.05] dark:hover:bg-white/[0.06] transition-colors cursor-pointer focus-visible:ring-2 focus-visible:ring-emerald-500"
                 title="Edit transaction"
                 aria-label={`Edit transaction ${t.description || t.category}`}
               >
@@ -489,8 +489,8 @@ export default function TransactionsPage() {
                 onClick={() => setFilterType(t)}
                 className={`relative z-10 flex-1 sm:flex-initial min-h-[40px] px-2 sm:px-3.5 py-1.5 rounded-xl text-xs font-semibold capitalize transition-colors cursor-pointer touch-manipulation select-none active:scale-[0.96] whitespace-nowrap ${
                   filterType === t
-                    ? 'text-indigo-800 dark:text-indigo-200'
-                    : 'text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200'
+                    ? 'text-emerald-800 dark:text-emerald-300'
+                    : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
                 {filterType === t && (
@@ -518,7 +518,7 @@ export default function TransactionsPage() {
                   window.history.replaceState({}, '', url.toString());
                 }
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/30 text-indigo-800 dark:text-indigo-200 text-xs font-semibold transition-all cursor-pointer whitespace-nowrap"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500/12 hover:bg-emerald-500/20 border border-emerald-500/25 text-emerald-800 dark:text-emerald-200 text-xs font-semibold transition-all cursor-pointer whitespace-nowrap"
               title="Clear category filter"
             >
               <span>Category: {filterCategory}</span>
@@ -590,7 +590,7 @@ export default function TransactionsPage() {
             <select
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
-              className="flex-1 sm:flex-initial h-11 min-w-[165px] rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/90 px-3.5 py-2 text-base sm:text-xs font-mono text-slate-950 dark:text-white outline-none focus:border-indigo-400 cursor-pointer transition-colors"
+              className="flex-1 sm:flex-initial h-11 min-w-[165px] rounded-xl border border-black/[0.08] dark:border-white/[0.08] bg-background px-3.5 py-2 text-base sm:text-xs font-mono text-foreground outline-none focus:border-emerald-600 cursor-pointer transition-colors"
               aria-label="Filter transactions by month or year"
             >
               {availableYears.map(year => {
@@ -604,19 +604,19 @@ export default function TransactionsPage() {
                     ? `── ${year} (Next Year) ──`
                     : `── Year ${year} ──`;
                 return (
-                  <optgroup key={year} label={yLabel} className="bg-white dark:bg-zinc-950 text-indigo-800 dark:text-indigo-400 font-bold">
-                    <option value={`year-${year}`} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono font-semibold">
+                  <optgroup key={year} label={yLabel} className="bg-card text-emerald-700 dark:text-emerald-400 font-bold">
+                    <option value={`year-${year}`} className="bg-card text-foreground font-mono font-semibold">
                       {year} full year
                     </option>
                     {monthsByYear[year]?.map(m => (
-                      <option key={m} value={m} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono">
+                      <option key={m} value={m} className="bg-card text-foreground font-mono">
                         {m === currentMonthStr ? `${formatPeriodLabel(m)} (Current)` : formatPeriodLabel(m)}
                       </option>
                     ))}
                   </optgroup>
                 );
               })}
-              <option value="all" className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono">
+              <option value="all" className="bg-card text-foreground font-mono">
                 All time
               </option>
             </select>
@@ -625,7 +625,7 @@ export default function TransactionsPage() {
               <button
                 type="button"
                 onClick={() => setSelectedMonth(currentMonthStr)}
-                className="h-11 px-3 shrink-0 inline-flex items-center gap-1.5 justify-center rounded-xl border border-indigo-500/25 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 text-xs font-semibold hover:bg-indigo-500/20 active:scale-[0.96] transition-all cursor-pointer touch-manipulation shadow-xs"
+                className="h-11 px-3 shrink-0 inline-flex items-center gap-1.5 justify-center rounded-xl border border-emerald-500/25 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 text-xs font-semibold hover:bg-emerald-500/20 active:scale-[0.96] transition-all cursor-pointer touch-manipulation"
                 title={`Jump back to current month (${currentMonthName})`}
                 aria-label={`Jump back to current month (${currentMonthName})`}
               >
@@ -638,7 +638,7 @@ export default function TransactionsPage() {
 
           {/* Search Field (16px text-base on mobile to prevent iOS Safari auto-zoom) */}
           <div className="flex-1 relative min-w-[200px]">
-            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600 dark:text-zinc-400 pointer-events-none" />
+            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
             <input
               type="search"
               inputMode="search"
@@ -646,7 +646,7 @@ export default function TransactionsPage() {
               placeholder="Search transactions, categories, notes..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full h-11 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/90 py-2.5 pl-10 pr-10 text-base sm:text-sm text-slate-950 dark:text-white outline-none placeholder:text-slate-500 dark:placeholder:text-zinc-400 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-500/30 transition-all shadow-inner"
+              className="w-full h-11 rounded-xl border border-black/[0.08] dark:border-white/[0.08] bg-background py-2.5 pl-10 pr-10 text-base sm:text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/15 transition-all"
             />
             {searchQuery && (
               <button
@@ -665,23 +665,23 @@ export default function TransactionsPage() {
       {/* Summary Bar */}
       {filterType === 'investment' ? (
         <div className="space-y-2">
-          <div className="grid grid-cols-3 gap-2.5 rounded-2xl border border-indigo-500/25 bg-card/60 p-4 shadow-xl specular-card">
+          <div className="grid grid-cols-3 gap-2.5 rounded-[20px] border border-amber-500/25 bg-card p-4 shadow-[0_1px_2px_rgba(17,20,24,0.03)]">
             <div className="text-center">
-              <span className="block text-xs font-semibold text-slate-700 dark:text-zinc-300">Net Invested</span>
-              <div className="text-base md:text-lg font-bold text-indigo-700 dark:text-indigo-400 font-mono tabular-nums mt-0.5">
+              <span className="block text-xs font-semibold text-muted-foreground">Net Invested</span>
+              <div className="text-base md:text-lg font-bold text-amber-700 dark:text-amber-400 font-mono tabular-nums mt-0.5">
                 <AnimatedNumber value={displaySummary.totalInvested} animateOnMount />
               </div>
-              <span className="block text-[10px] text-slate-500 dark:text-zinc-400">Stocks & Assets</span>
+              <span className="block text-[10px] text-muted-foreground">Stocks & Assets</span>
             </div>
-            <div className="text-center border-l border-slate-200 dark:border-white/[0.08]">
-              <span className="block text-xs font-semibold text-slate-700 dark:text-zinc-300">Total Purchases</span>
-              <div className="text-base md:text-lg font-bold text-slate-900 dark:text-white font-mono tabular-nums mt-0.5">
+            <div className="text-center border-l border-black/[0.07] dark:border-white/[0.08]">
+              <span className="block text-xs font-semibold text-muted-foreground">Total Purchases</span>
+              <div className="text-base md:text-lg font-bold text-foreground font-mono tabular-nums mt-0.5">
                 <AnimatedNumber value={displaySummary.investedBuys} animateOnMount />
               </div>
-              <span className="block text-[10px] text-indigo-600 dark:text-indigo-400">BUY orders</span>
+              <span className="block text-[10px] text-amber-700 dark:text-amber-400">BUY orders</span>
             </div>
-            <div className="text-center border-l border-slate-200 dark:border-white/[0.08]">
-              <span className="block text-xs font-semibold text-slate-700 dark:text-zinc-300">Total Liquidated</span>
+            <div className="text-center border-l border-black/[0.07] dark:border-white/[0.08]">
+              <span className="block text-xs font-semibold text-muted-foreground">Total Liquidated</span>
               <div className="text-base md:text-lg font-bold text-emerald-700 dark:text-emerald-400 font-mono tabular-nums mt-0.5">
                 <AnimatedNumber value={displaySummary.investedSells} animateOnMount />
               </div>
@@ -689,14 +689,14 @@ export default function TransactionsPage() {
             </div>
           </div>
           {displaySummary.savingsDeposits > 0 && (
-            <div className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/40 text-xs text-indigo-900 dark:text-indigo-300">
-              <span className="font-medium">🏦 Separate Cash & Emergency Savings:</span>
+            <div className="flex items-center justify-between px-3.5 py-2 rounded-xl bg-emerald-500/[0.08] border border-emerald-500/20 text-xs text-emerald-900 dark:text-emerald-300">
+              <span className="font-medium">Separate Cash & Emergency Savings:</span>
               <span className="font-mono font-bold">RM{'\u00A0'}{displaySummary.savingsDeposits.toFixed(2)}</span>
             </div>
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-3 rounded-2xl border border-slate-200 dark:border-white/[0.08] bg-card/60 p-4 shadow-xl specular-card">
+        <div className="grid grid-cols-3 gap-3 rounded-[20px] border border-black/[0.08] dark:border-white/[0.08] bg-card p-4 shadow-[0_1px_2px_rgba(17,20,24,0.03)]">
           <div className="text-center">
             <div className="min-w-0 px-1 text-xs leading-tight text-slate-700 dark:text-zinc-300 font-medium">
               <span className="block">Income</span>
@@ -717,7 +717,7 @@ export default function TransactionsPage() {
             <div className="min-w-0 px-1 text-xs leading-tight text-slate-700 dark:text-zinc-300 font-medium">
               <span className="block">Invested</span>
             </div>
-            <div className="text-base md:text-lg font-bold text-indigo-800 dark:text-indigo-400 font-mono tabular-nums mt-0.5">
+            <div className="text-base md:text-lg font-bold text-amber-700 dark:text-amber-400 font-mono tabular-nums mt-0.5">
               <AnimatedNumber value={displaySummary.totalInvested} animateOnMount />
             </div>
           </div>
@@ -749,23 +749,23 @@ export default function TransactionsPage() {
           <div className="space-y-4">
             {dayGroups.map((group) => (
               <div key={group.date} className="space-y-2">
-                {/* Day Group Header (clean, non-blurry) */}
-                <div className="flex items-center justify-between px-3.5 py-2.5 rounded-2xl bg-white dark:bg-zinc-950 border border-slate-200 dark:border-white/[0.08] shadow-sm">
+                {/* Day Group Header (clean Atelier styling) */}
+                <div className="flex items-center justify-between px-3.5 py-2.5 rounded-2xl bg-card border border-black/[0.08] dark:border-white/[0.08] shadow-[0_1px_2px_rgba(17,20,24,0.03)]">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <div className={`flex items-center justify-center h-8 w-8 rounded-xl shrink-0 ${
                       group.isToday
-                        ? 'bg-indigo-500/20 text-indigo-800 dark:text-indigo-300 border border-indigo-500/30 shadow-[0_0_12px_rgba(99,102,241,0.2)]'
+                        ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30'
                         : group.isYesterday
-                        ? 'bg-purple-500/15 text-violet-800 dark:text-purple-300 border border-purple-500/25'
-                        : 'bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 border border-slate-200 dark:border-zinc-800'
+                        ? 'bg-amber-500/12 text-amber-800 dark:text-amber-300 border border-amber-500/25'
+                        : 'bg-black/[0.04] dark:bg-white/[0.05] text-muted-foreground border border-black/[0.07] dark:border-white/[0.08]'
                     }`}>
                       <Calendar className="h-4 w-4" />
                     </div>
 
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className={`text-xs sm:text-sm font-bold tracking-tight truncate ${
-                          group.isToday ? 'text-indigo-800 dark:text-indigo-300' : 'text-slate-900 dark:text-zinc-100'
+                        <span className={`text-xs sm:text-sm font-semibold tracking-tight truncate ${
+                          group.isToday ? 'text-emerald-800 dark:text-emerald-300' : 'text-foreground'
                         }`}>
                           {group.title}
                         </span>

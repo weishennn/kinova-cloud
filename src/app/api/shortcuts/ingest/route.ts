@@ -731,10 +731,10 @@ export async function POST(req: NextRequest) {
     }
 
     const startedAtMs = Date.now();
-    // Default to gemini-2.5-flash (~2s latency) with automatic failover across gemini-3.5-flash / flash-latest
+    // Default to gemini-3.5-flash-lite (~1s latency across all keys) with automatic failover
     const preferredModel = (
       process.env.GEMINI_OCR_MODEL ||
-      'gemini-2.5-flash'
+      'gemini-3.5-flash-lite'
     ).trim();
 
     const prompt = `You are an intelligent financial OCR and receipt analysis AI.
@@ -936,7 +936,7 @@ Return JSON shape:
           let healedOcr = await runShortcutGeminiOcrWithFastFail({
             geminiKeys: freshKeys.length > 0 ? freshKeys : geminiKeys,
             onKeyFailure: reportGeminiKeyFailure,
-            preferredModel: 'gemini-3.5-flash',
+            preferredModel: 'gemini-3.5-flash-lite',
             prompt,
             mimeType,
             cleanBase64,
@@ -949,7 +949,7 @@ Return JSON shape:
             healedOcr = await runShortcutGeminiOcrWithFastFail({
               geminiKeys: freshKeys.length > 0 ? freshKeys : geminiKeys,
               onKeyFailure: reportGeminiKeyFailure,
-              preferredModel: 'gemini-2.5-flash',
+              preferredModel: 'gemini-flash-lite-latest',
               prompt: concisePrompt,
               mimeType,
               cleanBase64,

@@ -35,88 +35,88 @@
   --font-mono: var(--font-geist-mono);
 }
 
-/* Calm light surfaces by default; dark mode follows the device or saved preference. */
+/* Warm Alabaster & Deep Jade in light mode; Obsidian Vault & Luminous Jade in dark mode. */
 :root {
-  --background: #f7f7fc;
-  --foreground: #0a0a0a;
-  --card: #ffffff;
-  --card-foreground: #0a0a0a;
-  --primary: #4f46e5;
-  --primary-foreground: #ffffff;
-  --secondary: #f1f5f9;
-  --secondary-foreground: #0a0a0a;
-  --destructive: #c2413b;
-  --destructive-foreground: #ffffff;
-  --muted: #f1f5f9;
-  --muted-foreground: #64748b;
-  --accent: #eef2ff;
-  --accent-foreground: #312e81;
-  --popover: #ffffff;
-  --popover-foreground: #0a0a0a;
-  --border: #e2e8f0;
-  --input: #e2e8f0;
-  --ring: #4f46e5;
+  --background: #F5F4EF;
+  --foreground: #121417;
+  --card: #FFFFFF;
+  --card-foreground: #121417;
+  --primary: #0D6E52;
+  --primary-foreground: #FFFFFF;
+  --secondary: #ECEAE2;
+  --secondary-foreground: #121417;
+  --destructive: #C23B38;
+  --destructive-foreground: #FFFFFF;
+  --muted: #ECEAE2;
+  --muted-foreground: #5D636A;
+  --accent: #E6F3EE;
+  --accent-foreground: #094D39;
+  --popover: #FFFFFF;
+  --popover-foreground: #121417;
+  --border: rgba(18, 20, 23, 0.085);
+  --input: rgba(18, 20, 23, 0.12);
+  --ring: #0D6E52;
   --radius: 0.875rem;
-  --chart-1: #4f46e5;
-  --chart-2: #16804a;
-  --chart-3: #c2413b;
-  --chart-4: #a16207;
-  --chart-5: #64748b;
+  --chart-1: #0D6E52;
+  --chart-2: #B8862D;
+  --chart-3: #C23B38;
+  --chart-4: #1F6F8B;
+  --chart-5: #5D636A;
 }
 
 /* Explicit light and dark theme tokens for system and user-selected modes. */
 .light {
-  --background: #f7f7fc;
-  --foreground: #0a0a0a;
-  --card: #ffffff;
-  --card-foreground: #0a0a0a;
-  --primary: #4f46e5;
-  --primary-foreground: #ffffff;
-  --secondary: #f1f5f9;
-  --secondary-foreground: #0a0a0a;
-  --destructive: #c2413b;
-  --destructive-foreground: #ffffff;
-  --muted: #f1f5f9;
-  --muted-foreground: #64748b;
-  --accent: #eef2ff;
-  --accent-foreground: #312e81;
-  --popover: #ffffff;
-  --popover-foreground: #0a0a0a;
-  --border: #e2e8f0;
-  --input: #e2e8f0;
-  --ring: #4f46e5;
-  --chart-1: #4f46e5;
-  --chart-2: #16804a;
-  --chart-3: #c2413b;
-  --chart-4: #a16207;
-  --chart-5: #64748b;
+  --background: #F5F4EF;
+  --foreground: #121417;
+  --card: #FFFFFF;
+  --card-foreground: #121417;
+  --primary: #0D6E52;
+  --primary-foreground: #FFFFFF;
+  --secondary: #ECEAE2;
+  --secondary-foreground: #121417;
+  --destructive: #C23B38;
+  --destructive-foreground: #FFFFFF;
+  --muted: #ECEAE2;
+  --muted-foreground: #5D636A;
+  --accent: #E6F3EE;
+  --accent-foreground: #094D39;
+  --popover: #FFFFFF;
+  --popover-foreground: #121417;
+  --border: rgba(18, 20, 23, 0.085);
+  --input: rgba(18, 20, 23, 0.12);
+  --ring: #0D6E52;
+  --chart-1: #0D6E52;
+  --chart-2: #B8862D;
+  --chart-3: #C23B38;
+  --chart-4: #1F6F8B;
+  --chart-5: #5D636A;
 }
 
 .dark {
-  --background: #090d16;
-  --foreground: #f8fafc;
-  --card: #111827;
-  --card-foreground: #f8fafc;
-  --primary: #6366f1;
-  --primary-foreground: #ffffff;
-  --secondary: #1a2333;
-  --secondary-foreground: #f8fafc;
-  --destructive: #f43f5e;
-  --destructive-foreground: #ffffff;
-  --muted: #1e293b;
-  --muted-foreground: #94a3b8;
-  --accent: #1e293b;
-  --accent-foreground: #f8fafc;
-  --popover: #0f172a;
-  --popover-foreground: #f8fafc;
+  --background: #090B0D;
+  --foreground: #F4F4F1;
+  --card: #111418;
+  --card-foreground: #F4F4F1;
+  --primary: #2DD4A0;
+  --primary-foreground: #071913;
+  --secondary: #171B21;
+  --secondary-foreground: #F4F4F1;
+  --destructive: #F06A66;
+  --destructive-foreground: #FFFFFF;
+  --muted: #171B21;
+  --muted-foreground: #969EA8;
+  --accent: #13251F;
+  --accent-foreground: #6EE7C0;
+  --popover: #111418;
+  --popover-foreground: #F4F4F1;
   --border: rgba(255, 255, 255, 0.08);
-  --input: rgba(255, 255, 255, 0.1);
-  --ring: #6366f1;
-  --chart-1: #6366f1;
-  --chart-2: #34d399;
-  --chart-3: #fb7185;
-  --chart-4: #fbbf24;
-  --chart-5: #94a3b8;
+  --input: rgba(255, 255, 255, 0.11);
+  --ring: #2DD4A0;
+  --chart-1: #2DD4A0;
+  --chart-2: #E5B85C;
+  --chart-3: #F06A66;
+  --chart-4: #60A5FA;
+  --chart-5: #969EA8;
 }
 
 html,
@@ -183,28 +183,28 @@ input[type="date"]::-webkit-date-and-time-value {
 }
 
 /* Glass morphism utility */
-.glass { background: rgba(255,255,255,0.82); backdrop-filter: blur(20px); border: 1px solid rgba(148,163,184,0.24); }
-.glass-strong { background: rgba(255,255,255,0.94); backdrop-filter: blur(28px); border: 1px solid rgba(148,163,184,0.32); }
-.dark .glass { background: rgba(15,23,42,0.76); border-color: rgba(255,255,255,0.1); }
-.dark .glass-strong { background: rgba(15,23,42,0.92); border-color: rgba(255,255,255,0.15); }
+.glass { background: rgba(255,255,255,0.82); backdrop-filter: blur(20px); border: 1px solid rgba(18,20,23,0.08); }
+.glass-strong { background: rgba(255,255,255,0.95); backdrop-filter: blur(28px); border: 1px solid rgba(18,20,23,0.1); }
+.dark .glass { background: rgba(17,20,24,0.8); border-color: rgba(255,255,255,0.08); }
+.dark .glass-strong { background: rgba(17,20,24,0.94); border-color: rgba(255,255,255,0.12); }
 
 /* Gradient backgrounds */
-.gradient-primary { background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); }
-.gradient-success { background: linear-gradient(135deg, #10b981 0%, #34d399 100%); }
-.gradient-danger { background: linear-gradient(135deg, #ef4444 0%, #f87171 100%); }
-.gradient-warning { background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%); }
-.gradient-info { background: linear-gradient(135deg, #06b6d4 0%, #22d3ee 100%); }
+.gradient-primary { background: linear-gradient(135deg, #0D6E52 0%, #145344 100%); }
+.gradient-success { background: linear-gradient(135deg, #0D7A58 0%, #2DD4A0 100%); }
+.gradient-danger { background: linear-gradient(135deg, #C23B38 0%, #E05D5A 100%); }
+.gradient-warning { background: linear-gradient(135deg, #B8862D 0%, #E5B85C 100%); }
+.gradient-info { background: linear-gradient(135deg, #1F6F8B 0%, #38BDF8 100%); }
 
 /* Animations */
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slideUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes slideDown { from { opacity: 0; transform: translateY(-16px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes scaleIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
-@keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4); } 50% { box-shadow: 0 0 20px 4px rgba(99, 102, 241, 0.2); } }
+@keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 0 0 rgba(13, 110, 82, 0.35); } 50% { box-shadow: 0 0 20px 4px rgba(13, 110, 82, 0.18); } }
 @keyframes aurora {
-  0% { transform: translate(0, 0) scale(1); opacity: 0.5; }
-  50% { transform: translate(30px, -20px) scale(1.1); opacity: 0.8; }
-  100% { transform: translate(0, 0) scale(1); opacity: 0.5; }
+  0% { transform: translate(0, 0) scale(1); opacity: 0.45; }
+  50% { transform: translate(24px, -16px) scale(1.06); opacity: 0.72; }
+  100% { transform: translate(0, 0) scale(1); opacity: 0.45; }
 }
 @keyframes shimmer {
   0% { background-position: -200% 0; }
@@ -259,25 +259,25 @@ input[type="date"]::-webkit-date-and-time-value {
   content: '';
 }
 
-/* Clean Solid Card Utilities */
+/* Clean Elevated Card Utilities */
 .specular-card {
   position: relative;
   overflow: hidden;
   background-color: var(--card);
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 1px 3px rgba(18, 20, 23, 0.04), 0 8px 24px -12px rgba(18, 20, 23, 0.06);
   contain: paint;
 }
 
 .dark .specular-card {
   background-color: var(--card);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .specular-card:hover {
-  border-color: rgba(99, 102, 241, 0.35);
+  border-color: rgba(13, 110, 82, 0.28);
 }
 
-.dark .specular-card:hover { box-shadow: 0 16px 40px -12px rgba(99, 102, 241, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.15); }
+.dark .specular-card:hover { box-shadow: 0 16px 40px -12px rgba(45, 212, 160, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.1); }
 
 @keyframes specular-card-sweep {
   0%, 18% { background-position: 120% 0; opacity: 0; }

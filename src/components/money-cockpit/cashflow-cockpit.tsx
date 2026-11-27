@@ -51,7 +51,7 @@ const CartesianGrid = dynamic(() => import('recharts').then((mod) => mod.Cartesi
 const Tooltip = dynamic(() => import('recharts').then((mod) => mod.Tooltip), { ssr: false });
 const ResponsiveContainer = dynamic(() => import('recharts').then((mod) => mod.ResponsiveContainer), { ssr: false });
 
-const categoryColors = ['#8b5cf6', '#558d78', '#8a77a8', '#aa8152', '#5b8c99', '#9c6d6d'];
+const categoryColors = ['#0D6E52', '#C23B38', '#B8862D', '#1F6F8B', '#2E5B88', '#8F5C38'];
 
 function currentMonthValue() {
   const now = new Date();
@@ -492,10 +492,21 @@ export function CashflowCockpit() {
       <main className="cockpit-grid">
         <section className="cockpit-welcome cockpit-area-welcome">
           <div>
-            <p className="cockpit-eyebrow">{greeting}</p>
+            <div className="cockpit-welcome-meta">
+              <span className="cockpit-greeting-pill">{greeting}</span>
+            </div>
             <h1>Your money, at a glance.</h1>
-            <p className="cockpit-welcome-note">{monthName(selectedMonth)} · A clear view of what came in and went out.</p>
+            <p className="cockpit-welcome-note">{monthName(selectedMonth)} · Cash flow, pacing, and holdings in one view.</p>
           </div>
+          <button
+            type="button"
+            className="cockpit-primary-action"
+            onClick={() => setQuickAddOpen(true)}
+            aria-label="Add expense"
+          >
+            <Wallet size={15} aria-hidden="true" />
+            <span>Record entry</span>
+          </button>
         </section>
 
         <div className="cockpit-area-orbit">
@@ -513,7 +524,7 @@ export function CashflowCockpit() {
 
         <section className="cockpit-trend cockpit-area-trend" aria-labelledby="trend-title">
           <div className="cockpit-section-heading">
-            <div><p className="cockpit-eyebrow">CASH FLOW</p><h2 id="trend-title">Income and spending</h2></div>
+            <div><h2 id="trend-title">Income & spending</h2></div>
             <div className="cockpit-chart-legend" aria-label="Chart legend">
               <span><i className="income" />Income</span><span><i className="expense" />Expenses</span>
             </div>
@@ -527,31 +538,31 @@ export function CashflowCockpit() {
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={trendData} margin={{ top: 10, right: 4, left: 0, bottom: 0 }}>
                   <defs>
-                    <linearGradient id="income-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#24804d" stopOpacity={0.16} /><stop offset="100%" stopColor="#24804d" stopOpacity={0} /></linearGradient>
-                    <linearGradient id="expense-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#c2413b" stopOpacity={0.12} /><stop offset="100%" stopColor="#c2413b" stopOpacity={0} /></linearGradient>
+                    <linearGradient id="income-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#0D7A58" stopOpacity={0.22} /><stop offset="100%" stopColor="#0D7A58" stopOpacity={0} /></linearGradient>
+                    <linearGradient id="expense-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#C23B38" stopOpacity={0.16} /><stop offset="100%" stopColor="#C23B38" stopOpacity={0} /></linearGradient>
                   </defs>
                   <CartesianGrid vertical={false} stroke="var(--cockpit-gridline)" strokeDasharray="3 5" />
                   <XAxis dataKey="label" tickLine={false} axisLine={false} interval="preserveStartEnd" tick={{ fill: 'var(--cockpit-muted)', fontSize: 11 }} />
                   <YAxis hide domain={[0, 'dataMax']} />
                   <Tooltip
                     cursor={{ stroke: 'var(--cockpit-line-strong)', strokeDasharray: '3 3' }}
-                    contentStyle={{ color: 'var(--cockpit-text)', background: 'var(--cockpit-surface)', border: '1px solid var(--cockpit-line)', borderRadius: 12, boxShadow: '0 8px 24px rgba(15, 23, 42, .12)' }}
+                    contentStyle={{ color: 'var(--cockpit-text)', background: 'var(--cockpit-surface)', border: '1px solid var(--cockpit-line-strong)', borderRadius: 12, boxShadow: '0 10px 28px rgba(18, 20, 23, .14)' }}
                     labelStyle={{ color: 'var(--cockpit-muted)', fontSize: 11, marginBottom: 4 }}
                     formatter={(value: unknown) => formatMoney(Number(value))}
                   />
-                  <Area type="monotone" dataKey="income" name="Income" stroke="#24804d" strokeWidth={2} fill="url(#income-fill)" activeDot={{ r: 4, strokeWidth: 0 }} />
-                  <Area type="monotone" dataKey="expense" name="Expenses" stroke="#c2413b" strokeWidth={2} fill="url(#expense-fill)" activeDot={{ r: 4, strokeWidth: 0 }} />
+                  <Area type="monotone" dataKey="income" name="Income" stroke="#0D7A58" strokeWidth={2.2} fill="url(#income-fill)" activeDot={{ r: 4, strokeWidth: 0 }} />
+                  <Area type="monotone" dataKey="expense" name="Expenses" stroke="#C23B38" strokeWidth={2.2} fill="url(#expense-fill)" activeDot={{ r: 4, strokeWidth: 0 }} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
           ) : (
-            <div className="cockpit-chart-empty"><TrendingUp size={20} aria-hidden="true" /><span>Your trend will appear after your first transaction in this period.</span></div>
+            <div className="cockpit-chart-empty"><TrendingUp size={20} aria-hidden="true" /><span>Your cash flow curve will appear once you add an entry in this period.</span></div>
           )}
         </section>
 
         <section className="cockpit-pulse cockpit-area-pulse" aria-labelledby="pulse-title">
           <div className="cockpit-section-heading">
-            <div><p className="cockpit-eyebrow">SPENDING</p><h2 id="pulse-title">Top categories</h2></div>
+            <div><h2 id="pulse-title">Top categories</h2></div>
             <Link href="/analytics" className="cockpit-text-link">See analytics <ArrowRight size={14} /></Link>
           </div>
           {categoryTotals.length ? (
@@ -583,9 +594,9 @@ export function CashflowCockpit() {
                 ? {
                     color:
                       activeAlert.severity === 'critical'
-                        ? '#ef4444'
+                        ? 'var(--cockpit-red)'
                         : activeAlert.severity === 'warning'
-                        ? '#f59e0b'
+                        ? 'var(--cockpit-amber)'
                         : 'var(--cockpit-accent)',
                   }
                 : undefined
@@ -605,16 +616,14 @@ export function CashflowCockpit() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
               <p className="cockpit-eyebrow" style={{ margin: 0 }}>
                 {activeAlert
-                  ? `AI RADAR · ${
-                      activeAlert.severity === 'critical'
-                        ? '🔴 预算超支风险'
-                        : activeAlert.severity === 'warning'
-                        ? '⚠️ 支出异动预警'
-                        : '💡 智能变动洞察'
-                    }`
+                  ? activeAlert.severity === 'critical'
+                    ? 'Budget Risk Alert'
+                    : activeAlert.severity === 'warning'
+                    ? 'Spending Pace Notice'
+                    : 'Spending Insight'
                   : savingsThisPeriod > 0
-                  ? 'AI SAVINGS RADAR'
-                  : 'FINANCIAL RADAR'}
+                  ? 'Savings & Subsidies'
+                  : 'Financial Radar'}
               </p>
               {proactiveAlerts.length > 1 && (
                 <div className="cockpit-insight-nav">
@@ -647,7 +656,7 @@ export function CashflowCockpit() {
                 ? `Saved ${formatMoney(savingsThisPeriod)} in subsidies & deals!`
                 : categoryTotals[0]
                 ? `${categoryTotals[0].name} leads this period.`
-                : 'Your money story starts here.'}
+                : 'Your money radar is ready.'}
             </h2>
             <p>
               {activeAlert
@@ -655,12 +664,12 @@ export function CashflowCockpit() {
                 : savingsThisPeriod > 0
                 ? `Driven by BUDI MADANI fuel subsidies and merchant vouchers. ${categoryTotals[0] ? `${categoryTotals[0].name} leads overall spending at ${formatMoney(categoryTotals[0].amount)}.` : ''}`
                 : categoryTotals[0]
-                ? `${formatMoney(categoryTotals[0].amount)} recorded${totals.spending > 0 ? ` · ${Math.round((categoryTotals[0].amount / totals.spending) * 100)}% of spending` : ''}. Tap its pulse above to follow those transactions.`
-                : 'Add your first transaction and your personal money map will take shape.'}
+                ? `${formatMoney(categoryTotals[0].amount)} recorded${totals.spending > 0 ? ` · ${Math.round((categoryTotals[0].amount / totals.spending) * 100)}% of spending` : ''}. Select a category above to filter the ledger.`
+                : 'Record your first entry above or scan a receipt to unlock live pacing alerts and habit intelligence.'}
             </p>
             {activeAlert && (
               <div className="cockpit-insight-explanation">
-                <strong>💡 为什么提醒我：</strong>
+                <strong>Why this surfaced: </strong>
                 <span>{activeAlert.explanation}</span>
               </div>
             )}
@@ -688,7 +697,7 @@ export function CashflowCockpit() {
 
         <section className="cockpit-stream cockpit-area-stream" aria-labelledby="stream-title">
           <div className="cockpit-section-heading">
-            <div><p className="cockpit-eyebrow">ACTIVITY</p><h2 id="stream-title">{activityView === 'recent' ? 'Recent transactions' : 'Claims calendar'}</h2></div>
+            <div><h2 id="stream-title">{activityView === 'recent' ? 'Recent activity' : 'Claims calendar'}</h2></div>
             <div className="cockpit-stream-actions">
               <div className="cockpit-view-toggle" role="group" aria-label="Activity view">
                 <button type="button" aria-label="Show recent transactions" aria-pressed={activityView === 'recent'} className={activityView === 'recent' ? 'is-active' : ''} onClick={() => setActivityView('recent')}><ArrowLeft size={14} /></button>
@@ -703,7 +712,7 @@ export function CashflowCockpit() {
               className="cockpit-filter-pill"
               onClick={() => setActiveAlertFilter(null)}
             >
-              <span>🚨 预警账目: {activeAlertFilter.label} ({filteredRecent.length}笔)</span>
+              <span>Alert filter: {activeAlertFilter.label} ({filteredRecent.length})</span>
               <span aria-hidden="true">×</span>
               <span className="sr-only">Clear alert filter</span>
             </button>
@@ -757,11 +766,11 @@ export function CashflowCockpit() {
               </AnimatePresence>
             </div>
           ) : (
-            <div className="cockpit-inline-empty"><Search size={18} /><span>{activeCategory ? `No ${activeCategory} entries in this period.` : 'No transactions in this period. Use the + button at the bottom to add one.'}</span></div>
+            <div className="cockpit-inline-empty"><Search size={18} /><span>{activeCategory ? `No ${activeCategory} entries in this period.` : 'No transactions in this period yet.'}</span><button type="button" onClick={() => setQuickAddOpen(true)}>Add first entry</button></div>
           )}
         </section>
 
-        <section className="cockpit-area-ai-hub" aria-label="Gemini AI Intelligence Hub">
+        <section className="cockpit-area-ai-hub" aria-label="Kinova Intelligence Hub">
           <AiIntelligenceHub
             userBudgetCap={userBudgetCap}
             allTransactions={allLedgerTransactions.length > 0 ? allLedgerTransactions : transactions}
@@ -774,17 +783,17 @@ export function CashflowCockpit() {
         </section>
 
         <section className="cockpit-area-commitments">
-          <div className="cockpit-section-heading cockpit-secondary-heading"><div><p className="cockpit-eyebrow">UP NEXT</p><h2>Recurring commitments</h2></div><CircleHelp size={15} aria-hidden="true" /></div>
+          <div className="cockpit-section-heading cockpit-secondary-heading"><div><h2>Recurring commitments</h2></div><CircleHelp size={15} aria-hidden="true" /></div>
           <RecurringCommitments />
         </section>
 
         <section className="cockpit-area-installments">
-          <div className="cockpit-section-heading cockpit-secondary-heading"><div><p className="cockpit-eyebrow">PAYING OVER TIME</p><h2>Installments</h2></div><Receipt size={15} aria-hidden="true" /></div>
+          <div className="cockpit-section-heading cockpit-secondary-heading"><div><h2>Installments</h2></div><Receipt size={15} aria-hidden="true" /></div>
           <InstallmentDashboard />
         </section>
 
         <section className="cockpit-area-advisor" aria-labelledby="advisor-title">
-          <div className="cockpit-section-heading cockpit-secondary-heading"><div><p className="cockpit-eyebrow">PLANNING</p><h2 id="advisor-title">Income allocation</h2></div><Wallet size={15} aria-hidden="true" /></div>
+          <div className="cockpit-section-heading cockpit-secondary-heading"><div><h2 id="advisor-title">Income allocation</h2></div><Wallet size={15} aria-hidden="true" /></div>
           <IncomeAdvisor
             liveIncome={totals.income}
             liveExpense={totals.spending}

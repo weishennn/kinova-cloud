@@ -1646,7 +1646,7 @@ export function SmartQuickInput() {
           inputRef.current?.focus();
         }}
       />
-      <div className="relative rounded-2xl border border-indigo-500/25 bg-white dark:bg-zinc-950 p-2.5 sm:p-3 shadow-sm space-y-1.5 transition-colors focus-within:border-indigo-500/60">
+      <div className="relative rounded-[20px] border border-black/[0.08] dark:border-white/[0.08] bg-card p-2.5 sm:p-3 shadow-[0_2px_10px_rgba(17,20,24,0.04)] space-y-2 transition-colors focus-within:border-emerald-600/50 dark:focus-within:border-emerald-400/50">
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -1669,10 +1669,10 @@ export function SmartQuickInput() {
               disabled={!input.trim() || isAssistantThinking || isSubmitting}
               title={input.trim() ? "Ask Kinova to interpret / think (Ctrl+Enter)" : "Kinova Assistant"}
               aria-label="Ask Kinova Assistant"
-              className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-xl hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all cursor-pointer disabled:cursor-default disabled:hover:bg-transparent disabled:opacity-40"
+              className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg hover:bg-emerald-500/10 text-muted-foreground hover:text-emerald-700 dark:hover:text-emerald-400 transition-all cursor-pointer disabled:cursor-default disabled:hover:bg-transparent disabled:opacity-40"
             >
               <Sparkles className={`h-4 w-4 shrink-0 transition-colors ${
-                isAssistantThinking || isAiParsing ? 'text-indigo-600 dark:text-indigo-400 animate-spin' : isAiEnhanced ? 'text-purple-600 dark:text-purple-400' : 'hover:text-indigo-600'
+                isAssistantThinking || isAiParsing ? 'text-emerald-600 dark:text-emerald-400 animate-spin' : isAiEnhanced ? 'text-amber-600 dark:text-amber-400' : 'hover:text-emerald-600 dark:hover:text-emerald-400'
               }`} />
             </button>
           <input
@@ -1714,7 +1714,7 @@ export function SmartQuickInput() {
             }}
 
             placeholder={receiptAttachment ? 'Edit receipt description...' : 'e.g. Mamak lunch 18, Shell petrol 60, Groceries 45...'}
-            className="block w-full h-11 rounded-2xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-950/90 py-2.5 pl-10 pr-20 text-[16px] sm:text-sm text-slate-950 dark:text-white placeholder-zinc-400 outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400/50 transition-colors shadow-inner touch-manipulation leading-5"
+            className="block w-full h-11 rounded-xl border border-black/[0.08] dark:border-white/[0.08] bg-black/[0.02] dark:bg-white/[0.03] py-2.5 pl-10 pr-20 text-[16px] sm:text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-emerald-600/60 dark:focus:border-emerald-400/60 focus:bg-background focus:ring-2 focus:ring-emerald-500/15 transition-all touch-manipulation leading-5"
           />
           {/* Action buttons: Camera Scan + Voice Dictation */}
           <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
@@ -1731,22 +1731,22 @@ export function SmartQuickInput() {
               disabled={isScanningReceipt}
               title="Scan receipt with Gemini"
               aria-label="Scan receipt with Gemini"
-              className="relative min-w-[34px] min-h-[34px] flex items-center justify-center rounded-xl text-indigo-800 dark:text-indigo-300 hover:text-slate-950 dark:hover:text-white hover:bg-indigo-500/20 disabled:opacity-50 transition-all cursor-pointer touch-manipulation active:scale-[0.92]"
+              className="relative min-w-[34px] min-h-[34px] flex items-center justify-center rounded-lg text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/12 disabled:opacity-50 transition-all cursor-pointer touch-manipulation active:scale-[0.92]"
             >
-              {isScanningReceipt ? <Loader2 className="h-4 w-4 animate-spin text-amber-800 dark:text-amber-400" /> : <Camera className="h-4 w-4" />}
+              {isScanningReceipt ? <Loader2 className="h-4 w-4 animate-spin text-amber-700 dark:text-amber-400" /> : <Camera className="h-4 w-4" />}
             </button>
             {isListening && (
-              <span className="absolute -inset-1 rounded-xl bg-rose-500/40 animate-ping pointer-events-none" />
+              <span className="absolute -inset-1 rounded-lg bg-rose-500/40 animate-ping pointer-events-none" />
             )}
             <button
               type="button"
               onClick={toggleListening}
               title={isListening ? 'Stop listening' : 'Speak to record'}
               aria-label={isListening ? 'Stop listening' : 'Speak to record'}
-              className={`relative min-w-[34px] min-h-[34px] flex items-center justify-center rounded-xl transition-all cursor-pointer touch-manipulation active:scale-[0.92] ${
+              className={`relative min-w-[34px] min-h-[34px] flex items-center justify-center rounded-lg transition-all cursor-pointer touch-manipulation active:scale-[0.92] ${
                 isListening
-                  ? 'bg-rose-500 text-white dark:text-white shadow-lg shadow-rose-500/50'
-                  : 'text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800/80'
+                  ? 'bg-rose-600 text-white shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06]'
               }`}
             >
               {isListening ? <MicOff className="h-4 w-4 animate-pulse" /> : <Mic className="h-4 w-4" />}
@@ -1763,10 +1763,10 @@ export function SmartQuickInput() {
           }}
           disabled={(!activeCommand && !input.trim()) || isSubmitting || isAssistantThinking}
           whileTap={{ scale: 0.95 }}
-          className={`h-11 px-4 rounded-2xl flex items-center gap-1.5 text-xs font-semibold shadow-md transition-all shrink-0 cursor-pointer ${
+          className={`h-11 px-4 rounded-xl flex items-center gap-1.5 text-xs font-semibold transition-all shrink-0 cursor-pointer ${
             (activeCommand || input.trim()) && !isSubmitting && !isAssistantThinking
-              ? 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white dark:text-white shadow-indigo-500/25 hover:from-indigo-400 hover:to-purple-500'
-              : 'bg-slate-100 dark:bg-zinc-800/50 text-slate-500 dark:text-zinc-400 border border-slate-200 dark:border-white/5 cursor-not-allowed'
+              ? 'bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white shadow-sm'
+              : 'bg-black/[0.04] dark:bg-white/[0.04] text-muted-foreground border border-black/[0.06] dark:border-white/[0.06] cursor-not-allowed'
           }`}
         >
           {isSubmitting || isAssistantThinking ? (
@@ -1806,11 +1806,11 @@ export function SmartQuickInput() {
       {/* Time-of-day Contextual Quick Suggestions with 1-tap logging */}
       {!input && !receiptAttachment && !isScanningReceipt && timeOfDaySuggestions.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 pt-0.5 px-0.5">
-          <span className="text-[10px] font-semibold text-slate-500 dark:text-zinc-400">💡 推荐快捷记账 (1-tap)：</span>
+          <span className="text-[10px] font-semibold text-muted-foreground">Quick log:</span>
           {timeOfDaySuggestions.map((item) => (
             <div
               key={item.text}
-              className="group inline-flex items-center rounded-lg bg-slate-100/90 dark:bg-zinc-800/70 border border-slate-200 dark:border-white/[0.06] text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white hover:bg-slate-200/80 dark:hover:bg-zinc-700/80 transition-all text-[11px]"
+              className="group inline-flex items-center rounded-lg bg-black/[0.03] dark:bg-white/[0.04] border border-black/[0.07] dark:border-white/[0.07] text-muted-foreground hover:text-foreground hover:border-emerald-500/30 transition-all text-[11px]"
             >
               <button
                 type="button"
@@ -1835,8 +1835,8 @@ export function SmartQuickInput() {
 
       {/* Loading state for OCR receipt scanning */}
       {isScanningReceipt && (
-        <div role="status" className="flex items-center gap-2 rounded-xl border border-indigo-500/20 bg-indigo-500/10 px-3 py-2 text-xs text-indigo-800 dark:text-indigo-200">
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-800 dark:text-amber-400" />
+        <div role="status" className="flex items-center gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.08] px-3 py-2 text-xs text-emerald-900 dark:text-emerald-200">
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-700 dark:text-amber-400" />
           <span>Gemini is reading your receipt...</span>
         </div>
       )}
@@ -1851,8 +1851,8 @@ export function SmartQuickInput() {
 
       {/* Assistant Thinking Indicator */}
       {isAssistantThinking && (
-        <div role="status" className="flex items-center gap-2 rounded-xl border border-indigo-500/20 bg-indigo-500/10 px-3 py-2 text-xs text-indigo-800 dark:text-indigo-200 animate-in fade-in duration-150">
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-700 dark:text-indigo-400" />
+        <div role="status" className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.08] px-3 py-2 text-xs text-emerald-900 dark:text-emerald-200 animate-in fade-in duration-150">
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-700 dark:text-emerald-400" />
           <span>Kinova is thinking…</span>
         </div>
       )}
@@ -1882,8 +1882,8 @@ export function SmartQuickInput() {
 
       {/* Local Router Special Modes: Undo */}
       {localRoute?.mode === 'undo' && (
-        <div className="rounded-2xl border border-purple-500/30 bg-purple-500/10 p-3 shadow-md space-y-2 text-left animate-in fade-in duration-150">
-          <div className="text-xs font-bold text-purple-900 dark:text-purple-200 flex items-center justify-between">
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/[0.07] p-3 shadow-sm space-y-2 text-left animate-in fade-in duration-150">
+          <div className="text-xs font-semibold text-amber-900 dark:text-amber-200 flex items-center justify-between">
             <span>↩️ {localRoute.message}</span>
           </div>
           {localRoute.actionToUndo ? (
@@ -1894,7 +1894,7 @@ export function SmartQuickInput() {
               <button
                 type="button"
                 onClick={() => void handleUndoAction(String(localRoute.actionToUndo?.payload?.id || localRoute.actionToUndo?.id), String(localRoute.actionToUndo?.payload?.monthStr || ''))}
-                className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow cursor-pointer transition-all"
+                className="px-3 py-1.5 rounded-lg bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white text-xs font-semibold shadow-sm cursor-pointer transition-all"
               >
                 Confirm Undo / 确认撤销
               </button>
@@ -2040,10 +2040,10 @@ export function SmartQuickInput() {
 
       {/* Assistant Mode: Advise */}
       {assistantResult?.mode === 'advise' && (
-        <div className="rounded-2xl border border-indigo-500/30 bg-white/95 dark:bg-zinc-950/90 p-3.5 shadow-lg space-y-2.5 text-left animate-in fade-in duration-200">
+        <div className="rounded-xl border border-emerald-500/25 bg-card p-3.5 shadow-sm space-y-2.5 text-left animate-in fade-in duration-200">
           <div className="flex items-center justify-between border-b border-slate-200 dark:border-white/[0.06] pb-2">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300">
-              <Sparkles className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+            <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-800 dark:text-emerald-300">
+              <Sparkles className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-400" />
               <span>Kinova Financial Advice</span>
             </div>
             <button
@@ -2065,11 +2065,11 @@ export function SmartQuickInput() {
           {assistantResult.proposedAction && (
             <div className="pt-1 space-y-2">
               {assistantResult.proposedAction.type === 'rebalance_caps' && (
-                <div className="text-xs bg-indigo-50/80 dark:bg-indigo-950/40 p-2.5 rounded-xl border border-indigo-200/60 dark:border-indigo-800/60 text-indigo-900 dark:text-indigo-200">
+                <div className="text-xs bg-emerald-500/[0.08] p-2.5 rounded-xl border border-emerald-500/20 text-foreground">
                   <div className="font-semibold flex items-center gap-1.5 mb-1">
                     <span>⚖️ Proposed Budget Rebalance</span>
                   </div>
-                  <div className="text-[11px] text-indigo-700 dark:text-indigo-300">
+                  <div className="text-[11px] text-emerald-800 dark:text-emerald-300">
                     {(assistantResult.proposedAction.payload as any)?.donorSummary || (assistantResult.proposedAction.payload as any)?.explanation || 'Trims unspent slack to balance overspent categories.'}
                   </div>
                 </div>
@@ -2088,7 +2088,7 @@ export function SmartQuickInput() {
                 <button
                   type="button"
                   onClick={() => void handleExecuteProposedAction(assistantResult.proposedAction!)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow transition-all cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white font-semibold text-xs shadow-sm transition-all cursor-pointer"
                 >
                   <span>{assistantResult.proposedAction.label}</span>
                 </button>
@@ -2134,10 +2134,10 @@ export function SmartQuickInput() {
           <div
             role="status"
             aria-live="polite"
-            className="rounded-2xl border border-indigo-500/25 bg-indigo-500/10 p-3 text-sm text-slate-900 dark:text-white leading-relaxed animate-in fade-in duration-200"
+            className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] p-3 text-sm text-foreground leading-relaxed animate-in fade-in duration-200"
           >
             <div className="flex items-start gap-2">
-              <Sparkles aria-hidden="true" className="h-4 w-4 shrink-0 mt-0.5 text-indigo-600 dark:text-indigo-400" />
+              <Sparkles aria-hidden="true" className="h-4 w-4 shrink-0 mt-0.5 text-emerald-700 dark:text-emerald-400" />
               <p>{assistantResult.answer || assistantResult.reasoning}</p>
             </div>
           </div>
@@ -2154,7 +2154,7 @@ export function SmartQuickInput() {
           >
             {/* If a receipt is attached, render full interactive preview card */}
             {receiptAttachment && activeCommand.intent === 'transaction' && activeCommand.data ? (
-              <div className="rounded-2xl border border-indigo-500/30 bg-white/90 dark:bg-zinc-950/80 p-3 sm:p-4 text-left shadow-lg space-y-3">
+              <div className="rounded-xl border border-black/[0.08] dark:border-white/[0.08] bg-card p-3 sm:p-4 text-left shadow-sm space-y-3">
                 {/* Header */}
                 <div className="flex items-center justify-between gap-2 border-b border-slate-200 dark:border-white/[0.06] pb-2.5">
                   <div className="flex items-center gap-2">
@@ -2188,10 +2188,10 @@ export function SmartQuickInput() {
                       type="checkbox"
                       checked={saveReceiptPhoto}
                       onChange={(e) => setSaveReceiptPhoto(e.target.checked)}
-                      className="h-3.5 w-3.5 rounded border-slate-300 dark:border-zinc-700 bg-slate-100 dark:bg-zinc-800 text-indigo-700 dark:text-indigo-500 focus:ring-indigo-400 accent-indigo-500"
+                      className="h-3.5 w-3.5 rounded border-black/[0.15] dark:border-white/[0.15] bg-background text-emerald-700 dark:text-emerald-400 focus:ring-emerald-500 accent-emerald-600"
                     />
                     <span className="flex items-center gap-1.5 font-medium">
-                      <Paperclip className="h-3.5 w-3.5 text-indigo-800 dark:text-indigo-400" />
+                      <Paperclip className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-400" />
                       <span>Save receipt photo to Google Drive</span>
                     </span>
                   </label>
@@ -2225,8 +2225,8 @@ export function SmartQuickInput() {
 
                 {/* Pass 2 Assistant Interpretation & Proposed Action */}
                 {assistantResult && (assistantResult.answer || assistantResult.reasoning) && (
-                  <div className="flex items-start gap-2.5 rounded-xl bg-indigo-500/10 border border-indigo-500/25 p-3 text-xs text-indigo-900 dark:text-indigo-200">
-                    <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+                  <div className="flex items-start gap-2.5 rounded-xl bg-emerald-500/[0.07] border border-emerald-500/20 p-3 text-xs text-foreground">
+                    <Sparkles className="h-4 w-4 text-emerald-700 dark:text-emerald-400 shrink-0 mt-0.5" />
                     <div className="space-y-1.5 flex-1">
                       <div className="font-semibold text-slate-900 dark:text-white leading-snug">
                         {assistantResult.answer}
@@ -2241,7 +2241,7 @@ export function SmartQuickInput() {
                           <button
                             type="button"
                             onClick={() => void handleQuickSubmit()}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md transition-all cursor-pointer"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white font-semibold text-xs shadow-sm transition-all cursor-pointer"
                           >
                             <Check className="h-3.5 w-3.5" />
                             <span>{assistantResult.proposedAction.label || 'Save this expense'}</span>
@@ -2293,7 +2293,7 @@ export function SmartQuickInput() {
                               });
                             }
                           }}
-                          className="text-[10px] text-indigo-800 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 font-medium cursor-pointer"
+                          className="text-[10px] text-emerald-700 dark:text-emerald-400 hover:underline font-medium cursor-pointer"
                         >
                           Select all
                         </button>
@@ -2311,13 +2311,13 @@ export function SmartQuickInput() {
                             onClick={() => toggleReceiptItem(idx)}
                             className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all cursor-pointer ${
                               isSelected
-                                ? 'bg-indigo-600/30 border border-indigo-500/50 text-slate-950 dark:text-white shadow-sm'
-                                : 'bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-500 dark:text-zinc-400 line-through opacity-60'
+                                ? 'bg-emerald-500/15 border border-emerald-500/40 text-foreground shadow-sm'
+                                : 'bg-background border border-black/[0.08] dark:border-white/[0.08] text-muted-foreground line-through opacity-60'
                             }`}
                           >
                             <span>{isSelected ? '✓' : '✗'}</span>
                             {qty > 1 && (
-                              <span className="rounded bg-indigo-500/20 px-1 py-0.2 font-mono text-[10px] font-bold text-indigo-900 dark:text-indigo-200">
+                              <span className="rounded bg-emerald-500/20 px-1 py-0.2 font-mono text-[10px] font-bold text-emerald-900 dark:text-emerald-200">
                                 {qty}×
                               </span>
                             )}
@@ -2343,7 +2343,7 @@ export function SmartQuickInput() {
                       type="text"
                       value={activeCommand.data.description}
                       onChange={(e) => updateTransactionData({ description: e.target.value })}
-                      className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 text-sm text-slate-950 dark:text-white outline-none focus:border-indigo-500 transition-colors"
+                      className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 text-sm text-slate-950 dark:text-white outline-none focus:border-emerald-500 transition-colors"
                     />
                   </div>
                   <div className="space-y-1">
@@ -2353,7 +2353,7 @@ export function SmartQuickInput() {
                       step="0.01"
                       value={activeCommand.data.amount}
                       onChange={(e) => updateTransactionData({ amount: Number(e.target.value) || 0 })}
-                      className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 font-mono font-bold text-sm text-emerald-800 dark:text-emerald-400 outline-none focus:border-indigo-500 transition-colors"
+                      className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 font-mono font-bold text-sm text-emerald-800 dark:text-emerald-400 outline-none focus:border-emerald-500 transition-colors"
                     />
                   </div>
                   <div className="sm:col-span-3">
@@ -2370,7 +2370,7 @@ export function SmartQuickInput() {
                       type="date"
                       value={activeCommand.data.date}
                       onChange={(e) => updateTransactionData({ date: e.target.value })}
-                      className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 text-xs text-slate-950 dark:text-white outline-none focus:border-indigo-500 transition-colors"
+                      className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 text-xs text-slate-950 dark:text-white outline-none focus:border-emerald-500 transition-colors"
                     />
                   </div>
                   <div className="space-y-1">
@@ -2378,7 +2378,7 @@ export function SmartQuickInput() {
                     <select
                       value={activeCommand.data.category}
                       onChange={(e) => updateTransactionData({ category: e.target.value })}
-                      className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-2.5 text-xs text-slate-950 dark:text-white outline-none focus:border-indigo-500 transition-colors"
+                      className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-2.5 text-xs text-slate-950 dark:text-white outline-none focus:border-emerald-500 transition-colors"
                     >
                       {EXPENSE_CATEGORIES.map((cat) => (
                         <option key={cat} value={cat}>{cat}</option>
@@ -2445,7 +2445,7 @@ export function SmartQuickInput() {
                               });
                             }
                           }}
-                          className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 pr-8 font-mono text-xs text-amber-800 dark:text-amber-300 outline-none focus:border-indigo-500 transition-colors"
+                          className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 pr-8 font-mono text-xs text-amber-800 dark:text-amber-300 outline-none focus:border-emerald-500 transition-colors"
                         />
                         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-500 dark:text-zinc-400 font-mono pointer-events-none">%</span>
                       </div>
@@ -2527,7 +2527,7 @@ export function SmartQuickInput() {
                     type="button"
                     onClick={() => void handleQuickSubmit()}
                     disabled={isSubmitting}
-                    className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-1.5 text-xs font-bold text-white dark:text-white shadow-lg shadow-emerald-500/20 hover:from-emerald-400 hover:to-teal-400 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50"
+                    className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-white shadow-sm active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50"
                   >
                     {isSubmitting ? (
                       <>
@@ -2551,13 +2551,13 @@ export function SmartQuickInput() {
                     <span className="text-[11px] font-semibold text-slate-600 dark:text-zinc-400">Preview:</span>
                     
                     {assistantResult?.command || (aiParsed && isAiEnhanced) ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-indigo-500/20 to-purple-500/20 text-indigo-800 dark:text-indigo-300 border border-indigo-500/40 text-[10px] font-bold shadow-sm">
-                        <Sparkles className="h-3 w-3 text-indigo-700 dark:text-indigo-400 animate-pulse" />
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/12 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30 text-[10px] font-bold">
+                        <Sparkles className="h-3 w-3 text-emerald-700 dark:text-emerald-400" />
                         Kinova Assistant
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-slate-300 dark:border-zinc-700 text-[10px] font-medium shadow-sm">
-                        ⚡ Quick parse
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/[0.04] dark:bg-white/[0.05] text-muted-foreground border border-black/[0.08] dark:border-white/[0.08] text-[10px] font-medium">
+                        Quick parse
                       </span>
                     )}
 
@@ -2567,17 +2567,17 @@ export function SmartQuickInput() {
                           type="button"
                           onClick={() => setIsEditingDetails(!isEditingDetails)}
                           title="Click to edit details"
-                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-800 dark:text-indigo-300 border border-indigo-500/30 font-medium hover:bg-indigo-500/25 transition-colors cursor-pointer"
+                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/12 text-emerald-800 dark:text-emerald-300 border border-emerald-500/25 font-medium hover:bg-emerald-500/20 transition-colors cursor-pointer"
                         >
                           <span>{CATEGORY_EMOJIS[activeCommand.data.category] || '🏷️'}</span>
                           <span>{activeCommand.data.category}</span>
                         </button>
-                        <span className="font-mono font-bold text-slate-950 dark:text-white px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-zinc-800/80 border border-slate-300 dark:border-zinc-700/60">
+                        <span className="font-mono font-bold text-foreground px-2 py-0.5 rounded-lg bg-black/[0.04] dark:bg-white/[0.05] border border-black/[0.08] dark:border-white/[0.08]">
                           {activeCommand.data.currency} {activeCommand.data.amount.toFixed(2)}
                         </span>
                         {localParsed?.formula && !aiParsed && (
-                          <span className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-mono font-semibold text-indigo-800 dark:text-indigo-300">
-                            🧮 {localParsed.formula}
+                          <span className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-mono font-semibold text-amber-800 dark:text-amber-300">
+                            {localParsed.formula}
                           </span>
                         )}
                         {(activeCommand.data.taxAmount != null || activeCommand.data.taxRate != null) && (
@@ -2592,7 +2592,7 @@ export function SmartQuickInput() {
                         )}
                         <span className="text-slate-800 dark:text-zinc-200 font-semibold truncate max-w-[200px]">
                           &ldquo;{activeCommand.data.description}&rdquo;{localParsed?.habitMatch && (
-                            <span className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-semibold text-purple-800 dark:text-purple-300">
+                            <span className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-semibold text-amber-800 dark:text-amber-300">
                               ✨ ({localParsed.habitMatch.matchedVia === 'keyword' || localParsed.habitMatch.matchedVia === 'compact' || localParsed.habitMatch.matchedVia === 'stem'
                                 ? `字眼: ${localParsed.habitMatch.matchedToken || localParsed.habitMatch.rawPattern}`
                                 : `习惯: 转给 ${localParsed.habitMatch.rawPattern}`})
@@ -2641,7 +2641,7 @@ export function SmartQuickInput() {
                           }}
                           disabled={isAssistantThinking || isSubmitting}
                           title="Bypass quick parse and ask Kinova AI to interpret (Ctrl+Enter)"
-                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/25 text-[10px] font-medium hover:bg-purple-500/20 transition-colors cursor-pointer"
+                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-500/25 text-[10px] font-medium hover:bg-amber-500/20 transition-colors cursor-pointer"
                         >
                           <Sparkles className="h-3 w-3" />
                           <span>Ask Kinova</span>
@@ -2705,8 +2705,8 @@ export function SmartQuickInput() {
                         onClick={() => setIsEditingDetails((prev) => !prev)}
                         className={`text-[11px] font-bold flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all cursor-pointer shrink-0 ${
                           isEditingDetails
-                            ? 'bg-indigo-500/20 text-indigo-800 dark:text-indigo-200 border-indigo-500/40 shadow-sm'
-                            : 'bg-slate-100 dark:bg-zinc-800/80 text-indigo-800 dark:text-indigo-300 border-indigo-500/30 hover:bg-indigo-500/15 hover:text-slate-950 dark:hover:text-white'
+                            ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-200 border-emerald-500/40 shadow-sm'
+                            : 'bg-black/[0.03] dark:bg-white/[0.04] text-emerald-800 dark:text-emerald-300 border-emerald-500/25 hover:bg-emerald-500/12'
                         }`}
                       >
                         <Pencil className="h-3 w-3" />
@@ -2737,16 +2737,16 @@ export function SmartQuickInput() {
 
                 {/* Expandable inline editor for typed commands */}
                 {isEditingDetails && activeCommand.intent === 'transaction' && activeCommand.data && (
-                  <div className="rounded-2xl border border-indigo-500/30 bg-white/90 dark:bg-zinc-950/80 p-3 sm:p-4 text-left shadow-lg space-y-3 mt-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
-                    <div className="flex items-center justify-between border-b border-slate-200 dark:border-white/[0.06] pb-2">
-                      <div className="flex items-center gap-1.5 text-xs text-indigo-800 dark:text-indigo-300 font-semibold">
+                  <div className="rounded-xl border border-emerald-500/25 bg-card p-3 sm:p-4 text-left shadow-sm space-y-3 mt-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                    <div className="flex items-center justify-between border-b border-black/[0.06] dark:border-white/[0.06] pb-2">
+                      <div className="flex items-center gap-1.5 text-xs text-emerald-800 dark:text-emerald-300 font-semibold">
                         <Pencil className="h-3.5 w-3.5" />
                         <span>Edit transaction details before saving</span>
                       </div>
                       <button
                         type="button"
                         onClick={() => setIsEditingDetails(false)}
-                        className="text-[11px] text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white cursor-pointer"
+                        className="text-[11px] text-muted-foreground hover:text-foreground cursor-pointer"
                       >
                         Done
                       </button>
@@ -2754,39 +2754,39 @@ export function SmartQuickInput() {
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       <div className="sm:col-span-2 space-y-1">
-                        <label className="text-[10px] uppercase font-bold tracking-wider text-slate-600 dark:text-zinc-400">Description</label>
+                        <label className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Description</label>
                         <input
                           type="text"
                           value={activeCommand.data.description}
                           onChange={(e) => updateTransactionData({ description: e.target.value })}
-                          className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 text-sm text-slate-950 dark:text-white outline-none focus:border-indigo-500 transition-colors"
+                          className="w-full h-9 rounded-xl border border-black/[0.1] dark:border-white/[0.1] bg-background px-3 text-sm text-foreground outline-none focus:border-emerald-600 transition-colors"
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] uppercase font-bold tracking-wider text-slate-600 dark:text-zinc-400">Total Amount ({activeCommand.data.currency})</label>
+                        <label className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Total Amount ({activeCommand.data.currency})</label>
                         <input
                           type="number"
                           step="0.01"
                           value={activeCommand.data.amount}
                           onChange={(e) => updateTransactionData({ amount: Number(e.target.value) || 0 })}
-                          className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 font-mono font-bold text-sm text-emerald-800 dark:text-emerald-400 outline-none focus:border-indigo-500 transition-colors"
+                          className="w-full h-9 rounded-xl border border-black/[0.1] dark:border-white/[0.1] bg-background px-3 font-mono font-bold text-sm text-emerald-700 dark:text-emerald-400 outline-none focus:border-emerald-600 transition-colors"
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] uppercase font-bold tracking-wider text-slate-600 dark:text-zinc-400">Date</label>
+                        <label className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Date</label>
                         <input
                           type="date"
                           value={activeCommand.data.date}
                           onChange={(e) => updateTransactionData({ date: e.target.value })}
-                          className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 text-xs text-slate-950 dark:text-white outline-none focus:border-indigo-500 transition-colors"
+                          className="w-full h-9 rounded-xl border border-black/[0.1] dark:border-white/[0.1] bg-background px-3 text-xs text-foreground outline-none focus:border-emerald-600 transition-colors"
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] uppercase font-bold tracking-wider text-slate-600 dark:text-zinc-400">Category</label>
+                        <label className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Category</label>
                         <select
                           value={activeCommand.data.category}
                           onChange={(e) => updateTransactionData({ category: e.target.value })}
-                          className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-2.5 text-xs text-slate-950 dark:text-white outline-none focus:border-indigo-500 transition-colors"
+                          className="w-full h-9 rounded-xl border border-black/[0.1] dark:border-white/[0.1] bg-background px-2.5 text-xs text-foreground outline-none focus:border-emerald-600 transition-colors"
                         >
                           {EXPENSE_CATEGORIES.map((cat) => (
                             <option key={cat} value={cat}>{cat}</option>
@@ -2827,7 +2827,7 @@ export function SmartQuickInput() {
                                 amount: Number((base + newTax).toFixed(2))
                               });
                             }}
-                            className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 pr-8 font-mono text-xs text-amber-800 dark:text-amber-300 outline-none focus:border-indigo-500 transition-colors"
+                            className="w-full h-9 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 px-3 pr-8 font-mono text-xs text-amber-800 dark:text-amber-300 outline-none focus:border-emerald-500 transition-colors"
                           />
                           <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-500 dark:text-zinc-400 font-mono pointer-events-none">%</span>
                         </div>
@@ -2854,7 +2854,7 @@ export function SmartQuickInput() {
                         type="button"
                         onClick={() => void handleQuickSubmit()}
                         disabled={isSubmitting}
-                        className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-1.5 text-xs font-bold text-white dark:text-white shadow-lg shadow-emerald-500/20 hover:from-emerald-400 hover:to-teal-400 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50"
+                        className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-white shadow-sm active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50"
                       >
                         {isSubmitting ? (
                           <>

@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getValidGoogleSession } from '@/lib/google-auth';
 import { recordUserAiCall } from '@/lib/admin-registry';
-import { getLoadBalancedGeminiKeys, reportGeminiKeyFailure, generateGeminiContent, STANDARD_GEMINI_MODEL, STANDARD_GEMINI_MODELS } from '@/lib/gemini-key-pool';
-
-interface GroundedWebSource {
-  title: string;
-  uri: string;
-}
+import { getLoadBalancedGeminiKeys, generateGeminiWithSearchFallback, type GroundedWebSource } from '@/lib/gemini-key-pool';
 
 interface StockQuoteSummary {
   ticker: string;
@@ -138,90 +133,23 @@ ${quoteContext}
 
 ⚠️ 提示：以上为公开信息参考，投资有风险，决策需独立。`;
 
-    const preferredModel = process.env.GEMINI_MODEL || STANDARD_GEMINI_MODEL;
-    const models = [preferredModel, ...STANDARD_GEMINI_MODELS].filter((v, i, a) => a.indexOf(v) === i);
-
     let summary = '';
     let sources: GroundedWebSource[] = [];
 
-    // Phase 1: Try with Google Search tool (5.5s timeout)
-    searchLoop: for (const apiKey of apiKeys) {
-      for (const model of models) {
-        try {
-          const searchRes = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-goog-api-key': apiKey,
-              },
-              body: JSON.stringify({
-                contents: [{ role: 'user', parts: [{ text: prompt }] }],
-                tools: [{ google_search: {} }],
-                generationConfig: {
-                  temperature: 0.1,
-                  maxOutputTokens: 1000,
-                  thinkingConfig: {
-                    thinkingBudget: 0,
-                  },
-                },
-              }),
-              signal: AbortSignal.timeout(5500),
-            }
-          ).catch(() => null);
-
-          if (searchRes && searchRes.ok) {
-            const data = await searchRes.json();
-            const candidate = data?.candidates?.[0];
-            const text = Array.isArray(candidate?.content?.parts)
-              ? candidate.content.parts
-                  .map((part: { text?: unknown }) => safeText(part?.text, 9000))
-                  .filter(Boolean)
-                  .join('\n')
-                  .slice(0, 10000)
-              : '';
-            if (text) {
-              summary = text;
-              const groundingChunks = candidate?.groundingMetadata?.groundingChunks;
-              if (Array.isArray(groundingChunks)) {
-                sources = groundingChunks
-                  .flatMap((chunk: Record<string, unknown>) => {
-                    const web = chunk?.web as Record<string, unknown> | undefined;
-                    const uri = safeText(web?.uri, 500);
-                    const title = safeText(web?.title, 160);
-                    if (!uri || !/^https:\/\//i.test(uri)) return [];
-                    return [{ title: title || new URL(uri).hostname, uri }];
-                  })
-                  .filter((source, index, all) => all.findIndex((cand) => cand.uri === source.uri) === index)
-                  .slice(0, 5);
-              }
-              break searchLoop;
-            }
-          } else if (searchRes && (searchRes.status === 429 || searchRes.status === 401 || searchRes.status === 403 || searchRes.status >= 500)) {
-            reportGeminiKeyFailure(apiKey, searchRes.status);
-          }
-        } catch {
-          // Continue
-        }
-      }
-    }
-
-    // Phase 2: If Search failed or timed out, fall back immediately to direct generation!
-    if (!summary) {
-      try {
-        const directResult = await generateGeminiContent({
-          prompt,
-          thinking: false,
-          thinkingBudget: 0,
-          temperature: 0.1,
-          maxOutputTokens: 1000,
-          timeoutMs: 10_000,
-        });
-        summary = directResult.rawText.slice(0, 10000);
-      } catch (directErr) {
-        console.warn('[StockInsights] Direct generation fallback error:', directErr);
-      }
+    try {
+      const searchResult = await generateGeminiWithSearchFallback({
+        prompt,
+        maxOutputTokens: 1000,
+        temperature: 0.1,
+        searchTimeoutMs: 4_500,
+        searchTotalTimeoutMs: 7_500,
+        directTimeoutMs: 8_000,
+        directTotalTimeoutMs: 12_000,
+      });
+      summary = searchResult.summary.slice(0, 10000);
+      sources = searchResult.sources;
+    } catch (directErr) {
+      console.warn('[StockInsights] Generation error:', directErr);
     }
 
     if (!summary) {

@@ -128,11 +128,11 @@ export function MoneyCalculator({
           aria-expanded={isOpen}
           className={`inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-[11px] font-bold border transition-all cursor-pointer touch-manipulation active:scale-95 ${
             isOpen
-              ? 'border-indigo-500 bg-indigo-500/20 text-indigo-800 dark:text-indigo-200 shadow-sm'
-              : 'border-slate-200 dark:border-zinc-800 bg-slate-100/90 dark:bg-zinc-900/70 text-slate-700 dark:text-zinc-300 hover:border-indigo-500/40 hover:text-slate-950 dark:hover:text-white'
+              ? 'border-emerald-500 -emerald-/20 text-emerald-800 dark:text-emerald-200 shadow-sm'
+              : 'border-slate-200 dark:border-zinc-800 bg-slate-100/90 dark:bg-zinc-900/70 text-slate-700 dark:text-zinc-300 hover:border-emerald-500/40 hover:text-slate-950 dark:hover:text-white'
           }`}
         >
-          <Calculator className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+          <Calculator className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
           <span>{isOpen ? 'Hide Calculator' : 'Calculator'}</span>
         </button>
 
@@ -148,7 +148,7 @@ export function MoneyCalculator({
             <Check className="h-3 w-3" />
           </button>
         ) : lastHistory ? (
-          <span className="text-[10px] font-mono text-indigo-700 dark:text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-lg truncate max-w-[220px]">
+          <span className="text-[10px] font-mono text-emerald-700 dark:text-emerald-300 -emerald-/10 border border-emerald-500/20 px-2 py-0.5 rounded-lg truncate max-w-[220px]">
             🧾 {lastHistory}
           </span>
         ) : null}
@@ -164,14 +164,14 @@ export function MoneyCalculator({
             transition={{ duration: 0.18, ease: 'easeOut' }}
             className="overflow-hidden"
           >
-            <div className="rounded-2xl border border-indigo-500/30 bg-slate-50/95 dark:bg-zinc-900/90 p-3 shadow-inner space-y-2.5">
+            <div className="rounded-2xl border border-emerald-500/30 bg-slate-50/95 dark:bg-zinc-900/90 p-3 shadow-inner space-y-2.5">
               {/* Expression Input / Tape Display */}
               <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3 py-2">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-zinc-400 font-medium mb-0.5">
                     <span>Formula (e.g. 25 + 12 - 3 + 6%)</span>
                     {lastHistory && (
-                      <span className="font-mono text-indigo-700 dark:text-indigo-400 truncate ml-2">{lastHistory}</span>
+                      <span className="font-mono text-emerald-700 dark:text-emerald-400 truncate ml-2">{lastHistory}</span>
                     )}
                   </div>
                   <input
@@ -222,14 +222,14 @@ export function MoneyCalculator({
                 <button
                   type="button"
                   onClick={() => appendToken('%')}
-                  className="min-h-[38px] rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs font-mono font-bold text-indigo-700 dark:text-indigo-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-all cursor-pointer active:scale-95 flex items-center justify-center"
+                  className="min-h-[38px] rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs font-mono font-bold text-emerald-700 dark:text-emerald-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-all cursor-pointer active:scale-95 flex items-center justify-center"
                 >
                   %
                 </button>
                 <button
                   type="button"
                   onClick={() => appendToken('÷')}
-                  className="min-h-[38px] rounded-xl border border-indigo-500/30 bg-indigo-500/15 text-sm font-mono font-bold text-indigo-800 dark:text-indigo-300 hover:bg-indigo-500/25 transition-all cursor-pointer active:scale-95"
+                  className="min-h-[38px] rounded-xl border border-emerald-500/30 -emerald-/15 text-sm font-mono font-bold text-emerald-800 dark:text-emerald-300 -emerald-/25 transition-all cursor-pointer active:scale-95"
                 >
                   ÷
                 </button>
@@ -248,7 +248,7 @@ export function MoneyCalculator({
                 <button
                   type="button"
                   onClick={() => appendToken('×')}
-                  className="min-h-[38px] rounded-xl border border-indigo-500/30 bg-indigo-500/15 text-sm font-mono font-bold text-indigo-800 dark:text-indigo-300 hover:bg-indigo-500/25 transition-all cursor-pointer active:scale-95"
+                  className="min-h-[38px] rounded-xl border border-emerald-500/30 -emerald-/15 text-sm font-mono font-bold text-emerald-800 dark:text-emerald-300 -emerald-/25 transition-all cursor-pointer active:scale-95"
                 >
                   ×
                 </button>
@@ -314,7 +314,7 @@ export function MoneyCalculator({
                     handleApplyEquals();
                     setIsOpen(false);
                   }}
-                  className="col-span-2 min-h-[38px] rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-xs font-bold text-white shadow-md shadow-indigo-500/20 transition-all cursor-pointer active:scale-95 flex items-center justify-center gap-1.5"
+                  className="col-span-2 min-h-[38px] rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-xs font-bold text-white shadow-md transition-all cursor-pointer active:scale-95 flex items-center justify-center gap-1.5"
                 >
                   <Check className="h-3.5 w-3.5" />
                   <span>= Apply ({evaluated.value !== null ? evaluated.value.toFixed(2) : '0.00'})</span>

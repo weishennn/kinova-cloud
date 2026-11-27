@@ -1,6 +1,14 @@
 import crypto from 'crypto';
 import { matchMerchantCategoryRule } from './merchant-rules.ts';
 import { normalizeToCanonicalCategory } from './canonical-categories.ts';
+import {
+  STANDARD_GEMINI_MODEL,
+  STANDARD_GEMINI_MODELS,
+  sanitizeGeminiModelName,
+  orderModelsByHealth,
+  reportGeminiModelFailure,
+  buildThinkingConfigForModel,
+} from './gemini-key-pool.ts';
 
 export type ShortcutTriggerSource = 'back_tap_screenshot' | 'apple_pay_wallet';
 
@@ -866,11 +874,7 @@ export function inspectShortcutUrlSafety(urlStr: string): {
  * - Gemini 2.5 Flash disables thinking cleanly via `thinkingBudget: 0` (~2s latency).
  */
 export function getThinkingConfigForShortcutModel(model: string): Record<string, unknown> {
-  const normalized = String(model || '').toLowerCase();
-  if (/gemini-(?:3|4)|flash-latest/.test(normalized)) {
-    return { thinkingLevel: 'low' };
-  }
-  return { thinkingBudget: 0 };
+  return buildThinkingConfigForModel(model, false, 0);
 }
 
 /**
@@ -953,15 +957,10 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
       : splitKeys(options.geminiKey);
   const effectiveKeys = candidateKeys.length > 0 ? candidateKeys : [''];
 
-  const preferred = (options.preferredModel || 'gemini-2.5-flash').trim();
-  const candidateModels = [
-    preferred,
-    'gemini-3.5-flash',
-    'gemini-2.5-flash',
-    'gemini-flash-latest',
-    'gemini-3.6-flash',
-  ]
-    .filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
+  const preferred = sanitizeGeminiModelName(options.preferredModel) || STANDARD_GEMINI_MODEL;
+  const candidateModels = orderModelsByHealth(
+    [preferred, ...STANDARD_GEMINI_MODELS].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i)
+  );
 
   let parsedOcr: Record<string, unknown> = {};
   let ocrFallbackNotice = '';
@@ -1179,8 +1178,9 @@ export async function runShortcutGeminiOcrWithFastFail(options: {
           ? '云端 AI 识别超时'
           : '连接云端 AI 网络异常';
         options.onKeyFailure?.(activeKey, isTimeout ? 504 : 502);
+        reportGeminiModelFailure(model, isTimeout ? 'timeout' : 'network');
 
-        // Self-heal on timeout/network error: try next model (and/or key) while deadline has time left
+        // Self-heal on timeout/network error: try next model immediately while deadline has time left
         if (idx + 1 < candidateModels.length && deadline - Date.now() > 1500) {
           shouldTryNextModel = true;
           break;

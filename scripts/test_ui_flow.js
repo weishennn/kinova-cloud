@@ -315,7 +315,7 @@ async function runTests() {
       const buttons = Array.from(document.querySelectorAll('#record-transaction-dialog form button'));
       buttons.find((candidate) => candidate.textContent?.trim() === 'Investment')?.click();
     });
-    await page.click('[aria-label="Select category Other Savings"]');
+    await page.click('[aria-label="Select category Stocks & Crypto"]');
     await fillAndSubmit('15.25', investmentDescription);
     const investmentCard = await page.evaluate((description) =>
       Array.from(document.querySelectorAll('[aria-label^="View transaction "]'))
@@ -329,7 +329,7 @@ async function runTests() {
     console.log('✓ Investment is saved and announced as investment.');
 
     await page.waitForFunction(() => {
-      const summaryValues = Array.from(document.querySelectorAll('.grid.grid-cols-2 .font-mono'))
+      const summaryValues = Array.from(document.querySelectorAll('.grid.grid-cols-3 .font-mono'))
         .map((element) => (element.textContent || '').replace(/\s+/g, ' ').trim());
       return summaryValues.includes('RM 50.00') && summaryValues.includes('RM 0.00');
     }, { timeout: 10000 });

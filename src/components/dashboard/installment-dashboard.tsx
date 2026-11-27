@@ -223,71 +223,88 @@ export function InstallmentDashboard() {
   }, [activePlans]);
 
   if (plans.length === 0 && !isLoading) {
-    return null; // No installments recorded yet
+    return (
+      <div className="rounded-[20px] border border-black/[0.08] dark:border-white/[0.08] bg-card px-5 py-6 shadow-[0_1px_2px_rgba(17,20,24,0.03)] flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="h-9 w-9 rounded-xl bg-emerald-500/12 border border-emerald-500/25 text-emerald-700 dark:text-emerald-400 flex items-center justify-center shrink-0">
+            <CreditCard className="h-4.5 w-4.5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-foreground truncate">All Clear · 0 Active Plans</p>
+            <p className="text-xs text-muted-foreground truncate">
+              No active 0% EPP or monthly installment debt commitments right now.
+            </p>
+          </div>
+        </div>
+        <span className="text-[11px] font-mono font-semibold px-2.5 py-1 rounded-full bg-emerald-500/12 text-emerald-800 dark:text-emerald-300 border border-emerald-500/25 shrink-0">
+          Debt-Free
+        </span>
+      </div>
+    );
   }
 
   return (
-    <div className="rounded-3xl border border-slate-200 dark:border-white/[0.08] bg-card/60 p-5 sm:p-6 backdrop-blur-2xl shadow-xl space-y-5">
+    <div className="rounded-[22px] border border-black/[0.08] dark:border-white/[0.08] bg-card p-5 sm:p-6 shadow-[0_1px_2px_rgba(17,20,24,0.03)] space-y-5">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2.5 rounded-2xl bg-purple-500/15 border border-purple-500/30 text-violet-800 dark:text-purple-400 shadow-sm shrink-0">
-            <CreditCard className="h-5 w-5" />
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-black/[0.06] dark:border-white/[0.06] pb-4">
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 rounded-xl bg-amber-500/12 border border-amber-500/25 text-amber-700 dark:text-amber-400 flex items-center justify-center shrink-0">
+            <CreditCard className="h-4.5 w-4.5" />
           </div>
           <div>
-            <h2 className="text-base sm:text-lg font-bold text-slate-950 dark:text-white tracking-tight">
+            <h2 className="text-sm sm:text-base font-semibold text-foreground tracking-tight">
               Active Installment & Debt Commitment
             </h2>
-            <p className="text-xs text-slate-600 dark:text-zinc-400">
+            <p className="text-xs text-muted-foreground">
               Track ongoing 0% EPP & monthly installment commitments
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="px-3 py-1 rounded-full text-xs font-semibold bg-purple-500/10 border border-purple-500/25 text-violet-800 dark:text-purple-300">
+          <span className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/12 border border-amber-500/25 text-amber-800 dark:text-amber-300">
             {activePlans.length} Active {activePlans.length === 1 ? 'Plan' : 'Plans'}
           </span>
         </div>
       </div>
 
-      {/* Hero Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      {/* Hero Stats Grid — unified hairline strip */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-black/[0.06] dark:divide-white/[0.06] rounded-xl bg-black/[0.02] dark:bg-white/[0.025] border border-black/[0.06] dark:border-white/[0.06]">
         {/* Monthly Commitment */}
-        <div className="rounded-2xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/50 p-4 space-y-1 shadow-sm">
-          <span className="text-[11px] font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider block">
+        <div className="p-4 space-y-1">
+          <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
             Monthly Commitment
           </span>
-          <div className="text-xl sm:text-2xl font-black font-mono tabular-nums text-violet-800 dark:text-purple-400">
+          <div className="text-xl sm:text-2xl font-extrabold font-mono tabular-nums text-amber-700 dark:text-amber-400">
             RM {totalMonthlyCommitment.toFixed(2)}
-            <span className="text-xs text-slate-600 dark:text-zinc-400 font-normal ml-1">/ month</span>
+            <span className="text-xs text-muted-foreground font-normal ml-1">/ month</span>
           </div>
-          <p className="text-[11px] text-slate-600 dark:text-zinc-400">Auto-deducted from living cashflow</p>
+          <p className="text-[11px] text-muted-foreground">Auto-deducted from living cashflow</p>
         </div>
 
         {/* Total Remaining Debt */}
-        <div className="rounded-2xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/50 p-4 space-y-1 shadow-sm">
-          <span className="text-[11px] font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider block">
+        <div className="p-4 space-y-1">
+          <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
             Remaining Debt Balance
           </span>
-          <div className="text-xl sm:text-2xl font-black font-mono tabular-nums whitespace-nowrap text-slate-950 dark:text-white">
+          <div className="text-xl sm:text-2xl font-extrabold font-mono tabular-nums whitespace-nowrap text-foreground">
             RM{'\u00A0'}{totalRemainingDebt.toFixed(2)}
           </div>
-          <p className="text-[11px] text-emerald-800 dark:text-emerald-400 flex items-center gap-1 font-medium">
+          <p className="text-[11px] text-emerald-700 dark:text-emerald-400 flex items-center gap-1 font-medium">
             <TrendingDown className="h-3 w-3" /> {overallProgress}% already paid off
           </p>
         </div>
 
         {/* Debt-Free Target Date */}
-        <div className="rounded-2xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/50 p-4 space-y-1 shadow-sm">
-          <span className="text-[11px] font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider block">
+        <div className="p-4 space-y-1">
+          <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
             Debt-Free Target
           </span>
-          <div className="text-xl sm:text-2xl font-black font-mono tabular-nums text-emerald-800 dark:text-emerald-400">
+          <div className="text-xl sm:text-2xl font-extrabold font-mono tabular-nums text-emerald-700 dark:text-emerald-400">
             {furthestEndDate}
           </div>
-          <p className="text-[11px] text-slate-600 dark:text-zinc-400 flex items-center gap-1">
-            <Sparkles className="h-3 w-3 text-violet-800 dark:text-purple-400" />
+          <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+            <Sparkles className="h-3 w-3 text-amber-600 dark:text-amber-400" />
             {activePlans.length > 0 ? 'Projected debt-free milestone' : 'All installments cleared!'}
           </p>
         </div>
@@ -296,10 +313,10 @@ export function InstallmentDashboard() {
       {/* Individual Plan Cards List */}
       <div className="space-y-3 pt-1">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold text-slate-700 dark:text-zinc-300 uppercase tracking-wider block">
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
             Ongoing Installment Plans
           </span>
-          <span className="text-[11px] text-slate-600 dark:text-zinc-400 hidden sm:inline">
+          <span className="text-[11px] text-muted-foreground hidden sm:inline">
             Tap any plan to edit or reschedule
           </span>
         </div>
@@ -321,45 +338,45 @@ export function InstallmentDashboard() {
                     setEditInstallmentPlan(p);
                   }
                 }}
-                className="rounded-2xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/60 p-4 space-y-3 hover:border-purple-500/40 hover:bg-white/90 dark:hover:bg-zinc-900/90 hover:shadow-lg hover:shadow-purple-950/20 cursor-pointer transition-all active:scale-[0.99] group focus:outline-none focus:ring-2 focus:ring-purple-500/40"
+                className="rounded-xl border border-black/[0.07] dark:border-white/[0.08] bg-black/[0.015] dark:bg-white/[0.02] p-4 space-y-3 hover:border-amber-500/40 cursor-pointer transition-all active:scale-[0.99] group focus:outline-none focus:ring-2 focus:ring-amber-500/40"
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-sm text-slate-950 dark:text-white group-hover:text-violet-800 dark:group-hover:text-purple-300 transition-colors">
+                    <span className="font-semibold text-sm text-foreground group-hover:text-amber-700 dark:group-hover:text-amber-300 transition-colors">
                       {p.name}
                     </span>
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400">
+                    <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-black/[0.05] dark:bg-white/[0.06] text-muted-foreground">
                       {p.category}
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <span
-                      className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
+                      className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
                         isCompleted
-                          ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-400 border border-emerald-500/30'
-                          : 'bg-purple-500/15 text-violet-800 dark:text-purple-300 border border-purple-500/30'
+                          ? 'bg-emerald-500/12 text-emerald-800 dark:text-emerald-400 border border-emerald-500/25'
+                          : 'bg-amber-500/12 text-amber-800 dark:text-amber-300 border border-amber-500/25'
                       }`}
                     >
                       {isCompleted ? 'Paid Off' : `Month ${p.latestPaidIndex}/${p.totalTenure}`}
                     </span>
-                    <ChevronRight className="h-4 w-4 text-slate-600 dark:text-zinc-300 group-hover:text-violet-800 dark:group-hover:text-purple-400 group-hover:translate-x-0.5 transition-all" />
+                    <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-amber-700 dark:group-hover:text-amber-400 group-hover:translate-x-0.5 transition-all" />
                   </div>
                 </div>
 
                 {/* Progress Bar */}
                 <div className="space-y-1">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-600 dark:text-zinc-400">
-                      Progress: <strong className="text-slate-950 dark:text-white">{p.latestPaidIndex} of {p.totalTenure} months</strong>
+                    <span className="text-muted-foreground">
+                      Progress: <strong className="text-foreground">{p.latestPaidIndex} of {p.totalTenure} months</strong>
                     </span>
-                    <span className="font-mono font-bold text-violet-800 dark:text-purple-300">{percent}%</span>
+                    <span className="font-mono font-bold text-amber-700 dark:text-amber-300">{percent}%</span>
                   </div>
-                  <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
+                  <div className="h-2 w-full rounded-full bg-black/[0.08] dark:bg-white/[0.08] overflow-hidden">
                     <div
                       className={`h-full rounded-full transition-all duration-500 ${
                         isCompleted
-                          ? 'bg-emerald-400'
-                          : 'bg-gradient-to-r from-purple-500 to-indigo-500'
+                          ? 'bg-emerald-500'
+                          : 'bg-gradient-to-r from-[#B8862D] to-[#E5B85C]'
                       }`}
                       style={{ width: `${percent}%` }}
                     />
@@ -367,22 +384,22 @@ export function InstallmentDashboard() {
                 </div>
 
                 {/* Numbers Row */}
-                <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200 dark:border-zinc-800/60 text-xs">
+                <div className="flex items-center justify-between gap-2 pt-2 border-t border-black/[0.06] dark:border-white/[0.06] text-xs">
                   <div className="min-w-0">
-                    <span className="text-slate-500 dark:text-zinc-400 block text-[10px]">Monthly</span>
-                    <span className="font-mono font-bold whitespace-nowrap tabular-nums text-violet-800 dark:text-purple-400">
+                    <span className="text-muted-foreground block text-[10px]">Monthly</span>
+                    <span className="font-mono font-bold whitespace-nowrap tabular-nums text-amber-700 dark:text-amber-400">
                       {p.currency}{'\u00A0'}{p.monthlyAmount.toFixed(2)}/mo
                     </span>
                   </div>
                   <div className="text-right min-w-0">
-                    <span className="text-slate-500 dark:text-zinc-400 block text-[10px]">Remaining</span>
-                    <span className="font-mono font-bold whitespace-nowrap tabular-nums text-slate-950 dark:text-white">
+                    <span className="text-muted-foreground block text-[10px]">Remaining</span>
+                    <span className="font-mono font-bold whitespace-nowrap tabular-nums text-foreground">
                       {p.currency}{'\u00A0'}{p.remainingBalance.toFixed(2)}
                     </span>
                   </div>
                   <div className="text-right shrink-0">
-                    <span className="text-slate-500 dark:text-zinc-400 block text-[10px]">Ends</span>
-                    <span className="font-mono font-semibold whitespace-nowrap tabular-nums text-slate-700 dark:text-zinc-300">
+                    <span className="text-muted-foreground block text-[10px]">Ends</span>
+                    <span className="font-mono font-semibold whitespace-nowrap tabular-nums text-muted-foreground">
                       {p.endDate}
                     </span>
                   </div>

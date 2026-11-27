@@ -6,23 +6,25 @@ import {
   extractTextFromGeminiResponse,
   stripJsonFences,
   generateGeminiContent,
+  generateGeminiWithSearchFallback,
   resetGeminiKeyPoolStateForTests,
   classifyMerchantWithGemini,
 } from '../src/lib/gemini-key-pool.ts';
+import { recordUserAiCall } from '../src/lib/admin-registry.ts';
 
-test('getStandardGeminiModelOrder enforces gemini-3.5-flash then reliable fallbacks by default', () => {
+test('getStandardGeminiModelOrder enforces healthy fast models by default', () => {
   const models = getStandardGeminiModelOrder({});
-  assert.deepEqual(models, ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest', 'gemini-2.5-flash']);
+  assert.deepEqual(models, ['gemini-3.5-flash-lite', 'gemini-flash-lite-latest', 'gemini-2.5-flash', 'gemini-3-flash-preview']);
 });
 
 test('getStandardGeminiModelOrder puts process.env.GEMINI_MODEL first when configured', () => {
   const models = getStandardGeminiModelOrder({ GEMINI_MODEL: 'gemini-2.5-pro' });
-  assert.deepEqual(models, ['gemini-2.5-pro', 'gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest', 'gemini-2.5-flash']);
+  assert.deepEqual(models, ['gemini-2.5-pro', 'gemini-3.5-flash-lite', 'gemini-flash-lite-latest', 'gemini-2.5-flash', 'gemini-3-flash-preview']);
 });
 
-test('getStandardGeminiModelOrder automatically remaps deprecated gemini-2.5-flash to gemini-3.5-flash to prevent 404', () => {
-  const models = getStandardGeminiModelOrder({ GEMINI_MODEL: 'gemini-2.5-flash' });
-  assert.equal(models[0], 'gemini-3.5-flash');
+test('getStandardGeminiModelOrder automatically remaps stalling gemini-3.5-flash to gemini-3.5-flash-lite to prevent timeouts', () => {
+  const models = getStandardGeminiModelOrder({ GEMINI_MODEL: 'gemini-3.5-flash' });
+  assert.equal(models[0], 'gemini-3.5-flash-lite');
 });
 
 test('extractTextFromGeminiResponse concatenates text parts and ignores thought parts', () => {
@@ -230,5 +232,102 @@ test('classifyMerchantWithGemini safely returns null on failure or empty input',
     fetchFn: failingFetch,
   });
   assert.equal(result, null);
+});
+
+test('generateGeminiContent immediately fails over to next model on timeout instead of retrying all keys on stalled model', async () => {
+  resetGeminiKeyPoolStateForTests();
+  const attemptedUrls = [];
+  const mockFetch = async (url) => {
+    attemptedUrls.push(String(url));
+    if (String(url).includes('slow-model')) {
+      const err = new Error('The operation was aborted due to timeout');
+      err.name = 'TimeoutError';
+      throw err;
+    }
+    return new Response(
+      JSON.stringify({
+        candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  };
+
+  const res1 = await generateGeminiContent({
+    prompt: 'Hello',
+    thinking: false,
+    models: ['slow-model', 'fast-model'],
+    env: { GEMINI_API_KEY: 'key-1,key-2,key-3' },
+    fetchFn: mockFetch,
+  });
+
+  assert.equal(res1.model, 'fast-model');
+  // Should hit slow-model ONCE (not 3x across all keys) then immediately succeed on fast-model
+  assert.equal(attemptedUrls.length, 2);
+  assert.ok(attemptedUrls[0].includes('slow-model'));
+  assert.ok(attemptedUrls[1].includes('fast-model'));
+
+  // Subsequent call should remember slow-model cooldown and start straight on fast-model
+  attemptedUrls.length = 0;
+  const res2 = await generateGeminiContent({
+    prompt: 'Hello again',
+    thinking: false,
+    models: ['slow-model', 'fast-model'],
+    env: { GEMINI_API_KEY: 'key-1,key-2,key-3' },
+    fetchFn: mockFetch,
+  });
+  assert.equal(res2.model, 'fast-model');
+  assert.equal(attemptedUrls.length, 1);
+  assert.ok(attemptedUrls[0].includes('fast-model'));
+});
+
+test('generateGeminiWithSearchFallback falls back cleanly when search grounding fails or times out', async () => {
+  resetGeminiKeyPoolStateForTests();
+  const calls = [];
+  const mockFetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url: String(url), hasSearch: Boolean(body.tools) });
+    if (body.tools) {
+      return new Response(JSON.stringify({ error: { message: 'Quota exceeded' } }), { status: 429 });
+    }
+    return new Response(
+      JSON.stringify({
+        candidates: [{ content: { parts: [{ text: 'RM 12.00 - RM 18.00' }] } }],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  };
+
+  const res = await generateGeminiWithSearchFallback({
+    prompt: 'Nasi lemak price',
+    env: { GEMINI_API_KEY: 'key-1' },
+    fetchFn: mockFetch,
+  });
+
+  assert.equal(res.grounded, false);
+  assert.equal(res.summary, 'RM 12.00 - RM 18.00');
+  assert.ok(calls.some((c) => c.hasSearch));
+  assert.ok(calls.some((c) => !c.hasSearch));
+});
+
+test('recordUserAiCall returns immediately for admin without blocking on slow Apps Script cold start', async () => {
+  const prevAdmin = process.env.ADMIN_EMAIL;
+  const prevUrl = process.env.APPS_SCRIPT_URL;
+  const prevFetch = globalThis.fetch;
+  try {
+    process.env.ADMIN_EMAIL = 'admin@example.com';
+    process.env.APPS_SCRIPT_URL = 'https://script.google.com/macros/s/fake-slow-script/exec';
+    globalThis.fetch = () => new Promise(() => {}); // Never resolves
+
+    const t0 = Date.now();
+    const status = await recordUserAiCall('admin@example.com');
+    const elapsed = Date.now() - t0;
+
+    assert.equal(status.allowed, true);
+    assert.ok(elapsed < 200, `Expected <200ms, got ${elapsed}ms`);
+  } finally {
+    process.env.ADMIN_EMAIL = prevAdmin;
+    process.env.APPS_SCRIPT_URL = prevUrl;
+    globalThis.fetch = prevFetch;
+  }
 });
 

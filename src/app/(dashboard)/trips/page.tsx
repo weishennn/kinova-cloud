@@ -867,10 +867,10 @@ export default function TripsPage() {
       />
 
       {/* Prominent Trixpense Live Sync Hub */}
-      <div className="rounded-3xl border border-indigo-500/25 bg-gradient-to-r from-indigo-500/[0.08] via-purple-500/[0.06] to-emerald-500/[0.06] p-4 sm:p-5 shadow-lg backdrop-blur-xl">
+      <div className="rounded-3xl border border-emerald-500/25 bg-gradient-to-r from-emerald-500/[0.08] via-amber-500/[0.06] to-emerald-500/[0.06] p-4 sm:p-5 shadow-lg backdrop-blur-xl">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/25">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl -emerald-/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25">
               <Link2 className="h-5 w-5" />
             </div>
             <div>
@@ -906,12 +906,12 @@ export default function TripsPage() {
                 }
                 maxLength={8}
                 placeholder="e.g. A1B2C3D4"
-                className="h-10 w-full sm:w-44 rounded-xl border border-slate-300 dark:border-white/10 bg-white/90 dark:bg-zinc-950/80 px-3 text-xs font-mono uppercase tracking-widest text-slate-950 dark:text-white outline-none focus:border-indigo-500"
+                className="h-10 w-full sm:w-44 rounded-xl border border-slate-300 dark:border-white/10 bg-white/90 dark:bg-zinc-950/80 px-3 text-xs font-mono uppercase tracking-widest text-slate-950 dark:text-white outline-none focus:border-emerald-500"
               />
               <button
                 type="submit"
                 disabled={isSyncingAll || quickInviteCode.trim().length !== 8}
-                className="h-10 shrink-0 px-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-semibold transition-all cursor-pointer touch-manipulation"
+                className="h-10 shrink-0 px-3.5 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold transition-all cursor-pointer touch-manipulation"
               >
                 Link / Import
               </button>
@@ -935,7 +935,7 @@ export default function TripsPage() {
       {/* Trips Grid */}
       {isTripsLoading ? (
         <div className="flex justify-center py-16">
-          <Loader2 className="h-6 w-6 animate-spin text-indigo-800 dark:text-indigo-400" />
+          <Loader2 className="h-6 w-6 animate-spin text-emerald-800 dark:text-emerald-400" />
         </div>
       ) : trips.length === 0 ? (
         <div className="py-16 text-center rounded-3xl border border-dashed border-slate-200 dark:border-white/[0.1] bg-card/40 backdrop-blur-xl p-8 shadow-lg">
@@ -943,7 +943,7 @@ export default function TripsPage() {
             animate={{ y: [0, -6, 0] }}
             transition={{ repeat: Infinity, duration: 3, ease: 'easeInOut' }}
           >
-            <Compass className="h-10 w-10 text-indigo-800 dark:text-indigo-400 mx-auto mb-3 opacity-80" />
+            <Compass className="h-10 w-10 text-emerald-800 dark:text-emerald-400 mx-auto mb-3 opacity-80" />
           </motion.div>
           <h3 className="text-base font-semibold text-slate-950 dark:text-white">
             No Trips Created Yet
@@ -954,7 +954,7 @@ export default function TripsPage() {
           </p>
           <button
             onClick={openCreate}
-            className="min-h-[40px] px-5 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-600 active:scale-[0.97] text-white dark:text-white text-xs font-semibold shadow-md transition-all cursor-pointer touch-manipulation"
+            className="min-h-[40px] px-5 py-2 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 active:scale-[0.97] text-white dark:text-white text-xs font-semibold shadow-md transition-all cursor-pointer touch-manipulation"
           >
             Create Your First Trip
           </button>
@@ -989,13 +989,13 @@ export default function TripsPage() {
                 whileTap={{ scale: 0.99 }}
                 transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
                 onClick={() => setSelectedTripId(trip.id)}
-                className="relative rounded-3xl border border-slate-200 dark:border-white/[0.08] bg-card/60 hover:bg-card/85 p-6 backdrop-blur-2xl hover:border-indigo-500/40 shadow-xl hover:shadow-2xl transition-all flex flex-col justify-between cursor-pointer group specular-card"
+                className="relative rounded-3xl border border-black/[0.08] dark:border-white/[0.08] bg-card hover:bg-card/85 p-6  hover:border-emerald-500/40 shadow-[0_1px_2px_rgba(17,20,24,0.03)] hover:shadow-2xl transition-all flex flex-col justify-between cursor-pointer group specular-card"
               >
                 <div>
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[11px] font-bold font-mono px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-800 dark:text-indigo-300 border border-indigo-500/30">
+                        <span className="text-[11px] font-bold font-mono px-2.5 py-0.5 rounded-full -emerald-/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30">
                           {trip.currency}
                         </span>
                         {isForeign && (
@@ -1011,7 +1011,7 @@ export default function TripsPage() {
                           </span>
                         )}
                       </div>
-                      <h2 className="text-xl font-bold text-slate-950 dark:text-white group-hover:text-indigo-800 dark:group-hover:text-indigo-300 transition-colors mt-1.5">
+                      <h2 className="text-xl font-bold text-slate-950 dark:text-white group-hover:text-emerald-800 dark:group-hover:text-emerald-300 transition-colors mt-1.5">
                         {trip.name}
                       </h2>
                     </div>
@@ -1027,7 +1027,7 @@ export default function TripsPage() {
                           e.stopPropagation();
                           void syncSingleTrip(trip);
                         }}
-                        className="min-h-[34px] inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-xl border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-800 dark:text-indigo-300 transition-all active:scale-95 cursor-pointer touch-manipulation"
+                        className="min-h-[34px] inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-xl border border-emerald-500/30 -emerald-/10 -emerald-/20 text-emerald-800 dark:text-emerald-300 transition-all active:scale-95 cursor-pointer touch-manipulation"
                       >
                         <RefreshCw
                           className={`h-3.5 w-3.5 ${isThisSyncing ? 'animate-spin' : ''}`}
@@ -1069,11 +1069,11 @@ export default function TripsPage() {
 
                   <div className="mt-2.5 flex flex-wrap gap-3 text-xs text-slate-700 dark:text-zinc-300">
                     <span className="flex items-center gap-1.5">
-                      <MapPin className="h-3.5 w-3.5 text-indigo-800 dark:text-indigo-400" />
+                      <MapPin className="h-3.5 w-3.5 text-emerald-800 dark:text-emerald-400" />
                       {trip.destination}
                     </span>
                     <span className="flex items-center gap-1.5 font-mono">
-                      <Calendar className="h-3.5 w-3.5 text-indigo-800 dark:text-indigo-400" />
+                      <Calendar className="h-3.5 w-3.5 text-emerald-800 dark:text-emerald-400" />
                       {trip.startDate} {trip.endDate && `→ ${trip.endDate}`}
                     </span>
                   </div>
@@ -1113,7 +1113,7 @@ export default function TripsPage() {
                   <div className="h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-zinc-800/80">
                     <div
                       className={`h-full rounded-full transition-all ${
-                        over ? 'bg-rose-500' : 'bg-gradient-to-r from-indigo-500 to-purple-500'
+                        over ? 'bg-rose-500' : 'bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500'
                       }`}
                       style={{ width: `${progress}%` }}
                     />
@@ -1179,7 +1179,7 @@ export default function TripsPage() {
                 </span>
                 {spendMap[selectedTrip.id]?.splitwiseIncluded &&
                   (spendMap[selectedTrip.id]?.splitwiseShare || 0) > 0 && (
-                    <span className="block text-[10px] font-mono text-indigo-800 dark:text-indigo-300 mt-0.5">
+                    <span className="block text-[10px] font-mono text-emerald-800 dark:text-emerald-300 mt-0.5">
                       Personal{' '}
                       {formatCurrency(
                         spendMap[selectedTrip.id]?.personalTotal || 0,
@@ -1197,7 +1197,7 @@ export default function TripsPage() {
                 <span className="text-slate-600 dark:text-zinc-400 block mb-0.5 font-medium">
                   Converted (MYR)
                 </span>
-                <span className="font-bold text-indigo-800 dark:text-indigo-300 text-base font-mono tabular-nums tracking-tight">
+                <span className="font-bold text-emerald-800 dark:text-emerald-300 text-base font-mono tabular-nums tracking-tight">
                   RM {(spendMap[selectedTrip.id]?.totalMyr || 0).toFixed(2)}
                 </span>
               </div>
@@ -1214,7 +1214,7 @@ export default function TripsPage() {
             {selectedTrip.currency !== 'MYR' && (
               <div className="text-[11px] text-slate-700 dark:text-zinc-300 font-mono pt-2 border-t border-slate-200 dark:border-white/[0.06] flex flex-wrap items-center justify-between gap-2">
                 <span>Average Exchange Rate:</span>
-                <span className="text-indigo-800 dark:text-indigo-300 font-semibold tabular-nums">
+                <span className="text-emerald-800 dark:text-emerald-300 font-semibold tabular-nums">
                   1 MYR ={' '}
                   {selectedTrip.rateToMyr > 0 ? (1 / selectedTrip.rateToMyr).toFixed(4) : '—'}{' '}
                   {selectedTrip.currency} (1 {selectedTrip.currency} = RM{' '}
@@ -1231,7 +1231,7 @@ export default function TripsPage() {
                 <h3 className="text-xs uppercase font-semibold tracking-wider text-slate-700 dark:text-zinc-300">
                   Trip Categories Breakdown (Personal + Trixpense Synced)
                 </h3>
-                <span className="text-[10px] font-medium text-indigo-800 dark:text-indigo-300 bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/20">
+                <span className="text-[10px] font-medium text-emerald-800 dark:text-emerald-300 -emerald-/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
                   Includes Stay &amp; Hotel · Flights · Food &amp; Dining
                 </span>
               </div>
@@ -1289,7 +1289,7 @@ export default function TripsPage() {
                   setEditTransaction(null);
                   setQuickAddOpen(true);
                 }}
-                className="min-h-[36px] px-3 py-1 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-800 dark:text-indigo-300 border border-indigo-500/20 text-xs font-semibold transition-all active:scale-95 cursor-pointer touch-manipulation flex items-center gap-1"
+                className="min-h-[36px] px-3 py-1 rounded-xl -emerald-/10 -emerald-/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/20 text-xs font-semibold transition-all active:scale-95 cursor-pointer touch-manipulation flex items-center gap-1"
               >
                 + Add Payment
               </button>
@@ -1310,7 +1310,7 @@ export default function TripsPage() {
                     className="flex items-center justify-between gap-3 p-3 rounded-2xl hover:bg-white/[0.04] transition-colors cursor-pointer group"
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-slate-950 dark:text-white group-hover:text-indigo-800 dark:group-hover:text-indigo-300 transition-colors">
+                      <p className="truncate text-sm font-semibold text-slate-950 dark:text-white group-hover:text-emerald-800 dark:group-hover:text-emerald-300 transition-colors">
                         {getCategoryEmoji(tx.category)} {tx.description || tx.category}
                       </p>
                       <p className="text-xs text-slate-600 dark:text-zinc-400">
@@ -1332,7 +1332,7 @@ export default function TripsPage() {
                           </p>
                         )}
                         {selectedTrip.currency !== 'MYR' && isTxSameCurrency && (
-                          <p className="text-[11px] text-indigo-800 dark:text-indigo-300 font-mono tabular-nums">
+                          <p className="text-[11px] text-emerald-800 dark:text-emerald-300 font-mono tabular-nums">
                             ≈ RM{'\u00A0'}{(tx.amount * selectedTrip.rateToMyr).toFixed(2)}
                           </p>
                         )}
@@ -1367,7 +1367,7 @@ export default function TripsPage() {
                 setSelectedTripId(null);
                 openEdit(t);
               }}
-              className="w-full min-h-[44px] py-2.5 px-4 rounded-2xl bg-gradient-to-r from-indigo-500 via-indigo-600 to-purple-600 hover:from-indigo-600 hover:to-purple-700 active:scale-[0.98] text-white dark:text-white font-bold text-sm shadow-xl shadow-indigo-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer touch-manipulation"
+              className="w-full min-h-[44px] py-2.5 px-4 rounded-2xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 active:scale-[0.98] text-white dark:text-white font-bold text-sm shadow-xl transition-all flex items-center justify-center gap-2 cursor-pointer touch-manipulation"
             >
               <Edit2 className="h-4 w-4" />
               <span>Edit Trip</span>
@@ -1413,10 +1413,10 @@ export default function TripsPage() {
         />
         <form onSubmit={saveTrip} className="mt-4 space-y-4">
           {/* Optional Quick Trixpense Link & Autofill */}
-          <div className="p-3.5 rounded-2xl bg-indigo-50/70 dark:bg-indigo-500/[0.06] border border-indigo-300/50 dark:border-indigo-400/20 space-y-2.5">
+          <div className="p-3.5 rounded-2xl bg-emerald-50/70 -emerald-/[0.06] border border-emerald-300/50 dark:border-emerald-400/20 space-y-2.5">
             <div className="flex items-center justify-between">
               <label className="text-xs font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
-                <Link2 className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+                <Link2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
                 <span>Link Trixpense Invite Code (Optional)</span>
               </label>
             </div>
@@ -1433,13 +1433,13 @@ export default function TripsPage() {
                   )
                 }
                 maxLength={8}
-                className="h-10 flex-1 rounded-xl border border-slate-300 dark:border-white/10 bg-white dark:bg-zinc-950/70 px-3 text-xs font-mono uppercase tracking-widest text-slate-950 dark:text-white outline-none focus:border-indigo-500/70"
+                className="h-10 flex-1 rounded-xl border border-slate-300 dark:border-white/10 bg-white dark:bg-zinc-950/70 px-3 text-xs font-mono uppercase tracking-widest text-slate-950 dark:text-white outline-none focus:border-emerald-500/70"
               />
               <button
                 type="button"
                 disabled={isFetchingModalSplitwise || modalInviteCode.trim().length !== 8}
                 onClick={() => void handleModalFetchSplitwise()}
-                className="h-10 px-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-semibold transition-all cursor-pointer"
+                className="h-10 px-3.5 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold transition-all cursor-pointer"
               >
                 {isFetchingModalSplitwise ? 'Fetching…' : 'Fetch & Autofill'}
               </button>
@@ -1474,7 +1474,7 @@ export default function TripsPage() {
               value={tripName}
               onChange={e => setTripName(e.target.value)}
               required
-              className="w-full h-11 sm:h-12 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-950/60 px-3.5 text-sm text-slate-950 dark:text-white shadow-inner outline-none focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20 transition-all placeholder:text-slate-600 dark:placeholder:text-zinc-300"
+              className="w-full h-11 sm:h-12 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-950/60 px-3.5 text-sm text-slate-950 dark:text-white shadow-inner outline-none focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/20 transition-all placeholder:text-slate-600 dark:placeholder:text-zinc-300"
             />
           </div>
 
@@ -1486,7 +1486,7 @@ export default function TripsPage() {
               placeholder="e.g. Chengdu, Sichuan / Japan"
               value={destination}
               onChange={e => setDestination(e.target.value)}
-              className="w-full h-11 sm:h-12 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-950/60 px-3.5 text-sm text-slate-950 dark:text-white shadow-inner outline-none focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20 transition-all placeholder:text-slate-600 dark:placeholder:text-zinc-300"
+              className="w-full h-11 sm:h-12 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-950/60 px-3.5 text-sm text-slate-950 dark:text-white shadow-inner outline-none focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/20 transition-all placeholder:text-slate-600 dark:placeholder:text-zinc-300"
             />
           </div>
 
@@ -1501,7 +1501,7 @@ export default function TripsPage() {
                 value={startDate}
                 onChange={e => setStartDate(e.target.value)}
                 required
-                className="w-full h-11 sm:h-12 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-950/60 px-2.5 sm:px-3.5 text-xs sm:text-sm text-slate-950 dark:text-white shadow-inner outline-none focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                className="w-full h-11 sm:h-12 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-950/60 px-2.5 sm:px-3.5 text-xs sm:text-sm text-slate-950 dark:text-white shadow-inner outline-none focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/20 transition-all"
               />
             </div>
             <div>
@@ -1512,7 +1512,7 @@ export default function TripsPage() {
                 type="date"
                 value={endDate}
                 onChange={e => setEndDate(e.target.value)}
-                className="w-full h-11 sm:h-12 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-950/60 px-2.5 sm:px-3.5 text-xs sm:text-sm text-slate-950 dark:text-white shadow-inner outline-none focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                className="w-full h-11 sm:h-12 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-950/60 px-2.5 sm:px-3.5 text-xs sm:text-sm text-slate-950 dark:text-white shadow-inner outline-none focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/20 transition-all"
               />
             </div>
           </div>
@@ -1530,7 +1530,7 @@ export default function TripsPage() {
                 value={budget}
                 onChange={e => setBudget(e.target.value)}
                 required
-                className="w-full h-11 sm:h-12 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-950/60 px-3 text-sm text-slate-950 dark:text-white font-mono tabular-nums shadow-inner outline-none focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20 transition-all placeholder:text-slate-600 dark:placeholder:text-zinc-300"
+                className="w-full h-11 sm:h-12 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-950/60 px-3 text-sm text-slate-950 dark:text-white font-mono tabular-nums shadow-inner outline-none focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/20 transition-all placeholder:text-slate-600 dark:placeholder:text-zinc-300"
               />
             </div>
             <div>
@@ -1540,7 +1540,7 @@ export default function TripsPage() {
               <select
                 value={currency}
                 onChange={e => applyCurrencyDefaultRate(e.target.value)}
-                className="w-full h-11 sm:h-12 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-950/60 px-2.5 sm:px-3.5 text-xs sm:text-sm text-slate-950 dark:text-white shadow-inner outline-none focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                className="w-full h-11 sm:h-12 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-950/60 px-2.5 sm:px-3.5 text-xs sm:text-sm text-slate-950 dark:text-white shadow-inner outline-none focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/20 transition-all"
               >
                 {COMMON_CURRENCIES.map(c => (
                   <option key={c.code} value={c.code}>
@@ -1562,7 +1562,7 @@ export default function TripsPage() {
                 <button
                   type="button"
                   onClick={() => setShowBatchCalc(prev => !prev)}
-                  className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-indigo-500/15 text-indigo-800 dark:text-indigo-300 border border-indigo-500/25 hover:bg-indigo-500/25 cursor-pointer"
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full -emerald-/15 text-emerald-800 dark:text-emerald-300 border border-emerald-500/25 -emerald-/25 cursor-pointer"
                 >
                   <Calculator className="h-3 w-3" />
                   <span>{showBatchCalc ? 'Hide Batch Calculator' : '🧮 Multi-Day Rate Calculator'}</span>
@@ -1580,7 +1580,7 @@ export default function TripsPage() {
                     step="any"
                     value={myrToForeignInput}
                     onChange={e => syncRateFromMyrToForeign(e.target.value)}
-                    className="w-full h-10 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-zinc-950/80 px-3 text-sm text-slate-950 dark:text-white font-mono tabular-nums outline-none focus:border-indigo-500/60"
+                    className="w-full h-10 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-zinc-950/80 px-3 text-sm text-slate-950 dark:text-white font-mono tabular-nums outline-none focus:border-emerald-500/60"
                   />
                 </div>
                 <div>
@@ -1594,15 +1594,15 @@ export default function TripsPage() {
                     value={rateToMyr}
                     onChange={e => syncRateFromRateToMyr(e.target.value)}
                     required
-                    className="w-full h-10 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-zinc-950/80 px-3 text-sm text-slate-950 dark:text-white font-mono tabular-nums outline-none focus:border-indigo-500/60"
+                    className="w-full h-10 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-zinc-950/80 px-3 text-sm text-slate-950 dark:text-white font-mono tabular-nums outline-none focus:border-emerald-500/60"
                   />
                 </div>
               </div>
 
               {showBatchCalc && (
-                <div className="rounded-xl border border-indigo-500/25 bg-indigo-500/[0.05] p-3 space-y-2.5">
+                <div className="rounded-xl border border-emerald-500/25 -emerald-/[0.05] p-3 space-y-2.5">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-indigo-950 dark:text-indigo-200">
+                    <span className="text-[11px] font-bold text-emerald-950 dark:text-emerald-200">
                       🧮 Multi-Batch Exchange Calculator (e.g. Day 1: 100 MYR → 160 {currency}, Day 2: 100 MYR → 162 {currency})
                     </span>
                   </div>
@@ -1641,7 +1641,7 @@ export default function TripsPage() {
                             }}
                             className="h-8 w-full rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-zinc-900 px-2 font-mono text-xs text-slate-950 dark:text-white"
                           />
-                          <span className="text-[10px] font-mono text-indigo-800 dark:text-indigo-300 shrink-0 w-14 text-right">
+                          <span className="text-[10px] font-mono text-emerald-800 dark:text-emerald-300 shrink-0 w-14 text-right">
                             ({rowRate})
                           </span>
                           {fxBatches.length > 1 && (
@@ -1667,7 +1667,7 @@ export default function TripsPage() {
                           { myr: '', foreign: '', label: `Day ${fxBatches.length + 1}` },
                         ])
                       }
-                      className="text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 hover:underline cursor-pointer"
+                      className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 hover:underline cursor-pointer"
                     >
                       + Add Exchange Day
                     </button>
@@ -1682,7 +1682,7 @@ export default function TripsPage() {
                   <button
                     type="button"
                     onClick={applyBatchAverageRate}
-                    className="w-full h-9 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition-all cursor-pointer"
+                    className="w-full h-9 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white text-xs font-semibold transition-all cursor-pointer"
                   >
                     Apply Weighted Average Rate (1 MYR ={' '}
                     {batchSummary.avgMyrToForeign > 0
@@ -1703,7 +1703,7 @@ export default function TripsPage() {
           <button
             type="submit"
             disabled={addTripMutation.isPending || updateTripMutation.isPending}
-            className="flex w-full min-h-[48px] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-600 py-3 text-sm font-semibold text-white dark:text-white shadow-xl shadow-indigo-500/25 hover:from-indigo-600 hover:to-purple-700 disabled:opacity-50 transition-all cursor-pointer active:scale-[0.98] touch-manipulation"
+            className="flex w-full min-h-[48px] items-center justify-center gap-2 rounded-2xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 py-3 text-sm font-semibold text-white dark:text-white shadow-xl disabled:opacity-50 transition-all cursor-pointer active:scale-[0.98] touch-manipulation"
           >
             {(addTripMutation.isPending || updateTripMutation.isPending) && (
               <Loader2 className="h-4 w-4 animate-spin" />

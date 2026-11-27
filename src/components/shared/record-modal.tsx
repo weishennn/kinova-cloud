@@ -112,12 +112,12 @@ const CATEGORIES = {
     { name: 'Other', icon: '💵' },
   ],
   Investment: [
-    { name: 'Fixed Deposit', icon: '🔒' },
-    { name: 'ASNB / Unit Trust', icon: '📈' },
+    { name: 'Stocks & Crypto', icon: '📈' },
+    { name: 'ASNB / Unit Trust', icon: '💼' },
     { name: 'EPF / KWSP', icon: '🏛️' },
+    { name: 'Fixed Deposit', icon: '🔒' },
     { name: 'Emergency Savings', icon: '🛡️' },
     { name: 'Other Savings', icon: '📦' },
-    { name: 'Stocks & Crypto', icon: '📈' },
   ]
 };
 
@@ -1736,10 +1736,10 @@ export function RecordPaymentModal() {
             className="mt-3 space-y-2.5 sm:mt-5 sm:space-y-5"
           >
             {shortcutDraft && (
-              <div className="rounded-2xl border border-indigo-500/35 bg-indigo-500/10 p-3 sm:p-3.5 space-y-2.5 text-xs">
+              <div className="rounded-2xl border border-emerald-500/35 -emerald-/10 p-3 sm:p-3.5 space-y-2.5 text-xs">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <span className="font-bold text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
-                    <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                  <span className="font-bold text-emerald-950 dark:text-emerald-200 flex items-center gap-1.5">
+                    <Sparkles className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                     {shortcutDraft.source === 'apple_pay_wallet'
                       ? ' Apple Pay 交易触发 · 待确认草稿'
                       : '📱 Kinova 快速记账 · 背面轻点截图草稿'}
@@ -1754,21 +1754,21 @@ export function RecordPaymentModal() {
                 </p>
 
                 {shortcutDraft.ocrSummary && (
-                  <div className="rounded-xl border border-indigo-500/30 bg-indigo-50/70 dark:bg-zinc-900/80 p-2.5 text-indigo-950 dark:text-indigo-200 text-[11px] flex items-start gap-1.5 leading-snug">
+                  <div className="rounded-xl border border-emerald-500/30 bg-emerald-50/70 dark:bg-zinc-900/80 p-2.5 text-emerald-950 dark:text-emerald-200 text-[11px] flex items-start gap-1.5 leading-snug">
                     <span className="font-bold shrink-0">📸 从画面读取:</span>
                     <span>{shortcutDraft.ocrSummary}</span>
                   </div>
                 )}
 
                 {shortcutReviewStatus === 'idle' && !shortcutDraft.assistantAdvice && (
-                  <div role="status" aria-live="polite" className="rounded-xl border border-violet-500/30 bg-violet-500/10 p-3 text-[11px] leading-relaxed text-violet-950 dark:text-violet-200 flex items-center gap-2">
+                  <div role="status" aria-live="polite" className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[11px] leading-relaxed text-amber-950 dark:text-amber-200 flex items-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin shrink-0" />
                     <span>Kinova 正在分析账本中的重复记录、常见金额和可能的 LHDN 提示…</span>
                   </div>
                 )}
 
                 {shortcutReviewStatus !== 'error' && shortcutDraft.assistantAdvice && (
-                  <div className="rounded-xl border border-violet-500/35 bg-violet-500/10 p-3 space-y-1.5 text-[11px] leading-relaxed text-violet-950 dark:text-violet-200">
+                  <div className="rounded-xl border border-amber-500/35 bg-amber-500/10 p-3 space-y-1.5 text-[11px] leading-relaxed text-amber-950 dark:text-amber-200">
                     <div className="font-bold flex items-center gap-1.5">
                       <Sparkles className="h-3.5 w-3.5" />
                       <span>Kinova 的判断</span>
@@ -1943,13 +1943,13 @@ export function RecordPaymentModal() {
                 type="button"
                 onClick={() => handleTypeChange('Investment')}
                 className={`relative z-10 flex min-h-[42px] items-center justify-center gap-1.5 py-2 rounded-xl font-semibold text-xs sm:text-sm transition-colors cursor-pointer touch-manipulation select-none active:scale-[0.96] ${
-                  type === 'Investment' ? 'text-indigo-800 dark:text-indigo-300' : 'text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white'
+                  type === 'Investment' ? 'text-emerald-800 dark:text-emerald-300' : 'text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white'
                 }`}
               >
                 {type === 'Investment' && (
                   <motion.div
                     layoutId="record-modal-type-indicator"
-                    className="absolute inset-0 z-0 rounded-xl bg-indigo-500/20 border border-indigo-500/40 shadow-sm pointer-events-none"
+                    className="absolute inset-0 z-0 rounded-xl -emerald-/20 border border-emerald-500/40 shadow-sm pointer-events-none"
                     transition={{ type: 'spring' as const, stiffness: 450, damping: 30 }}
                   />
                 )}
@@ -1979,7 +1979,7 @@ export function RecordPaymentModal() {
                         onClick={() => setTransactionCurrency(code)}
                         className={`px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold border transition-all cursor-pointer ${
                           transactionCurrency === code
-                            ? 'border-indigo-500 bg-indigo-500/20 text-indigo-900 dark:text-indigo-200'
+                            ? 'border-emerald-500 -emerald-/20 text-emerald-900 dark:text-emerald-200'
                             : 'border-slate-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
                         }`}
                       >
@@ -1994,13 +1994,13 @@ export function RecordPaymentModal() {
                   ? 'border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/60 focus-within:border-rose-500/60 focus-within:shadow-[0_0_20px_rgba(244,63,94,0.15)]'
                   : type === 'Income'
                   ? 'border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/60 focus-within:border-emerald-500/60 focus-within:shadow-[0_0_20px_rgba(16,185,129,0.15)]'
-                  : 'border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/60 focus-within:border-indigo-500/60 focus-within:shadow-[0_0_20px_rgba(99,102,241,0.15)]'
+                  : 'border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/60 focus-within:border-emerald-500/60 focus-within:shadow-[0_0_20px_rgba(99,102,241,0.15)]'
               }`}>
                 <select
                   aria-label="Transaction currency"
                   value={transactionCurrency}
                   onChange={(e) => setTransactionCurrency(e.target.value)}
-                  className="absolute left-3 z-10 rounded-xl bg-slate-100/90 dark:bg-zinc-800/90 px-2 py-1 text-base sm:text-lg font-bold font-mono text-indigo-800 dark:text-indigo-300 border border-slate-200/80 dark:border-white/10 outline-none cursor-pointer hover:border-indigo-500/50"
+                  className="absolute left-3 z-10 rounded-xl bg-slate-100/90 dark:bg-zinc-800/90 px-2 py-1 text-base sm:text-lg font-bold font-mono text-emerald-800 dark:text-emerald-300 border border-slate-200/80 dark:border-white/10 outline-none cursor-pointer hover:border-emerald-500/50"
                 >
                   {COMMON_CURRENCIES.map((item) => (
                     <option key={item.code} value={item.code} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white text-sm">
@@ -2037,7 +2037,7 @@ export function RecordPaymentModal() {
                     placeholder="e.g. Nasi Lemak, Petrol..."
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 py-2.5 px-3 text-sm text-slate-950 dark:text-white placeholder-zinc-500 outline-none focus:border-indigo-500"
+                    className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 py-2.5 px-3 text-sm text-slate-950 dark:text-white placeholder-zinc-500 outline-none focus:border-emerald-500"
                   />
                 </div>
                 {proactiveHabit &&
@@ -2046,7 +2046,7 @@ export function RecordPaymentModal() {
                     proactiveHabit.matchedVia === 'compact' ||
                     proactiveHabit.matchedVia === 'stem') &&
                   description.trim().toLowerCase() !== proactiveHabit.resolvedDescription.toLowerCase() && (
-                  <div className="mt-1 flex items-center justify-between gap-1.5 p-1.5 rounded-lg bg-purple-500/15 border border-purple-500/30 text-[11px] text-purple-900 dark:text-purple-200">
+                  <div className="mt-1 flex items-center justify-between gap-1.5 p-1.5 rounded-lg bg-amber-600 -amber-/15 border border-amber-500/30 text-[11px] text-amber-900 dark:text-amber-200">
                     <span className="truncate">
                       ✨ {proactiveHabit.matchedVia === 'keyword' || proactiveHabit.matchedVia === 'compact' || proactiveHabit.matchedVia === 'stem'
                         ? <>字眼 <strong>{proactiveHabit.matchedToken || proactiveHabit.matchedPattern}</strong></>
@@ -2060,7 +2060,7 @@ export function RecordPaymentModal() {
                         setCategory(proactiveHabit.resolvedCategory);
                         toast.success(`已一键匹配习惯「${proactiveHabit.resolvedDescription}」`);
                       }}
-                      className="shrink-0 px-2 py-0.5 rounded bg-purple-600 hover:bg-purple-700 text-white font-medium text-[10px] transition-colors shadow-sm"
+                      className="shrink-0 px-2 py-0.5 rounded bg-[#B8862D] dark:bg-amber-500 hover:bg-amber-700 text-white font-medium text-[10px] transition-colors shadow-sm"
                     >
                       一键应用
                     </button>
@@ -2079,7 +2079,7 @@ export function RecordPaymentModal() {
                       setDate(e.target.value);
                       setManualUntagged(false);
                     }}
-                    className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 py-2.5 px-2.5 text-xs sm:text-sm text-slate-950 dark:text-white outline-none focus:border-indigo-500"
+                    className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 py-2.5 px-2.5 text-xs sm:text-sm text-slate-950 dark:text-white outline-none focus:border-emerald-500"
                   />
                 </div>
               </div>
@@ -2090,7 +2090,7 @@ export function RecordPaymentModal() {
               <div className="flex items-center justify-between gap-2">
                 <span id="record-category-label" className="text-xs font-semibold text-slate-700 dark:text-zinc-300 uppercase tracking-wider">Category</span>
                 {type === 'Expense' && (tripTag || activeTripForDate || category === 'Stay & Hotel' || category === 'Flights') && (
-                  <span className="text-[10px] font-semibold text-indigo-800 dark:text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-full">
+                  <span className="text-[10px] font-semibold text-emerald-800 dark:text-emerald-300 -emerald-/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
                     ✈️ Trip Categories Synced (Stay &amp; Flights)
                   </span>
                 )}
@@ -2111,7 +2111,7 @@ export function RecordPaymentModal() {
                     aria-label={`Select category ${cat.name}`}
                     className={`min-h-[54px] sm:min-h-[58px] flex flex-col items-center justify-center px-1.5 py-2 sm:p-2 rounded-xl sm:rounded-2xl border text-center transition-all cursor-pointer touch-manipulation select-none active:scale-[0.95] ${
                       category === cat.name
-                        ? 'border-indigo-500 bg-indigo-500/25 text-slate-950 dark:text-white shadow-[0_0_15px_rgba(99,102,241,0.25)] ring-1 ring-indigo-500/50'
+                        ? 'border-emerald-500 -emerald-/25 text-slate-950 dark:text-white shadow-[0_0_15px_rgba(99,102,241,0.25)] ring-1 ring-emerald-500/50'
                         : 'border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/50 text-slate-700 dark:text-zinc-300 hover:border-slate-300 dark:hover:border-zinc-700 hover:text-slate-950 dark:hover:text-white'
                     }`}
                   >
@@ -2169,7 +2169,7 @@ export function RecordPaymentModal() {
                         ? 'bg-rose-500'
                         : categoryBudgetStatus.spentPercentAfter > 80
                         ? 'bg-amber-400'
-                        : 'bg-indigo-500'
+                        : 'bg-[#0D6E52] dark:bg-emerald-500'
                     }`}
                     style={{ width: `${Math.min(100, categoryBudgetStatus.spentPercentAfter)}%` }}
                   />
@@ -2230,7 +2230,7 @@ export function RecordPaymentModal() {
                   </div>
                 ) : (
                   <div className="mt-1 pt-2 border-t border-black/10 dark:border-white/10 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-zinc-400">
-                    <span className="inline-flex items-center gap-1 text-indigo-700 dark:text-indigo-300 font-medium">
+                    <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300 font-medium">
                       <span>🏷️ Monthly Capped Bucket</span>
                       <span className="text-[10px] text-slate-500 dark:text-zinc-400">(Spend one time, use whole month)</span>
                     </span>
@@ -2276,13 +2276,13 @@ export function RecordPaymentModal() {
 
             {/* Merchant Category Rule Memory Toggle ("我改过一次，下次更省事") */}
             {showRememberCategoryPrompt && (
-              <div className="flex items-center gap-2.5 p-3 rounded-2xl bg-indigo-500/10 border border-indigo-500/25 text-xs text-indigo-900 dark:text-indigo-200 shadow-sm">
+              <div className="flex items-center gap-2.5 p-3 rounded-2xl -emerald-/10 border border-emerald-500/25 text-xs text-emerald-900 dark:text-emerald-200 shadow-sm">
                 <input
                   type="checkbox"
                   id="rememberMerchantRule"
                   checked={rememberMerchantRule}
                   onChange={(e) => setRememberMerchantRule(e.target.checked)}
-                  className="rounded border-indigo-400 text-indigo-600 focus:ring-indigo-500 h-4 w-4 cursor-pointer shrink-0"
+                  className="rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500 h-4 w-4 cursor-pointer shrink-0"
                 />
                 <label htmlFor="rememberMerchantRule" className="cursor-pointer select-none leading-tight font-medium">
                   💡 记住分类：以后「<strong>{candidateMerchant}</strong>」默认归类为「<strong>{category}</strong>」
@@ -2295,7 +2295,7 @@ export function RecordPaymentModal() {
               <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/40 p-2.5 sm:p-3.5 space-y-2.5">
                 <div className="flex items-center justify-between gap-2.5">
                   <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <div className="p-1.5 sm:p-2 rounded-xl bg-purple-500/15 text-violet-800 dark:text-purple-400 border border-purple-500/20 shrink-0">
+                    <div className="p-1.5 sm:p-2 rounded-xl bg-amber-600 -amber-/15 text-amber-800 dark:text-amber-400 border border-amber-500/20 shrink-0">
                       <CreditCard className="h-4 w-4" />
                     </div>
                     <div className="min-w-0">
@@ -2315,7 +2315,7 @@ export function RecordPaymentModal() {
                     <span
                       className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors duration-200 ease-in-out ${
                         isInstallment
-                          ? 'bg-gradient-to-r from-indigo-500 to-purple-600 shadow-md shadow-purple-500/30'
+                          ? 'bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 shadow-md shadow-amber-500/30'
                           : 'bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-white/[0.08]'
                       }`}
                     >
@@ -2332,9 +2332,9 @@ export function RecordPaymentModal() {
                 {isInstallment && (
                   <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-zinc-800/80">
                     {/* First Payment Starts / Timing */}
-                    <div className="p-3 rounded-2xl bg-purple-950/20 border border-purple-500/25 space-y-2">
+                    <div className="p-3 rounded-2xl bg-amber-950/20 border border-amber-500/25 space-y-2">
                       <div className="flex flex-wrap items-center justify-between gap-1.5">
-                        <label className="text-[11px] font-bold text-violet-800 dark:text-purple-300 uppercase tracking-wider block">
+                        <label className="text-[11px] font-bold text-amber-800 dark:text-amber-300 uppercase tracking-wider block">
                           First Payment Starts
                         </label>
                         <div className="flex flex-wrap items-center justify-end gap-1">
@@ -2343,7 +2343,7 @@ export function RecordPaymentModal() {
                             onClick={() => setFirstPaymentDate(date)}
                             className={`px-2 py-0.5 rounded-lg text-[10px] font-semibold border transition-all cursor-pointer ${
                               firstPaymentDate === date
-                                ? 'border-purple-500 bg-purple-500/30 text-violet-800 dark:text-purple-200'
+                                ? 'border-amber-500 bg-amber-600 -amber-/30 text-amber-800 dark:text-amber-200'
                                 : 'border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200'
                             }`}
                           >
@@ -2363,7 +2363,7 @@ export function RecordPaymentModal() {
                             }}
                             className={`px-2 py-0.5 rounded-lg text-[10px] font-semibold border transition-all cursor-pointer ${
                               firstPaymentDate !== date
-                                ? 'border-purple-500 bg-purple-500/30 text-violet-800 dark:text-purple-200'
+                                ? 'border-amber-500 bg-amber-600 -amber-/30 text-amber-800 dark:text-amber-200'
                                 : 'border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200'
                             }`}
                           >
@@ -2375,7 +2375,7 @@ export function RecordPaymentModal() {
                         type="date"
                         value={firstPaymentDate}
                         onChange={(e) => setFirstPaymentDate(e.target.value)}
-                        className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-white/90 dark:bg-zinc-900/90 px-3 py-1.5 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-purple-400"
+                        className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-white/90 dark:bg-zinc-900/90 px-3 py-1.5 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-amber-400"
                       />
                     </div>
 
@@ -2394,7 +2394,7 @@ export function RecordPaymentModal() {
                              aria-pressed={installmentMonths === m && customInstallmentMonths === ''}
                              className={`min-h-[44px] rounded-xl text-xs font-bold border transition-all cursor-pointer touch-manipulation ${
                                installmentMonths === m && customInstallmentMonths === ''
-                                ? 'border-purple-500 bg-purple-600 text-white dark:text-white shadow-sm'
+                                ? 'border-amber-500 bg-[#B8862D] dark:bg-amber-500 text-white dark:text-white shadow-sm'
                                 : 'border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 text-slate-600 dark:text-zinc-400 hover:border-slate-300 dark:hover:border-zinc-700 hover:text-slate-950 dark:hover:text-white'
                             }`}
                           >
@@ -2417,7 +2417,7 @@ export function RecordPaymentModal() {
                             const next = e.target.value;
                             setCustomInstallmentMonths(next);
                           }}
-                          className="min-h-[44px] w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 px-3 py-2 text-sm text-slate-950 dark:text-white font-mono outline-none transition-colors placeholder:text-slate-600 dark:placeholder:text-zinc-300 focus:border-purple-500"
+                          className="min-h-[44px] w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 px-3 py-2 text-sm text-slate-950 dark:text-white font-mono outline-none transition-colors placeholder:text-slate-600 dark:placeholder:text-zinc-300 focus:border-amber-500"
                         />
                         <span className="shrink-0 text-xs text-slate-500 dark:text-zinc-400">months</span>
                       </div>
@@ -2448,7 +2448,7 @@ export function RecordPaymentModal() {
                             onClick={() => setHasInterest(true)}
                             className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
                               hasInterest
-                                ? 'border-purple-500 bg-purple-500/20 text-violet-800 dark:text-purple-300'
+                                ? 'border-amber-500 bg-amber-600 -amber-/20 text-amber-800 dark:text-amber-300'
                                 : 'border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-500 dark:text-zinc-400 hover:text-slate-700 dark:hover:text-zinc-300'
                             }`}
                           >
@@ -2466,7 +2466,7 @@ export function RecordPaymentModal() {
                             placeholder="Annual Interest Rate % (e.g. 3.0)"
                             value={installmentInterestRate}
                             onChange={(e) => setInstallmentInterestRate(e.target.value)}
-                            className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/80 py-2 pl-9 pr-3 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-purple-500"
+                            className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/80 py-2 pl-9 pr-3 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-amber-500"
                           />
                         </div>
                       )}
@@ -2474,10 +2474,10 @@ export function RecordPaymentModal() {
 
                     {/* Live Calculation Preview Card */}
                     {installmentPlan && parsedPrincipal > 0 && (
-                      <div className="rounded-xl bg-purple-950/20 border border-purple-500/25 p-3 space-y-2">
+                      <div className="rounded-xl bg-amber-950/20 border border-amber-500/25 p-3 space-y-2">
                         <div className="flex items-center justify-between text-xs">
                           <span className="text-slate-700 dark:text-zinc-300 font-medium">Monthly Installment</span>
-                          <span className="font-extrabold font-mono text-violet-800 dark:text-purple-400 text-sm">
+                          <span className="font-extrabold font-mono text-amber-800 dark:text-amber-400 text-sm">
                             {transactionCurrency} {installmentPlan.monthlyAmount.toFixed(2)} / mo
                           </span>
                         </div>
@@ -2492,9 +2492,9 @@ export function RecordPaymentModal() {
                             )}
                           </span>
                         </div>
-                        <div className="flex items-center justify-between text-[11px] pt-1 border-t border-purple-500/20 text-slate-600 dark:text-zinc-400">
+                        <div className="flex items-center justify-between text-[11px] pt-1 border-t border-amber-500/20 text-slate-600 dark:text-zinc-400">
                           <span>Timeline</span>
-                          <span className="min-w-0 text-right font-semibold text-violet-800 dark:text-purple-300 font-mono">
+                          <span className="min-w-0 text-right font-semibold text-amber-800 dark:text-amber-300 font-mono">
                             {installmentPlan.schedule[0]?.month} ➔ {installmentPlan.schedule[installmentPlan.schedule.length - 1]?.month}
                           </span>
                         </div>
@@ -2512,15 +2512,15 @@ export function RecordPaymentModal() {
             {type === 'Investment' && (
               <div className="space-y-3">
                 {/* Stock/Crypto Guidance Banner */}
-                <div className="flex items-center justify-between p-3 rounded-2xl bg-indigo-500/10 border border-indigo-500/25 text-xs text-indigo-800 dark:text-indigo-300">
+                <div className="flex items-center justify-between p-3 rounded-2xl -emerald-/10 border border-emerald-500/25 text-xs text-emerald-800 dark:text-emerald-300">
                   <div className="flex items-center gap-2">
-                    <TrendingUp className="h-4 w-4 text-indigo-800 dark:text-indigo-400 shrink-0" />
+                    <TrendingUp className="h-4 w-4 text-emerald-800 dark:text-emerald-400 shrink-0" />
                     <span>Trading US Stocks, Bursa or Crypto?</span>
                   </div>
                   <Link
                     href="/investments"
                     onClick={closeModal}
-                    className="font-bold text-indigo-800 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 flex items-center gap-0.5 underline underline-offset-2 shrink-0 cursor-pointer"
+                    className="font-bold text-emerald-800 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 flex items-center gap-0.5 underline underline-offset-2 shrink-0 cursor-pointer"
                   >
                     Go to Investments <ChevronRight className="h-3 w-3" />
                   </Link>
@@ -2528,13 +2528,13 @@ export function RecordPaymentModal() {
 
                 {/* Fixed Deposit Smart Calculator & Terms */}
                 {category === 'Fixed Deposit' && (
-                  <div className="rounded-2xl border border-indigo-500/30 bg-indigo-950/20 p-4 space-y-4">
+                  <div className="rounded-2xl border border-emerald-500/30 bg-emerald-950/20 p-4 space-y-4">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <Lock className="h-4 w-4 text-indigo-800 dark:text-indigo-400" />
+                        <Lock className="h-4 w-4 text-emerald-800 dark:text-emerald-400" />
                         <span className="text-xs font-bold text-slate-950 dark:text-white uppercase tracking-wider">Fixed Deposit Terms</span>
                       </div>
-                      <span className="text-[11px] font-semibold text-indigo-800 dark:text-indigo-400 bg-indigo-500/10 px-2.5 py-0.5 rounded-full border border-indigo-500/20">
+                      <span className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-400 -emerald-/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
                         Smart Calculator
                       </span>
                     </div>
@@ -2550,7 +2550,7 @@ export function RecordPaymentModal() {
                             onClick={() => handleFdBankChange(b)}
                             className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
                               fdBank === b
-                                ? 'border-indigo-500 bg-indigo-500/20 text-indigo-800 dark:text-indigo-300'
+                                ? 'border-emerald-500 -emerald-/20 text-emerald-800 dark:text-emerald-300'
                                 : 'border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 text-slate-600 dark:text-zinc-400 hover:border-slate-300 dark:hover:border-zinc-700'
                             }`}
                           >
@@ -2571,7 +2571,7 @@ export function RecordPaymentModal() {
                             onClick={() => handleFdTenureChange(t.months)}
                             className={`py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
                               fdTenureMonths === t.months
-                                ? 'border-indigo-500 bg-indigo-500 text-white dark:text-white shadow-sm'
+                                ? 'border-emerald-500 bg-[#0D6E52] dark:bg-emerald-500 text-white dark:text-white shadow-sm'
                                 : 'border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 text-slate-600 dark:text-zinc-400 hover:border-slate-300 dark:hover:border-zinc-700 hover:text-slate-950 dark:hover:text-white'
                             }`}
                           >
@@ -2592,7 +2592,7 @@ export function RecordPaymentModal() {
                           placeholder="3.85"
                           value={fdInterestRate}
                           onChange={(e) => handleFdRateChange(e.target.value)}
-                          className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/80 py-2 pl-9 pr-3 text-sm text-slate-950 dark:text-white font-mono outline-none focus:border-indigo-500"
+                          className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/80 py-2 pl-9 pr-3 text-sm text-slate-950 dark:text-white font-mono outline-none focus:border-emerald-500"
                         />
                       </div>
                     </div>
@@ -2613,9 +2613,9 @@ export function RecordPaymentModal() {
                       </div>
                       <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200 dark:border-zinc-800">
                         <span className="text-slate-600 dark:text-zinc-400 font-medium flex items-center gap-1">
-                          <Calendar className="h-3 w-3 text-indigo-800 dark:text-indigo-400" /> Maturity Date
+                          <Calendar className="h-3 w-3 text-emerald-800 dark:text-emerald-400" /> Maturity Date
                         </span>
-                        <span className="font-semibold text-indigo-800 dark:text-indigo-300 font-mono">
+                        <span className="font-semibold text-emerald-800 dark:text-emerald-300 font-mono">
                           {fdMaturityDate || 'N/A'}
                         </span>
                       </div>
@@ -2635,7 +2635,7 @@ export function RecordPaymentModal() {
                           onClick={() => handleAsnbFundChange(f)}
                           className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
                             asnbFund === f
-                              ? 'border-indigo-500 bg-indigo-500/20 text-indigo-800 dark:text-indigo-300'
+                              ? 'border-emerald-500 -emerald-/20 text-emerald-800 dark:text-emerald-300'
                               : 'border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 hover:border-slate-300 dark:hover:border-zinc-700'
                           }`}
                         >
@@ -2644,7 +2644,7 @@ export function RecordPaymentModal() {
                       ))}
                     </div>
                     <p className="text-[11px] text-slate-500 dark:text-zinc-400 pt-1">
-                      💡 Tip: When ASNB declares dividend, record it under <span className="text-indigo-800 dark:text-indigo-400 font-semibold">Investments &gt; Buy/Sell Stock</span> with Action <span className="text-emerald-800 dark:text-emerald-400 font-semibold">DIVIDEND</span> and toggle <span className="text-slate-950 dark:text-white font-medium">Reinvest</span> to automatically add units to your holdings!
+                      💡 Tip: When ASNB declares dividend, record it under <span className="text-emerald-800 dark:text-emerald-400 font-semibold">Investments &gt; Buy/Sell Stock</span> with Action <span className="text-emerald-800 dark:text-emerald-400 font-semibold">DIVIDEND</span> and toggle <span className="text-slate-950 dark:text-white font-medium">Reinvest</span> to automatically add units to your holdings!
                     </p>
                   </div>
                 )}
@@ -2661,7 +2661,7 @@ export function RecordPaymentModal() {
                           onClick={() => handleEpfAccountChange(acc)}
                           className={`p-2.5 rounded-xl text-xs font-semibold border text-center transition-all cursor-pointer ${
                             epfAccount === acc
-                              ? 'border-indigo-500 bg-indigo-500/20 text-indigo-800 dark:text-indigo-300 shadow-sm'
+                              ? 'border-emerald-500 -emerald-/20 text-emerald-800 dark:text-emerald-300 shadow-sm'
                               : 'border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 hover:border-slate-300 dark:hover:border-zinc-700'
                           }`}
                         >
@@ -2690,7 +2690,7 @@ export function RecordPaymentModal() {
             {showTripCurrency && (
               <div className="space-y-2">
                 <label htmlFor="record-currency" className="text-xs font-medium text-slate-600 dark:text-zinc-400 uppercase tracking-wider">{editTransaction ? 'Currency' : 'Trip currency'}</label>
-                <select id="record-currency" value={transactionCurrency} onChange={(e) => setTransactionCurrency(e.target.value)} className="min-h-[44px] w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 py-2.5 px-3 text-sm text-slate-950 dark:text-white outline-none focus:border-indigo-500">
+                <select id="record-currency" value={transactionCurrency} onChange={(e) => setTransactionCurrency(e.target.value)} className="min-h-[44px] w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 py-2.5 px-3 text-sm text-slate-950 dark:text-white outline-none focus:border-emerald-500">
                   {COMMON_CURRENCIES.map((item) => <option key={item.code} value={item.code}>{item.code} - {item.name}</option>)}
                 </select>
                 <p className="text-[11px] text-slate-500 dark:text-zinc-400">The amount and currency are saved as entered. No automatic conversion is written to the sheet.</p>
@@ -2702,11 +2702,11 @@ export function RecordPaymentModal() {
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
-                    <Plane className="h-3.5 w-3.5 text-indigo-800 dark:text-indigo-400" />
+                    <Plane className="h-3.5 w-3.5 text-emerald-800 dark:text-emerald-400" />
                     <span>Trip Sync & Tagging</span>
                   </span>
                   {tripTag && (
-                    <span className="text-[11px] text-indigo-800 dark:text-indigo-400 font-semibold font-mono">
+                    <span className="text-[11px] text-emerald-800 dark:text-emerald-400 font-semibold font-mono">
                       Tagged: {tripTag}
                     </span>
                   )}
@@ -2714,7 +2714,7 @@ export function RecordPaymentModal() {
 
                 {/* Case 1: In-Trip Date Auto-Detect (e.g. 20/9 - 30/9 Chengdu Trip) */}
                 {suggestedTrip ? (
-                  <div className="p-3.5 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 space-y-2">
+                  <div className="p-3.5 rounded-2xl -emerald-/10 border border-emerald-500/30 space-y-2">
                     <label className="flex items-start gap-3 cursor-pointer">
                       <input
                         type="checkbox"
@@ -2732,14 +2732,14 @@ export function RecordPaymentModal() {
                             setTransactionCurrency('MYR');
                           }
                         }}
-                        className="h-4 w-4 mt-0.5 rounded accent-indigo-500 cursor-pointer"
+                        className="h-4 w-4 mt-0.5 rounded accent-emerald-500 cursor-pointer"
                       />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                             <span className="text-xs font-bold text-slate-950 dark:text-white">
                             Tag to {suggestedTrip.name}
                           </span>
-                          <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-indigo-500/20 text-indigo-800 dark:text-indigo-300 border border-indigo-500/30">
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-bold -emerald-/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30">
                             Active Trip
                           </span>
                         </div>
@@ -2768,7 +2768,7 @@ export function RecordPaymentModal() {
                         }
                       }
                     }}
-                    className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 py-2.5 px-3 text-xs text-slate-700 dark:text-zinc-300 outline-none focus:border-indigo-500"
+                    className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 py-2.5 px-3 text-xs text-slate-700 dark:text-zinc-300 outline-none focus:border-emerald-500"
                   >
                     <option value="">None (Personal / Non-Trip Expense)</option>
                     {tripsList.map((t) => (
@@ -2790,7 +2790,7 @@ export function RecordPaymentModal() {
                     setTripTag(tripsList[0].name);
                     setManualUntagged(false);
                   }}
-                  className="text-xs text-slate-600 dark:text-zinc-400 hover:text-indigo-800 dark:hover:text-indigo-400 flex items-center gap-1.5 transition-colors cursor-pointer"
+                  className="text-xs text-slate-600 dark:text-zinc-400 hover:text-emerald-800 dark:hover:text-emerald-400 flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <Plane className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" />
                   <span>+ Tag to a trip (optional)</span>
@@ -2985,7 +2985,7 @@ export function RecordPaymentModal() {
                         setSelectedTaxCategoryId(e.target.value);
                         setManualTaxOverride(true);
                       }}
-                      className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/80 py-2 px-3 text-xs text-slate-700 dark:text-zinc-300 outline-none focus:border-indigo-500"
+                      className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/80 py-2 px-3 text-xs text-slate-700 dark:text-zinc-300 outline-none focus:border-emerald-500"
                     >
                       <option value="">Keep as Non-Deductible Expense</option>
                       {LHDN_TAX_CATEGORIES.map((cat) => {
@@ -3008,7 +3008,7 @@ export function RecordPaymentModal() {
                         setSelectedTaxCategoryId(e.target.value);
                         setManualTaxOverride(true);
                       }}
-                      className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 py-2.5 px-3 text-xs text-slate-700 dark:text-zinc-300 outline-none focus:border-indigo-500"
+                      className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 py-2.5 px-3 text-xs text-slate-700 dark:text-zinc-300 outline-none focus:border-emerald-500"
                     >
                       <option value="">
                         {category === 'Food & Dining' || category === 'Entertainment'
@@ -3144,18 +3144,18 @@ export function RecordPaymentModal() {
                   <button
                     type="button"
                     onClick={() => cameraInputRef.current?.click()}
-                    className="rounded-xl border border-dashed border-slate-200 dark:border-zinc-800 hover:border-indigo-500/50 bg-white/90 dark:bg-zinc-900/30 p-2.5 sm:p-3.5 flex items-center justify-center gap-2 text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white transition-all cursor-pointer"
+                    className="rounded-xl border border-dashed border-slate-200 dark:border-zinc-800 hover:border-emerald-500/50 bg-white/90 dark:bg-zinc-900/30 p-2.5 sm:p-3.5 flex items-center justify-center gap-2 text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white transition-all cursor-pointer"
                   >
-                    <Camera className="h-4 w-4 sm:h-5 sm:w-5 text-indigo-800 dark:text-indigo-400 shrink-0" />
+                    <Camera className="h-4 w-4 sm:h-5 sm:w-5 text-emerald-800 dark:text-emerald-400 shrink-0" />
                     <span className="text-xs font-semibold">Take Photo</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="rounded-xl border border-dashed border-slate-200 dark:border-zinc-800 hover:border-indigo-500/50 bg-white/90 dark:bg-zinc-900/30 p-2.5 sm:p-3.5 flex items-center justify-center gap-2 text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white transition-all cursor-pointer"
+                    className="rounded-xl border border-dashed border-slate-200 dark:border-zinc-800 hover:border-emerald-500/50 bg-white/90 dark:bg-zinc-900/30 p-2.5 sm:p-3.5 flex items-center justify-center gap-2 text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white transition-all cursor-pointer"
                   >
-                    <Upload className="h-4 w-4 sm:h-5 sm:w-5 text-violet-800 dark:text-purple-400 shrink-0" />
+                    <Upload className="h-4 w-4 sm:h-5 sm:w-5 text-amber-800 dark:text-amber-400 shrink-0" />
                     <span className="text-xs font-semibold">Upload Receipt</span>
                   </button>
                 </div>
@@ -3187,7 +3187,7 @@ export function RecordPaymentModal() {
                        type="button"
                        onClick={() => void handleScanReceipt()}
                        disabled={isScanningReceipt}
-                       className="inline-flex min-h-[36px] shrink-0 items-center gap-1.5 rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-2.5 text-[11px] font-semibold text-indigo-800 dark:text-indigo-300 hover:bg-indigo-500/20 disabled:opacity-50 cursor-pointer touch-manipulation"
+                       className="inline-flex min-h-[36px] shrink-0 items-center gap-1.5 rounded-xl border border-emerald-500/30 -emerald-/10 px-2.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 -emerald-/20 disabled:opacity-50 cursor-pointer touch-manipulation"
                      >
                        {isScanningReceipt ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
                        <span>{isScanningReceipt ? 'Scanning' : 'Scan'}</span>
@@ -3213,17 +3213,12 @@ export function RecordPaymentModal() {
 
             {/* Submit Button */}
             <motion.button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                void handleSubmit(e);
-              }}
+              type="submit"
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
               disabled={isSubmitting}
-              className="relative sticky bottom-0 z-10 w-full min-h-[48px] flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-500 via-indigo-600 to-purple-600 py-3.5 font-bold text-white dark:text-white shadow-xl shadow-indigo-500/25 hover:from-indigo-600 hover:to-purple-700 disabled:opacity-50 transition-all cursor-pointer text-base"
+              className="relative sticky bottom-0 z-10 w-full min-h-[48px] flex items-center justify-center gap-2 rounded-2xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 py-3.5 font-bold text-white dark:text-white shadow-xl disabled:opacity-50 transition-all cursor-pointer text-base"
             >
               {isSubmitting ? (
                 <>

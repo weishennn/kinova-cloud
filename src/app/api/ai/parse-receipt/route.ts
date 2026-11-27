@@ -3,7 +3,7 @@ import { getLocalDateString, normalizeDateString } from '@/lib/date-helper';
 import { normalizeToCanonicalCategory } from '@/lib/canonical-categories';
 import { getValidGoogleSession } from '@/lib/google-auth';
 import { recordUserAiCall } from '@/lib/admin-registry';
-import { generateGeminiContent } from '@/lib/gemini-key-pool';
+import { generateGeminiContent, STANDARD_GEMINI_MODEL } from '@/lib/gemini-key-pool';
 import { getReceiptReasoningReasons } from '@/lib/receipt-reasoning';
 import { reconcileKinovaReceiptItems, type RawReconcilableReceiptItem } from '@/lib/receipt-item-reconciler';
 import { sanitizeShopeePayCoinDiscount } from '@/lib/shopeepay-coin-guard';
@@ -23,13 +23,19 @@ function sanitizeDate(value: unknown, maxDateStr?: string): string | null {
 }
 
 function parseReceiptJson(text: string): Record<string, unknown> | null {
+  const unwrap = (val: unknown): Record<string, unknown> | null => {
+    const target = Array.isArray(val) ? val[0] : val;
+    return target && typeof target === 'object' && !Array.isArray(target)
+      ? (target as Record<string, unknown>)
+      : null;
+  };
   try {
-    return JSON.parse(text) as Record<string, unknown>;
+    return unwrap(JSON.parse(text));
   } catch {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
     try {
-      return JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+      return unwrap(JSON.parse(jsonMatch[0]));
     } catch {
       return null;
     }
@@ -200,7 +206,7 @@ Return ONLY this JSON shape:
   "notes": string
 }`;
 
-    let usedModel = process.env.GEMINI_MODEL?.trim() || 'gemini-3.5-flash';
+    let usedModel = STANDARD_GEMINI_MODEL;
     let parsed: Record<string, unknown> | null = null;
     let fastPassError: unknown = null;
     let fastResult: Awaited<ReturnType<typeof generateGeminiContent>> | null = null;
@@ -215,7 +221,7 @@ Return ONLY this JSON shape:
         temperature: 0.1,
         maxOutputTokens: 4096,
         timeoutMs: 8_000,
-        totalTimeoutMs: 10_000,
+        totalTimeoutMs: 14_000,
       });
       parsed = parseReceiptJson(fastResult.text);
       if (!parsed) fastPassError = new Error('Gemini OCR returned invalid JSON');
@@ -245,35 +251,17 @@ Return ONLY this JSON shape:
           mimeType,
           responseMimeType: 'application/json',
           thinking: true,
-          thinkingBudget: 128,
+          thinkingBudget: 256,
           temperature: 0.1,
           maxOutputTokens: 4096,
-          timeoutMs: 5_000,
-          totalTimeoutMs: 5_000,
-          preferredKeySlot: 0,
-          onlyPreferredKey: true,
-          models: [process.env.GEMINI_MODEL?.trim() || 'gemini-3.5-flash'],
+          timeoutMs: 8_000,
+          totalTimeoutMs: 12_000,
         });
       } catch (err: unknown) {
-        try {
-          recovered = await generateGeminiContent({
-            prompt: recoveryPrompt,
-            imageBase64,
-            mimeType,
-            responseMimeType: 'application/json',
-            thinking: true,
-            thinkingBudget: 128,
-            temperature: 0.1,
-            maxOutputTokens: 4096,
-            timeoutMs: 8_000,
-            totalTimeoutMs: 10_000,
-          });
-        } catch (fallbackErr: unknown) {
-          const errorMsg = fallbackErr instanceof Error
-            ? fallbackErr.message
-            : (err instanceof Error ? err.message : (fastPassError instanceof Error ? fastPassError.message : 'Gemini OCR failed'));
-          return NextResponse.json({ success: false, error: errorMsg }, { status: 502 });
-        }
+        const errorMsg = err instanceof Error
+          ? err.message
+          : (fastPassError instanceof Error ? fastPassError.message : 'Gemini OCR failed');
+        return NextResponse.json({ success: false, error: errorMsg }, { status: 502 });
       }
       parsed = parseReceiptJson(recovered.text);
       if (!parsed) {

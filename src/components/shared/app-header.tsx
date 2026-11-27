@@ -2,12 +2,24 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { RefreshCw, Check, LoaderCircle, Search, Sparkles } from 'lucide-react';
+import { RefreshCw, Check, LoaderCircle } from 'lucide-react';
 import { useSyncAndRefresh } from '@/hooks/useSyncAndRefresh';
 import { useSyncStatus } from '@/hooks/useSyncStatus';
 import { ThemeToggle } from './theme-toggle';
-import { receiptPriceSearchHref } from '@/lib/receipt-price-search-route';
 import { useAppStore } from '@/stores/app-store';
+
+function getRouteContextTitle(pathname: string): string {
+  if (pathname === '/') return 'Overview';
+  if (pathname.startsWith('/transactions')) return 'Cash Flow';
+  if (pathname.startsWith('/investments/binance')) return 'Binance Portfolio';
+  if (pathname.startsWith('/investments')) return 'Investments';
+  if (pathname.startsWith('/budget')) return 'Budget & Envelopes';
+  if (pathname.startsWith('/invoices')) return 'Invoices & Tax';
+  if (pathname.startsWith('/analytics')) return 'Analytics';
+  if (pathname.startsWith('/trips')) return 'Trips';
+  if (pathname.startsWith('/settings')) return 'Settings';
+  return 'Kinova';
+}
 
 export function AppHeader() {
   const pathname = usePathname();
@@ -15,21 +27,23 @@ export function AppHeader() {
   const { isRefreshing, justRefreshed, syncAndRefresh } = useSyncAndRefresh();
   const { isOnline, hasCloudEndpoint, isConnected, pendingCount, formattedLastSync, lastSyncError, isReady } = useSyncStatus();
 
+  const routeTitle = getRouteContextTitle(pathname || '/');
+
   const statusLabel = !isReady
     ? 'Checking sync…'
     : pendingCount > 0
-    ? `${pendingCount} pending`
-    : !isOnline
-      ? 'Offline'
-      : !hasCloudEndpoint
-        ? 'Local only'
-        : lastSyncError
-          ? 'Sync needs attention'
-          : isConnected && formattedLastSync !== 'Never'
-            ? `Synced ${formattedLastSync}`
-            : isConnected
-              ? 'Connected'
-              : `Cached · ${formattedLastSync}`;
+      ? `${pendingCount} pending`
+      : !isOnline
+        ? 'Offline'
+        : !hasCloudEndpoint
+          ? 'Local only'
+          : lastSyncError
+            ? 'Sync needs attention'
+            : isConnected && formattedLastSync !== 'Never'
+              ? `Synced ${formattedLastSync}`
+              : isConnected
+                ? 'Connected'
+                : `Cached · ${formattedLastSync}`;
   const statusClass = !isReady
     ? ''
     : pendingCount > 0 || !isOnline || lastSyncError
@@ -43,19 +57,22 @@ export function AppHeader() {
       <div className="cockpit-topbar-inner">
         <div className="cockpit-topbar-brand">
           <Link href="/" className="cockpit-wordmark" aria-label="Kinova home">
-            <img src="/kinova-header-logo.png" alt="Kinova" className="h-9 w-auto object-contain block" />
+            <img src="/kinova-header-logo.png" alt="Kinova" className="h-8 w-auto object-contain block" />
           </Link>
+          <span className="cockpit-topbar-page-title">{routeTitle}</span>
           {pendingCount > 0 ? (
             <Link
               href="/settings"
               className={`cockpit-sync-state ${statusClass}`}
               title={lastSyncError || 'Click to view or clear pending sync items in Settings'}
             >
-              <i aria-hidden="true" />{statusLabel}
+              <i aria-hidden="true" />
+              <span>{statusLabel}</span>
             </Link>
           ) : (
             <span className={`cockpit-sync-state ${statusClass}`} title={lastSyncError || statusLabel}>
-              <i aria-hidden="true" />{statusLabel}
+              <i aria-hidden="true" />
+              <span>{statusLabel}</span>
             </span>
           )}
         </div>
@@ -64,16 +81,14 @@ export function AppHeader() {
           <button
             type="button"
             onClick={() => setKinovaAIOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-500/10 hover:bg-indigo-500/20 active:scale-95 text-indigo-600 dark:text-indigo-300 border border-indigo-500/25 text-xs font-semibold transition-all cursor-pointer shadow-xs"
+            className="cockpit-ask-btn"
             title="Ask Kinova AI (Ctrl+K / Cmd+K)"
             aria-label="Open Kinova AI"
           >
-            <Sparkles size={13} className="text-indigo-500 shrink-0" />
+            <span className="cockpit-ask-dot" aria-hidden="true" />
             <span className="hidden sm:inline whitespace-nowrap">Ask Kinova</span>
-            <span className="sm:hidden font-medium">Ask</span>
-            <kbd className="hidden lg:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 rounded">
-              ⌘K
-            </kbd>
+            <span className="sm:hidden">Ask</span>
+            <kbd className="cockpit-ask-kbd">⌘K</kbd>
           </button>
           <ThemeToggle className="cockpit-icon-button" />
           <button
@@ -85,11 +100,11 @@ export function AppHeader() {
             aria-label={isRefreshing ? 'Syncing data with cloud' : justRefreshed ? 'Data synced' : 'Sync and refresh data'}
           >
             {isRefreshing ? (
-              <LoaderCircle className="spin" size={17} />
+              <LoaderCircle className="spin" size={16} />
             ) : justRefreshed ? (
-              <Check size={17} />
+              <Check size={16} />
             ) : (
-              <RefreshCw size={17} />
+              <RefreshCw size={16} />
             )}
           </button>
         </div>

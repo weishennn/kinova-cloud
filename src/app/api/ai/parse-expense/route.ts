@@ -396,7 +396,8 @@ export async function POST(req: NextRequest) {
         thinkingBudget: 0,
         temperature: 0.1,
         maxOutputTokens: 2048,
-        timeoutMs: 20_000,
+        timeoutMs: 10_000,
+        totalTimeoutMs: 18_000,
       });
 
       try {

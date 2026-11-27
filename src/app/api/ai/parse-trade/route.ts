@@ -55,7 +55,8 @@ export async function POST(req: NextRequest) {
         thinkingBudget: 0,
         temperature: 0.1,
         maxOutputTokens: 2048,
-        timeoutMs: 25_000,
+        timeoutMs: 15_000,
+        totalTimeoutMs: 25_000,
       });
       cleanJson = result.text;
     } catch (err: unknown) {

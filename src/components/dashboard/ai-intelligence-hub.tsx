@@ -220,59 +220,63 @@ export function AiIntelligenceHub({
   };
 
   return (
-    <div className="rounded-3xl border border-slate-200 dark:border-white/[0.08] bg-card/75 dark:bg-zinc-900/60 p-4 sm:p-6 backdrop-blur-2xl shadow-xl space-y-4">
+    <div className="rounded-[22px] border border-black/[0.08] dark:border-white/[0.08] bg-card p-5 sm:p-6 shadow-[0_1px_2px_rgba(17,20,24,0.03)] space-y-5">
       {/* Header and Switcher */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 dark:border-white/[0.06] pb-3.5">
-        <div className="flex items-center gap-2.5">
-          <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-md shadow-indigo-500/20 shrink-0">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-black/[0.06] dark:border-white/[0.06] pb-4">
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 rounded-xl bg-[#0E1513] border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-sm shrink-0">
             <Sparkles className="h-4 w-4" />
           </div>
           <div>
-            <h2 className="text-sm font-bold text-slate-950 dark:text-white tracking-tight flex items-center gap-2">
-              <span>Gemini 智能管家中枢 (AI Intelligence Hub)</span>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30">
-                实时守护中
+            <h2 className="text-sm font-semibold text-foreground tracking-tight flex items-center gap-2">
+              <span>Kinova Intelligence Hub</span>
+              <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 border border-emerald-500/25">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                实时守护
               </span>
             </h2>
           </div>
         </div>
 
-        {/* Tab Buttons */}
-        <div className="flex items-center gap-1 p-1 rounded-2xl bg-slate-100 dark:bg-zinc-800/80 text-xs font-medium overflow-x-auto no-scrollbar max-w-full">
+        {/* Atelier Tab Buttons */}
+        <div className="flex items-center gap-1 p-1 rounded-xl bg-black/[0.035] dark:bg-white/[0.04] border border-black/[0.06] dark:border-white/[0.06] text-xs font-medium overflow-x-auto no-scrollbar max-w-full">
           <button
             type="button"
             onClick={() => setActiveTab('health')}
-            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'health'
-                ? 'bg-white dark:bg-zinc-900 text-slate-950 dark:text-white shadow-sm font-bold'
-                : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-card text-foreground shadow-sm font-semibold border border-black/[0.06] dark:border-white/[0.08]'
+                : 'text-muted-foreground hover:text-foreground'
             }`}
           >
-            📊 财务健康 ({healthReport.totalScore}分)
+            <Activity className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span>财务健康 ({healthReport.totalScore})</span>
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('forecast')}
-            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'forecast'
-                ? 'bg-white dark:bg-zinc-900 text-slate-950 dark:text-white shadow-sm font-bold'
-                : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-card text-foreground shadow-sm font-semibold border border-black/[0.06] dark:border-white/[0.08]'
+                : 'text-muted-foreground hover:text-foreground'
             }`}
           >
-            🔮 90天预报
+            <TrendingUp className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+            <span>90天预报</span>
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('recurring')}
-            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer relative whitespace-nowrap shrink-0 ${
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer relative whitespace-nowrap shrink-0 ${
               activeTab === 'recurring'
-                ? 'bg-white dark:bg-zinc-900 text-slate-950 dark:text-white shadow-sm font-bold'
-                : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-card text-foreground shadow-sm font-semibold border border-black/[0.06] dark:border-white/[0.08]'
+                : 'text-muted-foreground hover:text-foreground'
             }`}
           >
-            <span>🔄 发现定期扣款</span>
+            <RefreshCw className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span>发现定期扣款</span>
             {untrackedCandidates.length > 0 && (
-              <span className="ml-1 px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[9px] font-bold animate-pulse">
+              <span className="ml-0.5 px-1.5 py-0.2 rounded-full bg-rose-600 text-white text-[10px] font-bold">
                 {untrackedCandidates.length}
               </span>
             )}
@@ -280,13 +284,14 @@ export function AiIntelligenceHub({
           <button
             type="button"
             onClick={() => setActiveTab('briefing')}
-            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'briefing'
-                ? 'bg-white dark:bg-zinc-900 text-slate-950 dark:text-white shadow-sm font-bold'
-                : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-card text-foreground shadow-sm font-semibold border border-black/[0.06] dark:border-white/[0.08]'
+                : 'text-muted-foreground hover:text-foreground'
             }`}
           >
-            📋 月度简报
+            <Layers className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+            <span>月度简报</span>
           </button>
         </div>
       </div>
@@ -317,59 +322,84 @@ export function AiIntelligenceHub({
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            {/* Score Card */}
-            <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-500/10 via-purple-500/10 to-transparent border border-indigo-500/20 flex flex-col justify-between">
-              <div>
-                <span className="text-[11px] font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider block">
-                  AI 综合健康分
-                </span>
-                <div className="mt-2 flex items-baseline gap-2">
-                  <span className="text-3xl sm:text-4xl font-extrabold text-indigo-600 dark:text-indigo-400 font-mono">
-                    {healthReport.totalScore}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+            {/* Obsidian Radial Health Score Card */}
+            <div className="lg:col-span-4 p-5 rounded-2xl bg-gradient-to-br from-[#0E1513] via-[#101C18] to-[#0A0F0D] border border-emerald-500/20 text-[#F5F4EF] flex flex-col justify-between gap-4 relative overflow-hidden">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <span className="text-[11px] font-semibold text-emerald-300/80 uppercase tracking-[0.12em] block">
+                    Financial Health
                   </span>
-                  <span className="text-xs text-slate-500 dark:text-zinc-400 font-bold">/ 100</span>
-                  <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-500/20 text-indigo-700 dark:text-indigo-300">
-                    等级 {healthReport.grade}
-                  </span>
+                  <div className="mt-1.5 flex items-baseline gap-2">
+                    <span className="text-3xl font-extrabold text-[#F5F4EF] font-mono tabular-nums">
+                      {healthReport.totalScore}
+                    </span>
+                    <span className="text-xs text-[#9AA6A1] font-semibold">/ 100</span>
+                    <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-400/15 text-emerald-300 border border-emerald-400/25">
+                      等级 {healthReport.grade}
+                    </span>
+                  </div>
                 </div>
+
+                {/* SVG Radial Gauge */}
+                <svg className="h-16 w-16 shrink-0 -rotate-90" viewBox="0 0 64 64" aria-hidden="true">
+                  <circle
+                    cx="32"
+                    cy="32"
+                    r="26"
+                    fill="none"
+                    stroke="rgba(255,255,255,0.1)"
+                    strokeWidth="6"
+                  />
+                  <circle
+                    cx="32"
+                    cy="32"
+                    r="26"
+                    fill="none"
+                    stroke={healthReport.totalScore >= 80 ? '#2DD4A0' : healthReport.totalScore >= 60 ? '#E5B85C' : '#F0706D'}
+                    strokeWidth="6"
+                    strokeLinecap="round"
+                    strokeDasharray={2 * Math.PI * 26}
+                    strokeDashoffset={2 * Math.PI * 26 * (1 - Math.max(0, Math.min(100, healthReport.totalScore)) / 100)}
+                  />
+                </svg>
               </div>
-              <p className="text-xs text-slate-700 dark:text-zinc-300 font-medium mt-3 leading-relaxed">
+              <p className="text-xs text-[#C7D0CC] font-medium leading-relaxed">
                 {healthReport.gradeLabel} · {healthReport.summary}
               </p>
             </div>
 
             {/* 4 Dimensions */}
-            <div className="md:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div className="lg:col-span-8 grid grid-cols-1 sm:grid-cols-2 gap-3">
               {Object.entries(healthReport.dimensions).map(([key, dim]) => (
                 <div
                   key={key}
-                  className="p-3 rounded-2xl bg-slate-50 dark:bg-zinc-900/50 border border-slate-100 dark:border-white/[0.06] flex flex-col justify-between"
+                  className="p-3.5 rounded-xl bg-black/[0.025] dark:bg-white/[0.03] border border-black/[0.06] dark:border-white/[0.06] flex flex-col justify-between"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-semibold text-slate-900 dark:text-white">
+                    <span className="text-xs font-semibold text-foreground">
                       {dim.name}
                     </span>
-                    <span className="text-xs font-mono font-bold text-slate-600 dark:text-zinc-400">
-                      {dim.score}/{dim.maxScore} 分
+                    <span className="text-xs font-mono font-bold text-muted-foreground tabular-nums">
+                      {dim.score}/{dim.maxScore}
                     </span>
                   </div>
                   {/* Progress Bar */}
-                  <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-zinc-800 my-2 overflow-hidden">
+                  <div className="w-full h-1.5 rounded-full bg-black/[0.08] dark:bg-white/[0.08] my-2.5 overflow-hidden">
                     <div
                       className={`h-full rounded-full transition-all duration-500 ${
                         dim.status === 'excellent'
-                          ? 'bg-emerald-500'
+                          ? 'bg-emerald-600 dark:bg-emerald-400'
                           : dim.status === 'good'
-                          ? 'bg-indigo-500'
+                          ? 'bg-teal-600 dark:bg-teal-400'
                           : dim.status === 'warning'
-                          ? 'bg-amber-500'
-                          : 'bg-rose-500'
+                          ? 'bg-amber-600 dark:bg-amber-400'
+                          : 'bg-rose-600 dark:bg-rose-400'
                       }`}
                       style={{ width: `${dim.percentage}%` }}
                     />
                   </div>
-                  <span className="text-[11px] text-slate-500 dark:text-zinc-400 truncate">
+                  <span className="text-[11px] text-muted-foreground truncate">
                     {dim.details}
                   </span>
                 </div>
@@ -378,15 +408,15 @@ export function AiIntelligenceHub({
           </div>
 
           {/* AI Actionable Recommendations */}
-          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-zinc-900/40 border border-slate-100 dark:border-white/[0.06] space-y-2">
-            <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-              <ShieldCheck className="h-4 w-4 text-emerald-500" />
+          <div className="p-4 rounded-xl bg-black/[0.025] dark:bg-white/[0.03] border border-black/[0.06] dark:border-white/[0.06] space-y-2">
+            <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+              <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
               <span>智能财务改善建议</span>
             </span>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-700 dark:text-zinc-300">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-muted-foreground">
               {healthReport.recommendations.map((rec, i) => (
                 <div key={i} className="flex items-start gap-2">
-                  <span className="text-indigo-500 font-bold shrink-0">•</span>
+                  <span className="text-emerald-600 dark:text-emerald-400 font-bold shrink-0">•</span>
                   <span>{rec}</span>
                 </div>
               ))}
@@ -402,59 +432,68 @@ export function AiIntelligenceHub({
           animate={{ opacity: 1, y: 0 }}
           className="space-y-4"
         >
-          {/* Key Metrics */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-zinc-900/50 border border-slate-100 dark:border-white/[0.06]">
-              <span className="text-[11px] text-slate-500 dark:text-zinc-400 block font-medium">起算流动资金</span>
-              <span className="text-lg font-bold font-mono text-slate-900 dark:text-white mt-1 block">
+          {/* Key Metrics — unified hairline strip */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-black/[0.06] dark:divide-white/[0.06] rounded-xl bg-black/[0.025] dark:bg-white/[0.03] border border-black/[0.06] dark:border-white/[0.06]">
+            <div className="p-4">
+              <span className="text-[11px] text-muted-foreground block font-medium">起算流动资金</span>
+              <span className="text-lg font-bold font-mono tabular-nums text-foreground mt-1 block">
                 RM {forecastResult.currentCashEstimate.toLocaleString('en-MY', { minimumFractionDigits: 2 })}
               </span>
-              <span className="text-[10px] text-slate-400 dark:text-zinc-500 truncate block">
+              <span className="text-[10px] text-muted-foreground truncate block mt-0.5">
                 {realCashStats.isConfigured ? '备用金 + 账本净结余' : (realCashStats.cumulativeNetCash > 0 ? '历史账本累计净结余' : '账本以 RM 0 起算')}
               </span>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-zinc-900/50 border border-slate-100 dark:border-white/[0.06]">
-              <span className="text-[11px] text-slate-500 dark:text-zinc-400 block font-medium">日常可支配日均支出</span>
-              <span className="text-lg font-bold font-mono text-slate-900 dark:text-white mt-1 block">
+            <div className="p-4">
+              <span className="text-[11px] text-muted-foreground block font-medium">日常可支配日均支出</span>
+              <span className="text-lg font-bold font-mono tabular-nums text-foreground mt-1 block">
                 RM{'\u00A0'}{forecastResult.dailyBurnRate.toFixed(2)} / 天
               </span>
-              <span className="text-[10px] text-slate-400 dark:text-zinc-500 truncate block">
+              <span className="text-[10px] text-muted-foreground truncate block mt-0.5">
                 {forecastResult.dailyBurnRate > 0 ? '基于历史平稳消费推算' : '尚无日常支出流水'}
               </span>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-zinc-900/50 border border-slate-100 dark:border-white/[0.06] min-w-0">
-              <span className="text-[11px] text-slate-500 dark:text-zinc-400 block font-medium">60 天后预计结余</span>
+            <div className="p-4 min-w-0">
+              <span className="text-[11px] text-muted-foreground block font-medium">60 天后预计结余</span>
               <span className={`text-lg font-bold font-mono tabular-nums whitespace-nowrap mt-1 block ${
                 forecastResult.forecast60DaysBalance >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'
               }`}>
                 RM{'\u00A0'}{forecastResult.forecast60DaysBalance.toLocaleString('en-MY', { minimumFractionDigits: 2 })}
               </span>
-              <span className="text-[10px] text-slate-400 dark:text-zinc-500 truncate block">已扣减预计固定扣款与分期</span>
+              <span className="text-[10px] text-muted-foreground truncate block mt-0.5">已扣减预计固定扣款与分期</span>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-zinc-900/50 border border-slate-100 dark:border-white/[0.06] min-w-0">
-              <span className="text-[11px] text-slate-500 dark:text-zinc-400 block font-medium">90 天后预计结余</span>
+            <div className="p-4 min-w-0">
+              <span className="text-[11px] text-muted-foreground block font-medium">90 天后预计结余</span>
               <span className={`text-lg font-bold font-mono tabular-nums whitespace-nowrap mt-1 block ${
                 forecastResult.forecast90DaysBalance >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'
               }`}>
                 RM{'\u00A0'}{forecastResult.forecast90DaysBalance.toLocaleString('en-MY', { minimumFractionDigits: 2 })}
               </span>
-              <span className="text-[10px] text-slate-400 dark:text-zinc-500 truncate block">全周期真实收支走势</span>
+              <span className="text-[10px] text-muted-foreground truncate block mt-0.5">全周期真实收支走势</span>
             </div>
           </div>
 
           {/* 30-Day Step Preview */}
-          <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-500/10 via-indigo-500/10 to-transparent border border-purple-500/20 flex items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-purple-600 dark:text-purple-400 shrink-0" />
-              <span className="text-slate-800 dark:text-zinc-200 font-medium">
+          <div className="p-4 rounded-xl bg-amber-500/[0.06] dark:bg-amber-400/[0.06] border border-amber-500/20 border-l-[3px] border-l-amber-600 dark:border-l-amber-400 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <TrendingUp className="h-4 w-4 text-amber-700 dark:text-amber-400 shrink-0" />
+              <span className="text-foreground font-medium">
                 {forecastResult.insightMessage}
               </span>
             </div>
-            <span className="px-2.5 py-1 rounded-full bg-purple-500/20 text-purple-700 dark:text-purple-300 font-bold shrink-0 text-[11px]">
-              {forecastResult.status === 'safe' ? '🟢 资金充裕' : forecastResult.status === 'tight' ? '🟡 需备缓冲' : '🔴 缺口预警'}
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-semibold shrink-0 text-[11px] border ${
+              forecastResult.status === 'safe'
+                ? 'bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 border-emerald-500/25'
+                : forecastResult.status === 'tight'
+                ? 'bg-amber-500/10 text-amber-800 dark:text-amber-300 border-amber-500/25'
+                : 'bg-rose-500/10 text-rose-800 dark:text-rose-300 border-rose-500/25'
+            }`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${
+                forecastResult.status === 'safe' ? 'bg-emerald-500' : forecastResult.status === 'tight' ? 'bg-amber-500' : 'bg-rose-500'
+              }`} />
+              {forecastResult.status === 'safe' ? '资金充裕' : forecastResult.status === 'tight' ? '需备缓冲' : '缺口预警'}
             </span>
           </div>
         </motion.div>
@@ -469,42 +508,42 @@ export function AiIntelligenceHub({
         >
           {untrackedCandidates.length > 0 ? (
             <div className="space-y-2">
-              <div className="text-xs text-slate-600 dark:text-zinc-400 flex items-center justify-between">
+              <div className="text-xs text-muted-foreground flex items-center justify-between">
                 <span>智能体扫描历史账本，发现了以下未登记为「定期支出」的规律扣费：</span>
-                <span className="font-semibold text-purple-700 dark:text-purple-400">{untrackedCandidates.length} 项待确认</span>
+                <span className="font-semibold text-emerald-700 dark:text-emerald-400">{untrackedCandidates.length} 项待确认</span>
               </div>
-              <div className="divide-y divide-slate-100 dark:divide-zinc-800 border border-slate-200 dark:border-white/[0.08] rounded-2xl overflow-hidden bg-white/70 dark:bg-zinc-900/40">
+              <div className="divide-y divide-black/[0.06] dark:divide-white/[0.06] border border-black/[0.06] dark:border-white/[0.06] rounded-xl overflow-hidden bg-black/[0.02] dark:bg-white/[0.02]">
                 {untrackedCandidates.map((item) => (
                   <div
                     key={item.id}
-                    className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2.5 p-3 hover:bg-slate-50 dark:hover:bg-zinc-800/40 transition-colors text-xs"
+                    className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2.5 p-3 hover:bg-black/[0.025] dark:hover:bg-white/[0.03] transition-colors text-xs"
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <div className="h-8 w-8 rounded-xl bg-purple-500/15 text-purple-700 dark:text-purple-400 flex items-center justify-center font-bold text-xs shrink-0">
+                      <div className="h-8 w-8 rounded-lg bg-emerald-500/12 text-emerald-800 dark:text-emerald-300 border border-emerald-500/20 flex items-center justify-center font-bold font-mono text-xs shrink-0">
                         {item.detectedDayOfMonth}日
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="font-bold text-slate-900 dark:text-white flex items-center gap-2 min-w-0">
+                        <div className="font-semibold text-foreground flex items-center gap-2 min-w-0">
                           <span className="truncate">{item.name}</span>
-                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 shrink-0">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-black/[0.05] dark:bg-white/[0.06] text-muted-foreground shrink-0">
                             {item.category}
                           </span>
                         </div>
-                        <span className="text-[11px] text-slate-500 dark:text-zinc-400 block truncate">
+                        <span className="text-[11px] text-muted-foreground block truncate">
                           约每月 {item.detectedDayOfMonth} 号扣费 · 历史出现 {item.occurrencesCount} 次 · 最近 {item.lastDate}
                         </span>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-3 shrink-0 ml-auto">
-                      <span className="font-mono font-bold text-slate-950 dark:text-white text-sm whitespace-nowrap tabular-nums">
+                      <span className="font-mono font-bold text-foreground text-sm whitespace-nowrap tabular-nums">
                         RM{'\u00A0'}{item.averageAmount.toFixed(2)}
                       </span>
                       <button
                         type="button"
                         onClick={() => handleAddDiscoveredToCommitments(item)}
                         disabled={isAddingRecurring === item.id}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs transition-colors shadow-sm cursor-pointer disabled:opacity-50"
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white font-semibold text-xs transition-colors shadow-sm cursor-pointer disabled:opacity-50"
                       >
                         <Plus className="h-3.5 w-3.5" />
                         <span>一键加入追踪</span>
@@ -533,40 +572,43 @@ export function AiIntelligenceHub({
           animate={{ opacity: 1, y: 0 }}
           className="space-y-3.5"
         >
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-zinc-900/50 border border-slate-100 dark:border-white/[0.06]">
-              <span className="text-[11px] text-slate-500 dark:text-zinc-400 block font-medium">本月累计总支出</span>
-              <span className="text-lg font-bold font-mono text-slate-900 dark:text-white mt-1 block">
+          <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-black/[0.06] dark:divide-white/[0.06] rounded-xl bg-black/[0.025] dark:bg-white/[0.03] border border-black/[0.06] dark:border-white/[0.06]">
+            <div className="p-4">
+              <span className="text-[11px] text-muted-foreground block font-medium">本月累计总支出</span>
+              <span className="text-lg font-bold font-mono tabular-nums text-foreground mt-1 block">
                 RM {briefing.totalSpending.toLocaleString('en-MY', { minimumFractionDigits: 2 })}
               </span>
             </div>
-            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-zinc-900/50 border border-slate-100 dark:border-white/[0.06]">
-              <span className="text-[11px] text-slate-500 dark:text-zinc-400 block font-medium">最大开销分类</span>
-              <span className="text-lg font-bold text-slate-900 dark:text-white mt-1 block">
+            <div className="p-4">
+              <span className="text-[11px] text-muted-foreground block font-medium">最大开销分类</span>
+              <span className="text-lg font-bold text-foreground mt-1 block">
                 {briefing.topCategoryName} ({briefing.topCategoryRatio}%)
               </span>
             </div>
-            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-zinc-900/50 border border-slate-100 dark:border-white/[0.06]">
-              <span className="text-[11px] text-slate-500 dark:text-zinc-400 block font-medium">单笔最大单据</span>
-              <span className="text-lg font-bold font-mono text-slate-900 dark:text-white mt-1 block truncate">
+            <div className="p-4">
+              <span className="text-[11px] text-muted-foreground block font-medium">单笔最大单据</span>
+              <span className="text-lg font-bold font-mono tabular-nums text-foreground mt-1 block truncate">
                 {briefing.largestExpense ? `RM ${briefing.largestExpense.amount.toFixed(2)}` : '无大额单据'}
               </span>
             </div>
           </div>
 
           {/* Highlights & Tips */}
-          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-zinc-900/40 border border-slate-100 dark:border-white/[0.06] space-y-2.5 text-xs">
-            <span className="font-bold text-slate-900 dark:text-white block">📌 关键开支洞察</span>
-            <div className="space-y-1.5 text-slate-700 dark:text-zinc-300">
+          <div className="p-4 rounded-xl bg-black/[0.025] dark:bg-white/[0.03] border border-black/[0.06] dark:border-white/[0.06] space-y-2.5 text-xs">
+            <span className="font-semibold text-foreground flex items-center gap-1.5">
+              <Sparkles className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+              <span>关键开支洞察</span>
+            </span>
+            <div className="space-y-1.5 text-muted-foreground">
               {briefing.highlights.map((h, i) => (
                 <div key={i} className="flex items-start gap-2">
-                  <span className="text-indigo-500 font-bold">•</span>
+                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">•</span>
                   <span>{h}</span>
                 </div>
               ))}
             </div>
 
-            <div className="mt-3 pt-3 border-t border-slate-200 dark:border-zinc-800 text-indigo-700 dark:text-indigo-300 font-medium leading-relaxed">
+            <div className="mt-3 pt-3 border-t border-black/[0.06] dark:border-white/[0.06] text-emerald-800 dark:text-emerald-300 font-medium leading-relaxed">
               {briefing.actionableTip}
             </div>
           </div>

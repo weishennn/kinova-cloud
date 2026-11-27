@@ -212,7 +212,7 @@ export default function AnalyticsPage() {
         title="Expense & Savings Analytics"
         description="Analyze monthly spending, category distribution, and track back historical savings across years"
         action={(
-          <div className="cockpit-segmented-control relative flex space-x-1 rounded-2xl bg-white/90 dark:bg-zinc-950/80 p-1.5 border border-slate-200 dark:border-white/[0.08] backdrop-blur-md">
+          <div className="cockpit-segmented-control relative flex space-x-1 rounded-xl bg-black/[0.035] dark:bg-white/[0.04] p-1 border border-black/[0.06] dark:border-white/[0.08]">
           {(['Daily', 'Monthly'] as const).map((tab) => {
             const isActive = period === tab;
             return (
@@ -220,14 +220,14 @@ export default function AnalyticsPage() {
                 key={tab}
                 type="button"
                 onClick={() => setPeriod(tab)}
-                className={`relative z-10 min-h-[44px] px-4 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer touch-manipulation active:scale-[0.97] ${
-                  isActive ? 'text-indigo-800 dark:text-indigo-200 font-bold' : 'text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200'
+                className={`relative z-10 min-h-[40px] px-4 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer touch-manipulation active:scale-[0.97] ${
+                  isActive ? 'text-emerald-800 dark:text-emerald-300 font-bold' : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
                 {isActive && (
                   <motion.div
                     layoutId="analytics-period-pill"
-                    className="cockpit-segmented-pill absolute inset-0 rounded-xl border pointer-events-none"
+                    className="cockpit-segmented-pill absolute inset-0 rounded-lg border pointer-events-none"
                     transition={{ type: 'spring' as const, stiffness: 450, damping: 32 }}
                   />
                 )}
@@ -240,7 +240,7 @@ export default function AnalyticsPage() {
       />
 
       {/* Unified Period Selector */}
-      <div className="bg-white/90 dark:bg-zinc-900/60 p-3.5 sm:p-4 rounded-3xl border border-slate-200 dark:border-white/[0.08] backdrop-blur-xl shadow-lg">
+      <div className="bg-card p-3.5 sm:p-4 rounded-[20px] border border-black/[0.08] dark:border-white/[0.08] shadow-[0_1px_2px_rgba(17,20,24,0.03)]">
         <PeriodBar
           selectedMonth={selectedMonth}
           onSelectMonth={setSelectedMonth}
@@ -251,58 +251,58 @@ export default function AnalyticsPage() {
         />
       </div>
 
-      {/* Summary KPI Cards with Spring Hover and Specular Highlights */}
+      {/* Summary KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <motion.div
-          whileHover={{ y: -3, scale: 1.015 }}
+          whileHover={{ y: -2 }}
           transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
-          className="p-5 rounded-3xl border border-slate-200 dark:border-white/[0.08] bg-card/60 backdrop-blur-2xl specular-card transition-all duration-300 hover:border-slate-200 dark:hover:border-white/[0.15] shadow-xl"
+          className="p-5 rounded-[20px] border border-black/[0.08] dark:border-white/[0.08] bg-card transition-all duration-300 shadow-[0_1px_2px_rgba(17,20,24,0.03)]"
         >
-          <span className="text-xs text-slate-600 dark:text-zinc-400 font-semibold uppercase tracking-wider">Total Expenses</span>
-          <div className="text-xl sm:text-2xl font-extrabold font-mono tabular-nums tracking-tight text-slate-950 dark:text-white mt-1.5">
+          <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Total Expenses</span>
+          <div className="text-xl sm:text-2xl font-extrabold font-mono tabular-nums tracking-tight text-foreground mt-1.5">
             <AnimatedNumber value={stats.totalExpense} animateOnMount />
           </div>
-          <span className="text-[11px] text-slate-600 dark:text-zinc-400 mt-1 block font-medium font-mono">
+          <span className="text-[11px] text-muted-foreground mt-1 block font-medium font-mono">
             {stats.count} recorded payments in {selectedMonth === 'all' ? 'all time' : formatMonthLabel(selectedMonth).split(' ')[0]}
           </span>
         </motion.div>
 
         <motion.div
-          whileHover={{ y: -3, scale: 1.015 }}
+          whileHover={{ y: -2 }}
           transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
-          className="p-5 rounded-3xl border border-slate-200 dark:border-white/[0.08] bg-card/60 backdrop-blur-2xl specular-card transition-all duration-300 hover:border-indigo-500/40 shadow-xl"
+          className="p-5 rounded-[20px] border border-black/[0.08] dark:border-white/[0.08] bg-card transition-all duration-300 hover:border-amber-500/40 shadow-[0_1px_2px_rgba(17,20,24,0.03)]"
         >
-          <span className="text-xs text-slate-600 dark:text-zinc-400 font-semibold uppercase tracking-wider">Average Daily Spend</span>
-          <div className="text-xl sm:text-2xl font-extrabold font-mono tabular-nums tracking-tight text-indigo-800 dark:text-indigo-300 mt-1.5">
+          <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Average Daily Spend</span>
+          <div className="text-xl sm:text-2xl font-extrabold font-mono tabular-nums tracking-tight text-amber-700 dark:text-amber-400 mt-1.5">
             <AnimatedNumber value={stats.avgDaily} animateOnMount />
           </div>
-          <span className="text-[11px] text-slate-600 dark:text-zinc-400 mt-1 block font-medium">per active spending day</span>
+          <span className="text-[11px] text-muted-foreground mt-1 block font-medium">per active spending day</span>
         </motion.div>
 
         <motion.div
-          whileHover={{ y: -3, scale: 1.015 }}
+          whileHover={{ y: -2 }}
           transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
-          className="p-5 rounded-3xl border border-slate-200 dark:border-white/[0.08] bg-card/60 backdrop-blur-2xl specular-card transition-all duration-300 hover:border-rose-500/40 shadow-xl"
+          className="p-5 rounded-[20px] border border-black/[0.08] dark:border-white/[0.08] bg-card transition-all duration-300 hover:border-rose-500/40 shadow-[0_1px_2px_rgba(17,20,24,0.03)]"
         >
-          <span className="text-xs text-slate-600 dark:text-zinc-400 font-semibold uppercase tracking-wider">Highest Single Expense</span>
-          <div className="text-xl sm:text-2xl font-extrabold font-mono tabular-nums tracking-tight text-rose-800 dark:text-rose-400 mt-1.5">
+          <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Highest Single Expense</span>
+          <div className="text-xl sm:text-2xl font-extrabold font-mono tabular-nums tracking-tight text-rose-700 dark:text-rose-400 mt-1.5">
             <AnimatedNumber value={stats.maxExpense.amount} animateOnMount />
           </div>
-          <span className="text-[11px] text-slate-600 dark:text-zinc-400 mt-1 block line-clamp-2 break-words font-medium" title={stats.maxExpense.description || stats.maxExpense.category}>
+          <span className="text-[11px] text-muted-foreground mt-1 block line-clamp-2 break-words font-medium" title={stats.maxExpense.description || stats.maxExpense.category}>
             {stats.maxExpense.description || stats.maxExpense.category}
           </span>
         </motion.div>
 
         <motion.div
-          whileHover={{ y: -3, scale: 1.015 }}
+          whileHover={{ y: -2 }}
           transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
-          className="p-5 rounded-3xl border border-slate-200 dark:border-white/[0.08] bg-card/60 backdrop-blur-2xl specular-card transition-all duration-300 hover:border-emerald-500/40 shadow-xl"
+          className="p-5 rounded-[20px] border border-black/[0.08] dark:border-white/[0.08] bg-card transition-all duration-300 hover:border-emerald-500/40 shadow-[0_1px_2px_rgba(17,20,24,0.03)]"
         >
-          <span className="text-xs text-slate-600 dark:text-zinc-400 font-semibold uppercase tracking-wider">Top Category</span>
-          <div className="min-w-0 text-xl sm:text-2xl font-extrabold text-emerald-800 dark:text-emerald-400 mt-1.5 break-words leading-tight" title={breakdown[0]?.name || 'None'}>
+          <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Top Category</span>
+          <div className="min-w-0 text-xl sm:text-2xl font-extrabold text-emerald-700 dark:text-emerald-400 mt-1.5 break-words leading-tight" title={breakdown[0]?.name || 'None'}>
             {breakdown[0]?.name || 'None'}
           </div>
-          <span className="text-[11px] text-slate-600 dark:text-zinc-400 mt-1 block font-medium">
+          <span className="text-[11px] text-muted-foreground mt-1 block font-medium">
             {breakdown[0] && stats.totalExpense > 0
               ? `${((breakdown[0].value / stats.totalExpense) * 100).toFixed(1)}% of spending`
               : 'No categorized data'}
@@ -311,7 +311,7 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Main Chart */}
-      <div className="h-[360px] w-full rounded-3xl border border-slate-200 dark:border-white/[0.08] bg-card/60 backdrop-blur-2xl p-5 sm:p-6 flex flex-col justify-center shadow-xl">
+      <div className="h-[360px] w-full rounded-3xl border border-black/[0.08] dark:border-white/[0.08] bg-card  p-5 sm:p-6 flex flex-col justify-center shadow-[0_1px_2px_rgba(17,20,24,0.03)]">
         <div className="mb-2 flex items-center justify-between">
           <span className="text-xs text-slate-600 dark:text-zinc-400 font-semibold uppercase tracking-wider">
             {period === 'Daily'
@@ -353,41 +353,41 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Category Spending Breakdown List */}
-      <div className="rounded-3xl border border-slate-200 dark:border-white/[0.08] bg-card/60 backdrop-blur-2xl p-6 space-y-4 shadow-xl">
+      <div className="rounded-[20px] border border-black/[0.08] dark:border-white/[0.08] bg-card p-6 space-y-4 shadow-[0_1px_2px_rgba(17,20,24,0.03)]">
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-bold text-slate-950 dark:text-white flex items-center gap-2">
-            <PieChart className="h-4 w-4 text-indigo-800 dark:text-indigo-400" />
+          <h2 className="text-base font-semibold text-foreground flex items-center gap-2">
+            <PieChart className="h-4 w-4 text-emerald-700 dark:text-emerald-400" />
             <span>Category Spending Breakdown ({formatMonthLabel(selectedMonth)})</span>
           </h2>
-          <span className="text-xs text-slate-600 dark:text-zinc-400 font-mono">{breakdown.length} Categories</span>
+          <span className="text-xs text-muted-foreground font-mono">{breakdown.length} Categories</span>
         </div>
 
         {breakdown.length === 0 ? (
-          <p className="text-xs text-slate-600 dark:text-zinc-400 text-center py-6">No categorized expenses recorded for {formatMonthLabel(selectedMonth)}</p>
+          <p className="text-xs text-muted-foreground text-center py-6">No categorized expenses recorded for {formatMonthLabel(selectedMonth)}</p>
         ) : (
           <div className="space-y-3.5">
             {breakdown.map((item) => {
               const percent = stats.totalExpense > 0 ? (item.value / stats.totalExpense) * 100 : 0;
-              const color = CATEGORY_COLORS[item.name] || '#6366f1';
+              const color = CATEGORY_COLORS[item.name] || '#0D6E52';
               return (
                 <Link
                   key={item.name}
                   href={`/transactions?category=${encodeURIComponent(item.name)}`}
-                  className="block space-y-1.5 rounded-xl p-2 -mx-2 hover:bg-slate-100/80 dark:hover:bg-white/[0.04] transition-colors group"
+                  className="block space-y-1.5 rounded-xl p-2 -mx-2 hover:bg-black/[0.03] dark:hover:bg-white/[0.04] transition-colors group"
                 >
                   <div className="flex items-center justify-between gap-2 text-xs">
                     <div className="flex items-center gap-2 min-w-0 flex-1">
                       <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
-                      <span className="font-semibold text-slate-950 dark:text-white truncate group-hover:text-indigo-700 dark:group-hover:text-indigo-300 transition-colors">
+                      <span className="font-semibold text-foreground truncate group-hover:text-emerald-700 dark:group-hover:text-emerald-300 transition-colors">
                         {item.name}
                       </span>
                     </div>
-                    <div className="text-slate-600 dark:text-zinc-400 shrink-0 whitespace-nowrap tabular-nums">
-                      <strong className="text-slate-950 dark:text-white font-mono tabular-nums tracking-tight">RM{'\u00A0'}{item.value.toFixed(2)}</strong>
-                      <span className="text-slate-600 dark:text-zinc-400 font-mono ml-1.5">({percent.toFixed(1)}%)</span>
+                    <div className="text-muted-foreground shrink-0 whitespace-nowrap tabular-nums">
+                      <strong className="text-foreground font-mono tabular-nums tracking-tight">RM{'\u00A0'}{item.value.toFixed(2)}</strong>
+                      <span className="text-muted-foreground font-mono ml-1.5">({percent.toFixed(1)}%)</span>
                     </div>
                   </div>
-                  <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-zinc-800/80">
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-black/[0.07] dark:bg-white/[0.07]">
                     <div
                       className="h-full rounded-full transition-all duration-500"
                       style={{ width: `${percent}%`, backgroundColor: color }}
@@ -400,8 +400,8 @@ export default function AnalyticsPage() {
         )}
       </div>
 
-      {/* Monthly Savings History & Multi-Year Track Back ("track back like which month i save how much") */}
-      <div className="rounded-3xl border border-slate-200 dark:border-white/[0.08] bg-card/60 backdrop-blur-2xl p-6 space-y-5 shadow-xl">
+      {/* Monthly Savings History & Multi-Year Track Back */}
+      <div className="rounded-[20px] border border-black/[0.08] dark:border-white/[0.08] bg-card p-6 space-y-5 shadow-[0_1px_2px_rgba(17,20,24,0.03)]">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-base sm:text-lg font-bold text-slate-950 dark:text-white flex items-center gap-2.5">
@@ -420,8 +420,8 @@ export default function AnalyticsPage() {
               onClick={() => setSavingsYearFilter('all')}
               className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition-all active:scale-95 ${
                 savingsYearFilter === 'all'
-                  ? 'bg-indigo-600 text-white dark:text-white shadow-md shadow-indigo-600/30'
-                  : 'bg-slate-100 dark:bg-zinc-800/80 text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white border border-slate-200 dark:border-white/[0.06]'
+                  ? 'bg-[#0D6E52] dark:bg-emerald-600 text-white shadow-sm'
+                  : 'bg-black/[0.04] dark:bg-white/[0.05] text-muted-foreground hover:text-foreground border border-black/[0.07] dark:border-white/[0.07]'
               }`}
             >
               All Years
@@ -433,8 +433,8 @@ export default function AnalyticsPage() {
                 onClick={() => setSavingsYearFilter(year)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition-all active:scale-95 ${
                   savingsYearFilter === year
-                    ? 'bg-indigo-600 text-white dark:text-white shadow-md shadow-indigo-600/30'
-                    : 'bg-slate-100 dark:bg-zinc-800/80 text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white border border-slate-200 dark:border-white/[0.06]'
+                    ? 'bg-[#0D6E52] dark:bg-emerald-600 text-white shadow-sm'
+                    : 'bg-black/[0.04] dark:bg-white/[0.05] text-muted-foreground hover:text-foreground border border-black/[0.07] dark:border-white/[0.07]'
                 }`}
               >
                 Year {year}
@@ -443,37 +443,37 @@ export default function AnalyticsPage() {
           </div>
         </div>
 
-        {/* Annual Overview Highlight Banner */}
-        <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-emerald-500/10 dark:from-emerald-950/25 via-slate-100 dark:via-zinc-900/80 to-indigo-500/10 dark:to-indigo-950/25 border border-emerald-500/25 flex flex-wrap items-center justify-between gap-4 shadow-inner">
+        {/* Annual Overview Highlight Banner — Obsidian & Jade Atelier Card */}
+        <div className="p-5 rounded-2xl bg-gradient-to-br from-[#0E1513] via-[#101C18] to-[#0A0F0D] border border-emerald-500/20 text-[#F5F4EF] flex flex-wrap items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-emerald-800 dark:text-emerald-400" />
-              <span className="text-xs font-bold text-emerald-800 dark:text-emerald-400 uppercase tracking-wider block">
+              <Sparkles className="h-4 w-4 text-emerald-400" />
+              <span className="text-xs font-semibold text-emerald-300 uppercase tracking-[0.12em] block">
                 {annualSummary.targetYear} Annual Savings Summary
               </span>
             </div>
-            <span className="text-2xl sm:text-3xl font-black font-mono tabular-nums whitespace-nowrap tracking-tight text-slate-950 dark:text-white mt-1 block">
+            <span className="text-2xl sm:text-3xl font-extrabold font-mono tabular-nums whitespace-nowrap tracking-tight text-[#F5F4EF] mt-1 block">
               {annualSummary.saved >= 0 ? '+' : '-'}RM{'\u00A0'}{Math.abs(annualSummary.saved).toFixed(2)}
             </span>
-            <span className="text-[11px] text-slate-600 dark:text-zinc-400 font-mono">
+            <span className="text-[11px] text-[#9AA6A1] font-mono">
               Total Net Saved in {annualSummary.targetYear} across {annualSummary.monthCount} recorded months
             </span>
           </div>
 
           <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-xs font-mono ml-auto">
             <div>
-              <span className="text-slate-600 dark:text-zinc-400 block text-[10px] uppercase font-semibold">Earned</span>
-              <span className="text-emerald-800 dark:text-emerald-400 font-bold text-sm whitespace-nowrap tabular-nums">RM{'\u00A0'}{annualSummary.income.toFixed(2)}</span>
+              <span className="text-[#9AA6A1] block text-[10px] uppercase font-semibold">Earned</span>
+              <span className="text-emerald-400 font-bold text-sm whitespace-nowrap tabular-nums">RM{'\u00A0'}{annualSummary.income.toFixed(2)}</span>
             </div>
-            <div className="w-px h-7 bg-slate-200 dark:bg-zinc-800" />
+            <div className="w-px h-7 bg-white/10" />
             <div>
-              <span className="text-slate-600 dark:text-zinc-400 block text-[10px] uppercase font-semibold">Spent</span>
-              <span className="text-rose-800 dark:text-rose-400 font-bold text-sm whitespace-nowrap tabular-nums">RM{'\u00A0'}{annualSummary.expense.toFixed(2)}</span>
+              <span className="text-[#9AA6A1] block text-[10px] uppercase font-semibold">Spent</span>
+              <span className="text-rose-400 font-bold text-sm whitespace-nowrap tabular-nums">RM{'\u00A0'}{annualSummary.expense.toFixed(2)}</span>
             </div>
-            <div className="w-px h-7 bg-slate-200 dark:bg-zinc-800" />
+            <div className="w-px h-7 bg-white/10" />
             <div>
-              <span className="text-slate-600 dark:text-zinc-400 block text-[10px] uppercase font-semibold">Saved Rate</span>
-              <span className="text-slate-950 dark:text-white font-bold text-sm whitespace-nowrap tabular-nums">{annualSummary.savingsRate.toFixed(1)}%</span>
+              <span className="text-[#9AA6A1] block text-[10px] uppercase font-semibold">Saved Rate</span>
+              <span className="text-[#E5B85C] font-bold text-sm whitespace-nowrap tabular-nums">{annualSummary.savingsRate.toFixed(1)}%</span>
             </div>
           </div>
         </div>
@@ -487,7 +487,7 @@ export default function AnalyticsPage() {
             return (
               <motion.div
                 key={m.monthKey}
-                whileHover={{ y: -2, scale: 1.01 }}
+                whileHover={{ y: -2 }}
                 transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
                 onClick={() => {
                   setSelectedMonth(m.monthKey);
@@ -496,20 +496,20 @@ export default function AnalyticsPage() {
                 role="button"
                 tabIndex={0}
                 aria-label={`View savings for ${m.monthName}, saved RM ${m.saved.toFixed(2)}`}
-                className={`p-4 sm:p-5 rounded-2xl border transition-all cursor-pointer shadow-md group ${
+                className={`p-4 sm:p-5 rounded-2xl border transition-all cursor-pointer group ${
                   isSelected
-                    ? 'border-indigo-500/50 bg-gradient-to-br from-indigo-500/15 dark:from-indigo-950/40 via-slate-100 dark:via-zinc-900/80 to-white dark:to-zinc-900 ring-2 ring-indigo-500/30'
-                    : 'border-slate-200 dark:border-white/[0.06] bg-white/90 dark:bg-zinc-900/50 hover:bg-white/90 dark:hover:bg-zinc-900/80 hover:border-slate-200 dark:hover:border-white/[0.12]'
+                    ? 'border-emerald-500/45 bg-emerald-500/[0.06] ring-1 ring-emerald-500/25'
+                    : 'border-black/[0.07] dark:border-white/[0.07] bg-black/[0.015] dark:bg-white/[0.02] hover:border-black/[0.15] dark:hover:border-white/[0.15]'
                 }`}
               >
                 {/* Top Row: Month Name & Badges */}
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-sm sm:text-base text-slate-950 dark:text-white group-hover:text-indigo-800 dark:group-hover:text-indigo-300 transition-colors">
+                    <span className="font-semibold text-sm sm:text-base text-foreground group-hover:text-emerald-700 dark:group-hover:text-emerald-300 transition-colors">
                       {m.monthName}
                     </span>
                     {m.isCurrent && (
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-800 dark:text-indigo-300 border border-indigo-500/25">
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/12 text-amber-800 dark:text-amber-300 border border-amber-500/25">
                         Current
                       </span>
                     )}
@@ -571,9 +571,9 @@ export default function AnalyticsPage() {
                 </div>
 
                 {/* Footer with transaction count and inspect cue */}
-                <div className="mt-3.5 pt-2.5 border-t border-slate-200 dark:border-white/[0.05] flex items-center justify-between text-[11px] text-slate-600 dark:text-zinc-400 font-mono">
+                <div className="mt-3.5 pt-2.5 border-t border-black/[0.06] dark:border-white/[0.06] flex items-center justify-between text-[11px] text-muted-foreground font-mono">
                   <span>{m.count} records</span>
-                  <span className="text-indigo-800 dark:text-indigo-400 group-hover:text-indigo-800 dark:group-hover:text-indigo-300 font-semibold transition-colors flex items-center gap-0.5">
+                  <span className="text-emerald-700 dark:text-emerald-400 font-semibold transition-colors flex items-center gap-0.5">
                     <span>{isSelected ? 'Viewing Analytics' : 'Inspect Month'}</span>
                     <ChevronRight className="h-3.5 w-3.5 group-hover:translate-x-0.5 transition-transform" />
                   </span>

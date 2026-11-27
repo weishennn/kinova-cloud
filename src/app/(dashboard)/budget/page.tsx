@@ -440,11 +440,11 @@ export default function BudgetPage() {
               type="number"
               value={budgetValue}
               onChange={(e) => setBudgetValue(e.target.value)}
-              className="w-32 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-1.5 text-xs text-slate-950 dark:text-white outline-none focus:border-indigo-500 font-mono"
+              className="w-32 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-1.5 text-xs text-slate-950 dark:text-white outline-none focus:border-emerald-500 font-mono"
             />
             <button
               type="submit"
-              className="p-2 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white dark:text-white cursor-pointer"
+              className="p-2 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white dark:text-white cursor-pointer"
             >
               <Check className="h-4 w-4" />
             </button>
@@ -470,7 +470,7 @@ export default function BudgetPage() {
         <motion.div
           whileHover={{ y: -4, scale: 1.01 }}
           transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
-          className="rounded-3xl border border-slate-200 dark:border-white/[0.08] bg-card/60 p-6 text-center backdrop-blur-2xl flex flex-col justify-between shadow-xl hover:border-indigo-500/40 transition-colors specular-card"
+          className="rounded-3xl border border-black/[0.08] dark:border-white/[0.08] bg-card p-6 text-center  flex flex-col justify-between shadow-[0_1px_2px_rgba(17,20,24,0.03)] hover:border-emerald-500/40 transition-colors specular-card"
         >
           <div className="relative mx-auto h-48 w-48">
             <svg className="h-full w-full" viewBox="0 0 100 100">
@@ -529,7 +529,7 @@ export default function BudgetPage() {
             <div className="h-2.5 w-full rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden flex">
               {/* Segment 1: Spent So Far */}
               <div
-                className="h-full bg-indigo-500 transition-all duration-500"
+                className="h-full bg-[#0D6E52] dark:bg-emerald-500 transition-all duration-500"
                 style={{ width: `${Math.min(100, (totalSpent / (effectiveBudget || 1)) * 100)}%` }}
                 title={`Spent So Far: RM ${totalSpent.toFixed(2)}`}
               />
@@ -550,7 +550,7 @@ export default function BudgetPage() {
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500 dark:text-zinc-400">
               <span className="flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full bg-indigo-500" />
+                <span className="h-2 w-2 rounded-full bg-[#0D6E52] dark:bg-emerald-500" />
                 <span>Spent: <strong>RM{'\u00A0'}{totalSpent.toFixed(0)}</strong></span>
               </span>
               {heroUnpaidReserve > 0 && (
@@ -663,11 +663,11 @@ export default function BudgetPage() {
       <motion.div
         whileHover={{ y: -2 }}
         transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
-        className="rounded-3xl border border-indigo-500/25 bg-gradient-to-br from-indigo-50/90 dark:from-indigo-950/25 via-slate-50 dark:via-zinc-900/40 to-white dark:to-zinc-950 p-5 sm:p-6 backdrop-blur-xl shadow-xl specular-card space-y-4"
+        className="rounded-3xl border border-emerald-500/25 bg-emerald-500/[0.04] p-5 sm:p-6 backdrop-blur-xl shadow-xl specular-card space-y-4"
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <div className="p-2.5 rounded-2xl bg-indigo-500/15 text-indigo-700 dark:text-indigo-400 border border-indigo-500/30">
+            <div className="p-2.5 rounded-2xl -emerald-/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
               <TrendingUp className="h-5 w-5" />
             </div>
             <div>
@@ -700,7 +700,7 @@ export default function BudgetPage() {
               <span className="text-[11px] text-slate-600 dark:text-zinc-400">
                 Daily living burn: <strong className="font-mono text-slate-900 dark:text-white">RM{'\u00A0'}{savingsPrediction.currentDailySpend.toFixed(2)}/day</strong>
                 {savingsPrediction.lumpSumSpent > 0 && (
-                  <span className="text-indigo-700 dark:text-indigo-300 font-medium">
+                  <span className="text-emerald-700 dark:text-emerald-300 font-medium">
                     {' '}· Lump sums: <strong className="font-mono">RM{'\u00A0'}{savingsPrediction.lumpSumSpent.toFixed(2)}</strong> (absorbed flexibly)
                   </span>
                 )}
@@ -752,11 +752,11 @@ export default function BudgetPage() {
               <span className="font-semibold text-slate-600 dark:text-zinc-400 uppercase text-[11px]">
                 Predicted Investments
               </span>
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-700 dark:text-indigo-300">
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full -emerald-/15 text-emerald-700 dark:text-emerald-300">
                 {savingsPrediction.predictedInvestmentPct}% of Income
               </span>
             </div>
-            <div className="text-2xl font-black font-mono text-indigo-800 dark:text-indigo-400">
+            <div className="text-2xl font-black font-mono text-emerald-800 dark:text-emerald-400">
               RM{'\u00A0'}{savingsPrediction.predictedInvestmentAmount.toLocaleString()}
             </div>
             <div className="space-y-1">
@@ -766,7 +766,7 @@ export default function BudgetPage() {
               </div>
               <div className="h-1.5 w-full bg-slate-200 dark:bg-zinc-800 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-indigo-500 rounded-full transition-all duration-500"
+                  className="h-full bg-[#0D6E52] dark:bg-emerald-500 rounded-full transition-all duration-500"
                   style={{ width: `${Math.min(100, (savingsPrediction.predictedInvestmentAmount / (savingsPrediction.targetInvestmentAmount || 1)) * 100)}%` }}
                 />
               </div>
@@ -797,16 +797,16 @@ export default function BudgetPage() {
               Safe Daily Pace: <strong className="text-emerald-700 dark:text-emerald-400">RM{'\u00A0'}{savingsPrediction.safeDailyLivingAllowance.toFixed(2)}/day</strong> ({savingsPrediction.daysRemaining}d left)
             </div>
             {savingsPrediction.lumpSumSpent > 0 && (
-              <div className="text-[10px] text-indigo-700 dark:text-indigo-300">
-                ✨ RM{'\u00A0'}{savingsPrediction.lumpSumSpent.toFixed(2)} lump sum absorbed into month without distorting daily living pace.
+              <div className="text-[10px] text-amber-800 dark:text-amber-300">
+                RM{'\u00A0'}{savingsPrediction.lumpSumSpent.toFixed(2)} lump sum absorbed into month without distorting daily living pace.
               </div>
             )}
           </div>
         </div>
 
         {/* Actionable Prediction Insight Banner */}
-        <div className="p-3.5 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-xs text-indigo-950 dark:text-indigo-200 flex items-start gap-2.5 leading-relaxed">
-          <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+        <div className="p-3.5 rounded-xl bg-emerald-500/[0.08] border border-emerald-500/20 text-xs text-foreground flex items-start gap-2.5 leading-relaxed">
+          <Sparkles className="h-4 w-4 text-emerald-700 dark:text-emerald-400 shrink-0 mt-0.5" />
           <span>{savingsPrediction.insightMessage}</span>
         </div>
       </motion.div>
@@ -815,35 +815,35 @@ export default function BudgetPage() {
       <motion.div
         whileHover={{ y: -2 }}
         transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
-        className="rounded-3xl border border-indigo-500/25 bg-gradient-to-br from-indigo-950/20 via-slate-50 dark:via-zinc-900/40 to-white dark:to-zinc-950 p-5 sm:p-6 backdrop-blur-xl shadow-xl specular-card space-y-4"
+        className="rounded-[22px] border border-black/[0.08] dark:border-white/[0.08] bg-card p-5 sm:p-6 shadow-[0_1px_2px_rgba(17,20,24,0.03)] space-y-4"
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <div className="p-2.5 rounded-2xl bg-indigo-500/15 text-indigo-700 dark:text-indigo-400 border border-indigo-500/30">
+            <div className="p-2.5 rounded-xl bg-emerald-500/12 text-emerald-700 dark:text-emerald-400 border border-emerald-500/25">
               <ShieldCheck className="h-5 w-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-slate-950 dark:text-white uppercase tracking-wider block">
+                <span className="text-xs font-bold text-foreground uppercase tracking-wider block">
                   Payday Cycle & Savings Shield
                 </span>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
                   paydayInfo.cyclePhase === 'living_phase'
-                    ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30'
-                    : 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30'
+                    ? 'bg-amber-500/12 text-amber-800 dark:text-amber-300 border border-amber-500/25'
+                    : 'bg-emerald-500/12 text-emerald-800 dark:text-emerald-300 border border-emerald-500/25'
                 }`}>
                   {paydayInfo.cyclePhase === 'living_phase' ? 'Living Phase' : 'Payday Settlement'}
                 </span>
               </div>
-              <span className="text-[11px] text-slate-600 dark:text-zinc-400">
+              <span className="text-[11px] text-muted-foreground">
                 {paydayInfo.headline}
               </span>
             </div>
           </div>
 
           <div className="text-right text-xs">
-            <span className="text-slate-500 dark:text-zinc-400 block text-[11px]">Salary Cycle Anchor</span>
-            <span className="font-mono font-bold text-slate-900 dark:text-white">
+            <span className="text-muted-foreground block text-[11px]">Salary Cycle Anchor</span>
+            <span className="font-mono font-bold text-foreground">
               {paydayInfo.paydayDay}th of month (Last Week)
             </span>
           </div>
@@ -852,29 +852,29 @@ export default function BudgetPage() {
         {/* 2 Envelopes Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
           {/* Envelope 1: Pre-quarantined Savings Target */}
-          <div className="p-4 rounded-2xl bg-white/90 dark:bg-zinc-900/60 border border-indigo-500/20 space-y-2">
+          <div className="p-4 rounded-2xl bg-black/[0.02] dark:bg-white/[0.025] border border-black/[0.07] dark:border-white/[0.07] space-y-2">
             <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-indigo-900 dark:text-indigo-300 flex items-center gap-1.5">
-                <ShieldAlert className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+              <span className="font-semibold text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                <ShieldAlert className="h-3.5 w-3.5 text-amber-700 dark:text-amber-400" />
                 Pre-Quarantined Savings Target
               </span>
-              <span className="font-mono font-bold text-slate-900 dark:text-white">
+              <span className="font-mono font-bold text-foreground">
                 RM{'\u00A0'}{paydayInfo.preQuarantinedSavings.toLocaleString()}
               </span>
             </div>
-            <p className="text-[11px] text-slate-600 dark:text-zinc-400 leading-relaxed">
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
               Shielded from Day 1 ({paydayInfo.savingsTargetPct + paydayInfo.investmentTargetPct}% of RM{'\u00A0'}{paydayInfo.baselineIncome.toLocaleString()} income). You will never suffer an artificial early surplus or end-of-month budget cliff.
             </p>
             <div className="space-y-1 pt-1">
-              <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-zinc-400">
+              <div className="flex items-center justify-between text-[10px] text-muted-foreground">
                 <span>Transfers fulfilled this month:</span>
-                <span className="font-mono font-bold text-slate-900 dark:text-white">
+                <span className="font-mono font-bold text-foreground">
                   RM{'\u00A0'}{paydayInfo.actualSavedThisMonth.toLocaleString()} ({paydayInfo.savingsProgressPct}%)
                 </span>
               </div>
-              <div className="h-1.5 w-full bg-slate-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+              <div className="h-1.5 w-full bg-black/[0.08] dark:bg-white/[0.08] rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-indigo-500 rounded-full transition-all duration-500"
+                  className="h-full bg-[#B8862D] dark:bg-amber-400 rounded-full transition-all duration-500"
                   style={{ width: `${paydayInfo.savingsProgressPct}%` }}
                 />
               </div>
@@ -907,8 +907,8 @@ export default function BudgetPage() {
         </div>
 
         {/* Intelligence Detail Banner */}
-        <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-xs text-indigo-950 dark:text-indigo-200 flex items-start gap-2 leading-relaxed">
-          <Info className="h-4 w-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+        <div className="p-3 rounded-xl -emerald-/10 border border-emerald-500/20 text-xs text-emerald-950 dark:text-emerald-200 flex items-start gap-2 leading-relaxed">
+          <Info className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
           <span>{paydayInfo.detail}</span>
         </div>
 
@@ -1010,7 +1010,7 @@ export default function BudgetPage() {
                   <div className="h-1.5 w-full bg-slate-100 dark:bg-zinc-800 rounded-full overflow-hidden">
                     <div
                       className={`h-full rounded-full transition-all ${
-                        ts.isOverBudget ? 'bg-rose-500' : 'bg-indigo-500'
+                        ts.isOverBudget ? 'bg-rose-500' : 'bg-[#0D6E52] dark:bg-emerald-500'
                       }`}
                       style={{ width: `${Math.min(100, ts.spentPercent)}%` }}
                     />
@@ -1187,7 +1187,7 @@ export default function BudgetPage() {
               whileTap={{ scale: 0.96 }}
               type="button"
               onClick={() => setIsAutoTuneOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-semibold text-xs shadow-md shadow-indigo-500/20 cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white font-semibold text-xs shadow-sm cursor-pointer"
             >
               <Sparkles className="h-3.5 w-3.5" />
               <span>AI Auto-Tune Caps</span>
@@ -1262,7 +1262,7 @@ export default function BudgetPage() {
                   <div className="flex items-center gap-2 flex-wrap min-w-0">
                     <Link
                       href={`/transactions?category=${encodeURIComponent(row.category)}`}
-                      className="font-bold text-slate-950 dark:text-white text-sm hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors inline-flex items-center gap-1"
+                      className="font-bold text-foreground text-sm hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors inline-flex items-center gap-1"
                       title={`View ${row.category} transactions`}
                     >
                       <span>{row.category}</span>
@@ -1271,7 +1271,7 @@ export default function BudgetPage() {
                     {suggestion && (
                       <span className={`text-[9px] font-semibold px-2 py-0.5 rounded-full border ${
                         suggestion.nature === 'fixed'
-                          ? 'bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/25'
+                          ? 'bg-amber-500/10 text-amber-800 dark:text-amber-300 border-amber-500/25'
                           : suggestion.nature === 'quasi-fixed'
                           ? 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/25'
                           : suggestion.nature === 'trend'
@@ -1338,7 +1338,7 @@ export default function BudgetPage() {
                           type="number"
                           value={categoryCapInput}
                           onChange={(e) => setCategoryCapInput(e.target.value)}
-                          className="w-20 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2 py-1 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-indigo-500"
+                          className="w-20 rounded-lg border border-black/[0.12] dark:border-white/[0.15] bg-background px-2 py-1 text-xs text-foreground font-mono outline-none focus:border-emerald-600"
                         />
                         <button
                           onClick={() => handleSaveCategoryCap(row.category)}
@@ -1366,7 +1366,7 @@ export default function BudgetPage() {
                         ? 'bg-rose-500'
                         : row.spentPercent > 70
                         ? 'bg-amber-400'
-                        : 'bg-indigo-500'
+                        : 'bg-[#0D6E52] dark:bg-emerald-500'
                     }`}
                     style={{ width: `${Math.min(row.spentPercent, 100)}%` }}
                     title={`Spent: RM ${row.spent.toFixed(2)}`}
@@ -1374,7 +1374,7 @@ export default function BudgetPage() {
                   {/* Segment 2: Reserved upcoming bills */}
                   {row.unpaidBillReserve > 0 && row.cap > 0 && (
                     <div
-                      className="h-full bg-amber-400/80 dark:bg-amber-500/80 transition-all duration-500 border-l border-white/20"
+                      className="h-full bg-amber-400/80 -amber-/80 transition-all duration-500 border-l border-white/20"
                       style={{
                         width: `${Math.min(row.reservePercent, Math.max(0, 100 - row.spentPercent))}%`,
                         backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(0,0,0,0.15) 3px, rgba(0,0,0,0.15) 6px)',
@@ -1454,14 +1454,14 @@ export default function BudgetPage() {
             {/* Header */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <div className="p-2.5 rounded-2xl bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/25">
+                <div className="p-2.5 rounded-xl bg-emerald-500/12 text-emerald-700 dark:text-emerald-400 border border-emerald-500/25">
                   <Sparkles className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  <h3 className="text-base font-bold text-foreground">
                     AI Intelligent Category Caps
                   </h3>
-                  <p className="text-xs text-slate-500 dark:text-zinc-400">
+                  <p className="text-xs text-muted-foreground">
                     Dynamically derived from your spending history & target savings
                   </p>
                 </div>
@@ -1469,30 +1469,30 @@ export default function BudgetPage() {
               <button
                 type="button"
                 onClick={() => setIsAutoTuneOpen(false)}
-                className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06] transition-colors cursor-pointer"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
             {/* Income & Savings Shield Math Summary */}
-            <div className="p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 space-y-2 text-xs">
+            <div className="p-4 rounded-xl bg-emerald-500/[0.08] border border-emerald-500/20 space-y-2 text-xs">
               <div className="flex flex-wrap items-center justify-between gap-2 font-semibold">
-                <span className="text-indigo-900 dark:text-indigo-300">
+                <span className="text-emerald-800 dark:text-emerald-300">
                   Income Allocation Shield:
                 </span>
-                <span className="font-mono text-slate-900 dark:text-white">
+                <span className="font-mono text-foreground">
                   RM{'\u00A0'}{intelligentPlan.baselineIncome.toLocaleString()} Income - RM{'\u00A0'}{intelligentPlan.targetSavingsAmount.toLocaleString()} Savings ({intelligentPlan.savingsTargetPct + intelligentPlan.investmentTargetPct}%) = <strong className="text-emerald-700 dark:text-emerald-300">RM{'\u00A0'}{intelligentPlan.targetLivingBudget.toLocaleString()} Living Pool</strong>
                 </span>
               </div>
-              <p className="text-[11px] text-slate-600 dark:text-zinc-400 leading-relaxed">
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
                 {intelligentPlan.summaryInsight}
               </p>
             </div>
 
             {/* Suggestions list */}
             <div className="space-y-3">
-              <div className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider flex items-center justify-between">
+              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
                 <span>Category Breakdown & AI Reasoning</span>
                 <span>Editable Suggested Cap (RM)</span>
               </div>
@@ -1502,7 +1502,7 @@ export default function BudgetPage() {
                   const currentVal = customCapsDraft[s.category] ?? s.suggestedCap;
                   const natureBadgeClass =
                     s.nature === 'fixed'
-                      ? 'bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/25'
+                      ? 'bg-amber-500/12 text-amber-800 dark:text-amber-300 border-amber-500/25'
                       : s.nature === 'quasi-fixed'
                       ? 'bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/25'
                       : s.nature === 'trend'
@@ -1558,7 +1558,7 @@ export default function BudgetPage() {
                             const val = parseFloat(e.target.value) || 0;
                             setCustomCapsDraft((prev) => ({ ...prev, [s.category]: val }));
                           }}
-                          className="w-24 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2.5 py-1.5 text-xs text-slate-900 dark:text-white font-mono text-right font-bold outline-none focus:border-indigo-500"
+                          className="w-24 rounded-xl border border-black/[0.12] dark:border-white/[0.15] bg-background px-2.5 py-1.5 text-xs text-foreground font-mono text-right font-bold outline-none focus:border-emerald-600"
                         />
                       </div>
                     </div>
@@ -1610,7 +1610,7 @@ export default function BudgetPage() {
                 <button
                   type="button"
                   onClick={handleApplySmartCaps}
-                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-bold text-xs shadow-lg shadow-indigo-500/25 cursor-pointer active:scale-95 transition-all flex items-center gap-1.5"
+                  className="px-5 py-2 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white font-bold text-xs shadow-sm cursor-pointer active:scale-95 transition-all flex items-center gap-1.5"
                 >
                   <Check className="h-4 w-4" />
                   <span>Apply All AI Smart Caps</span>

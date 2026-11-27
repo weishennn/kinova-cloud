@@ -303,7 +303,7 @@ function EditInstallmentContent({
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 15 }}
         transition={{ type: 'spring', damping: 28, stiffness: 350 }}
-        className="relative w-full max-w-xl max-h-[calc(100dvh-1.5rem)] overflow-y-auto overscroll-contain touch-pan-y [-webkit-overflow-scrolling:touch] custom-scrollbar rounded-3xl border border-purple-500/30 bg-white/95 dark:bg-[#090d16]/95 backdrop-blur-3xl p-6 shadow-2xl z-10 space-y-5"
+        className="relative w-full max-w-xl max-h-[calc(100dvh-1.5rem)] overflow-y-auto overscroll-contain touch-pan-y [-webkit-overflow-scrolling:touch] custom-scrollbar rounded-3xl border border-amber-500/30 bg-white/95 dark:bg-[#090d16]/95 backdrop-blur-3xl p-6 shadow-2xl z-10 space-y-5"
       >
         <CockpitModalHeader
           title="Edit installment plan"
@@ -325,7 +325,7 @@ function EditInstallmentContent({
                   placeholder="e.g. MacBook Pro M3, iPhone 16"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/80 px-3.5 py-2.5 text-sm text-slate-950 dark:text-white font-semibold outline-none focus:border-purple-500 transition-colors"
+                  className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/80 px-3.5 py-2.5 text-sm text-slate-950 dark:text-white font-semibold outline-none focus:border-amber-500 transition-colors"
                 />
               </div>
 
@@ -334,7 +334,7 @@ function EditInstallmentContent({
                 <select
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/80 px-3 py-2.5 text-xs text-slate-950 dark:text-white outline-none focus:border-purple-500 cursor-pointer transition-colors"
+                  className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/80 px-3 py-2.5 text-xs text-slate-950 dark:text-white outline-none focus:border-amber-500 cursor-pointer transition-colors"
                 >
                   {COMMON_CATEGORIES.map((c) => (
                     <option key={c} value={c} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white">
@@ -346,11 +346,11 @@ function EditInstallmentContent({
             </div>
 
             {/* First Installment Start Date & Quick Next-Month Shifter */}
-            <div className="p-3.5 rounded-2xl border border-purple-500/20 bg-purple-950/15 space-y-2.5">
+            <div className="p-3.5 rounded-2xl border border-amber-500/20 bg-amber-950/15 space-y-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <label className="text-xs font-bold text-slate-950 dark:text-white flex items-center gap-1.5">
-                    <Calendar className="h-3.5 w-3.5 text-violet-800 dark:text-purple-400" />
+                    <Calendar className="h-3.5 w-3.5 text-amber-800 dark:text-amber-400" />
                     First Installment Start Date
                   </label>
                   <p className="text-[11px] text-slate-600 dark:text-zinc-400">When does the bank first charge this installment?</p>
@@ -360,7 +360,7 @@ function EditInstallmentContent({
                   <button
                     type="button"
                     onClick={shiftToNextMonth}
-                    className="px-2.5 py-1 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-violet-800 dark:text-purple-300 border border-purple-500/30 text-[11px] font-semibold transition-all cursor-pointer shadow-sm active:scale-95"
+                    className="px-2.5 py-1 rounded-lg bg-amber-600 -amber-/20 hover:bg-amber-600 -amber-/30 text-amber-800 dark:text-amber-300 border border-amber-500/30 text-[11px] font-semibold transition-all cursor-pointer shadow-sm active:scale-95"
                     title="Move start date +1 month forward"
                   >
                     📅 Start Next Month
@@ -386,7 +386,7 @@ function EditInstallmentContent({
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-white/90 dark:bg-zinc-900/90 px-3 py-2 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-purple-400"
+                className="w-full rounded-xl border border-slate-300 dark:border-zinc-700 bg-white/90 dark:bg-zinc-900/90 px-3 py-2 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-amber-400"
               />
             </div>
 
@@ -404,7 +404,7 @@ function EditInstallmentContent({
                     placeholder="0.00"
                     value={totalAmount}
                     onChange={(e) => setTotalAmount(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/80 py-2.5 pl-12 pr-3 text-base text-slate-950 dark:text-white font-mono font-bold outline-none focus:border-purple-500 transition-colors"
+                    className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/80 py-2.5 pl-12 pr-3 text-base text-slate-950 dark:text-white font-mono font-bold outline-none focus:border-amber-500 transition-colors"
                   />
                 </div>
                 <MoneyCalculator
@@ -431,7 +431,7 @@ function EditInstallmentContent({
                       aria-pressed={tenureMonths === m && customTenureMonths === ''}
                       className={`min-h-[44px] rounded-xl text-xs font-bold border transition-all cursor-pointer touch-manipulation ${
                         tenureMonths === m && customTenureMonths === ''
-                          ? 'border-purple-500 bg-purple-600 text-white dark:text-white shadow-sm'
+                          ? 'border-amber-500 bg-[#B8862D] dark:bg-amber-500 text-white dark:text-white shadow-sm'
                           : 'border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 text-slate-600 dark:text-zinc-400 hover:border-slate-300 dark:hover:border-zinc-700 hover:text-slate-950 dark:hover:text-white'
                       }`}
                     >
@@ -454,7 +454,7 @@ function EditInstallmentContent({
                       const next = e.target.value;
                       setCustomTenureMonths(next);
                     }}
-                    className="min-h-[44px] w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 px-3 py-2 text-sm text-slate-950 dark:text-white font-mono outline-none transition-colors placeholder:text-slate-600 dark:placeholder:text-zinc-300 focus:border-purple-500"
+                    className="min-h-[44px] w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 px-3 py-2 text-sm text-slate-950 dark:text-white font-mono outline-none transition-colors placeholder:text-slate-600 dark:placeholder:text-zinc-300 focus:border-amber-500"
                   />
                   <span className="shrink-0 text-xs text-slate-500 dark:text-zinc-400">months</span>
                 </div>
@@ -486,7 +486,7 @@ function EditInstallmentContent({
                     onClick={() => setHasInterest(true)}
                     className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
                       hasInterest
-                        ? 'border-purple-500 bg-purple-500/20 text-violet-800 dark:text-purple-300'
+                        ? 'border-amber-500 bg-amber-600 -amber-/20 text-amber-800 dark:text-amber-300'
                         : 'border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-500 dark:text-zinc-400 hover:text-slate-700 dark:hover:text-zinc-300'
                     }`}
                   >
@@ -504,7 +504,7 @@ function EditInstallmentContent({
                     placeholder="Annual Interest Rate % (e.g. 3.5)"
                     value={annualInterestRate}
                     onChange={(e) => setAnnualInterestRate(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/80 py-2 pl-9 pr-3 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-purple-500"
+                    className="w-full rounded-xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/80 py-2 pl-9 pr-3 text-xs text-slate-950 dark:text-white font-mono outline-none focus:border-amber-500"
                   />
                 </div>
               )}
@@ -515,12 +515,12 @@ function EditInstallmentContent({
               <div className="rounded-2xl bg-white/90 dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800/80 p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-950 dark:text-white flex items-center gap-1.5">
-                    <Sparkles className="h-3.5 w-3.5 text-violet-800 dark:text-purple-400" />
+                    <Sparkles className="h-3.5 w-3.5 text-amber-800 dark:text-amber-400" />
                     Calculated Installment Schedule
                   </span>
                   <div className="text-right">
                     <span className="text-[10px] text-slate-500 dark:text-zinc-400 uppercase block">Monthly</span>
-                    <span className="text-sm font-black font-mono text-violet-800 dark:text-purple-400">
+                    <span className="text-sm font-black font-mono text-amber-800 dark:text-amber-400">
                       {currency} {previewPlan.monthlyAmount.toFixed(2)} / mo
                     </span>
                   </div>
@@ -534,7 +534,7 @@ function EditInstallmentContent({
                       className="flex items-center justify-between py-1 px-2.5 rounded-xl bg-white/90 dark:bg-zinc-950/60 border border-slate-200 dark:border-zinc-800/60 text-xs"
                     >
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-violet-800 dark:text-purple-300 font-bold text-[11px] w-12">
+                        <span className="font-mono text-amber-800 dark:text-amber-300 font-bold text-[11px] w-12">
                           M{item.installmentIndex}/{item.totalTenure}
                         </span>
                         <span className="text-slate-700 dark:text-zinc-300 font-medium">{item.date}</span>
@@ -549,7 +549,7 @@ function EditInstallmentContent({
 
                 <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-zinc-400 pt-1 border-t border-slate-200 dark:border-zinc-800/60">
                   <span>Total Payable: <strong className="text-slate-950 dark:text-white">{currency} {previewPlan.totalPayable.toFixed(2)}</strong></span>
-                  <span>Timeline: <strong className="text-violet-800 dark:text-purple-300">{previewPlan.schedule[0]?.month} ➔ {previewPlan.schedule[previewPlan.schedule.length - 1]?.month}</strong></span>
+                  <span>Timeline: <strong className="text-amber-800 dark:text-amber-300">{previewPlan.schedule[0]?.month} ➔ {previewPlan.schedule[previewPlan.schedule.length - 1]?.month}</strong></span>
                 </div>
               </div>
             )}
@@ -578,7 +578,7 @@ function EditInstallmentContent({
                 <button
                   type="submit"
                   disabled={isSubmitting || isDeleting}
-                  className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white dark:text-white text-xs font-bold shadow-lg shadow-purple-600/30 transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                  className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-[#B8862D] dark:bg-amber-500 hover:bg-amber-600 dark:bg-amber-500 text-white dark:text-white text-xs font-bold shadow-lg shadow-amber-600/30 transition-all cursor-pointer active:scale-95 disabled:opacity-50"
                 >
                   {isSubmitting ? (
                     <>

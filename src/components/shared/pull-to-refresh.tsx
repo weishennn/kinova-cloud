@@ -153,7 +153,7 @@ export function PullToRefresh({ onRefresh, children }: PullToRefreshProps) {
                 </>
               ) : isRefreshing || isHookRefreshing ? (
                 <>
-                  <RefreshCw className="h-3.5 w-3.5 text-indigo-800 dark:text-indigo-400 animate-spin" />
+                  <RefreshCw className="h-3.5 w-3.5 text-emerald-800 dark:text-emerald-400 animate-spin" />
                   <span className="text-slate-800 dark:text-zinc-200 font-medium text-[11px]">Syncing...</span>
                 </>
               ) : (
@@ -162,9 +162,9 @@ export function PullToRefresh({ onRefresh, children }: PullToRefreshProps) {
                     className="flex items-center justify-center transition-transform duration-150"
                     style={{ transform: `rotate(${progress >= 1 ? 180 : progress * 180}deg)` }}
                   >
-                    <ArrowDown className={`h-3.5 w-3.5 ${progress >= 1 ? 'text-indigo-800 dark:text-indigo-400' : 'text-slate-600 dark:text-zinc-400'}`} />
+                    <ArrowDown className={`h-3.5 w-3.5 ${progress >= 1 ? 'text-emerald-800 dark:text-emerald-400' : 'text-slate-600 dark:text-zinc-400'}`} />
                   </div>
-                  <span className={`text-[11px] ${progress >= 1 ? 'text-indigo-800 dark:text-indigo-300 font-bold' : 'text-slate-600 dark:text-zinc-400'}`}>
+                  <span className={`text-[11px] ${progress >= 1 ? 'text-emerald-800 dark:text-emerald-300 font-bold' : 'text-slate-600 dark:text-zinc-400'}`}>
                     {progress >= 1 ? 'Release to sync' : 'Pull to refresh'}
                   </span>
                 </>

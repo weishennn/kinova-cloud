@@ -122,7 +122,7 @@ export function GoogleAccountAndAdminPanel() {
                 className="h-12 w-12 rounded-2xl object-cover border border-slate-200 dark:border-zinc-700"
               />
             ) : (
-              <div className="h-12 w-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-500 font-bold text-lg">
+              <div className="h-12 w-12 rounded-2xl -emerald-/10 border border-emerald-500/20 flex items-center justify-center text-emerald-500 font-bold text-lg">
                 {googleUser?.name ? googleUser.name.charAt(0).toUpperCase() : isLocalMode ? 'L' : 'G'}
               </div>
             )}
@@ -190,7 +190,7 @@ export function GoogleAccountAndAdminPanel() {
               <>
                 <a
                   href="/api/auth/google/login?returnTo=/settings"
-                  className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-2 shadow-lg shadow-indigo-500/20 transition-all"
+                  className="px-4 py-2.5 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-2 shadow-lg transition-all"
                 >
                   <span>Connect Google Drive</span>
                 </a>
@@ -320,7 +320,7 @@ export function GoogleAccountAndAdminPanel() {
 
                         <div className="flex items-center gap-3 text-[11px] text-slate-500 dark:text-zinc-400 flex-wrap">
                           <span className="flex items-center gap-1">
-                            <Sparkles className="h-3 w-3 text-indigo-400" />
+                            <Sparkles className="h-3 w-3 text-emerald-400" />
                             AI Calls: <strong className="text-slate-700 dark:text-zinc-200">{u.aiCallCount || 0}</strong>
                           </span>
                           <span>Logins: {u.loginCount || 0}</span>

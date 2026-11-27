@@ -31,27 +31,43 @@ const NUMBERED_KEY_NAMES = [
 
 const QUOTA_COOLDOWN_MS = 60_000; // 60s cooldown on HTTP 429
 const AUTH_COOLDOWN_MS = 10 * 60_000; // 10m cooldown on HTTP 401/403
+const MODEL_TIMEOUT_COOLDOWN_MS = 3 * 60_000; // 3m cooldown on model timeout/network stall
+const MODEL_SERVER_COOLDOWN_MS = 60_000; // 60s cooldown on model 5xx overload
 
-export const STANDARD_GEMINI_MODEL = 'gemini-3.5-flash';
+export const STANDARD_GEMINI_MODEL = 'gemini-3.5-flash-lite';
 export const STANDARD_GEMINI_MODELS = [
+  'gemini-3.5-flash-lite',
+  'gemini-flash-lite-latest',
+  'gemini-2.5-flash',
+  'gemini-3-flash-preview',
+] as const;
+
+const STALLING_GEMINI_MODELS = new Set([
   'gemini-3.5-flash',
   'gemini-3.6-flash',
+  'gemini-3.7-flash',
+  'gemini-3.8-flash',
   'gemini-flash-latest',
-  'gemini-2.5-flash',
-] as const;
+]);
+
+export function sanitizeGeminiModelName(rawModel: string | undefined | null): string {
+  const trimmed = String(rawModel || '').trim();
+  if (!trimmed) return '';
+  if (STALLING_GEMINI_MODELS.has(trimmed.toLowerCase())) {
+    return STANDARD_GEMINI_MODEL;
+  }
+  return trimmed;
+}
 
 export function getStandardGeminiModelOrder(
   env: Record<string, string | undefined> = process.env
 ): string[] {
-  const rawPreferred = (env.GEMINI_MODEL || '').trim();
-  // Automatically sanitize deprecated model name so stale server env vars don't trigger 404
-  const preferred = rawPreferred === 'gemini-2.5-flash' ? 'gemini-3.5-flash' : rawPreferred;
+  const preferred = sanitizeGeminiModelName(env.GEMINI_MODEL);
   const models: string[] = [];
   if (preferred) {
     models.push(preferred);
   }
-  const defaultFallbacks = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest', 'gemini-2.5-flash'];
-  for (const fallback of defaultFallbacks) {
+  for (const fallback of STANDARD_GEMINI_MODELS) {
     if (!models.includes(fallback)) {
       models.push(fallback);
     }
@@ -61,6 +77,38 @@ export function getStandardGeminiModelOrder(
 
 let roundRobinCursor = 0;
 const keyCooldownUntil = new Map<string, number>();
+const modelCooldownUntil = new Map<string, number>();
+
+export function reportGeminiModelFailure(
+  model: string,
+  reason: 'timeout' | 'server' | 'network',
+  now: number = Date.now()
+): void {
+  const clean = String(model || '').trim().toLowerCase();
+  if (!clean) return;
+  const duration = reason === 'server' ? MODEL_SERVER_COOLDOWN_MS : MODEL_TIMEOUT_COOLDOWN_MS;
+  modelCooldownUntil.set(clean, now + duration);
+}
+
+export function orderModelsByHealth(models: string[], now: number = Date.now()): string[] {
+  if (models.length <= 1) return [...models];
+  const healthy: string[] = [];
+  const coolingDown: string[] = [];
+  for (const model of models) {
+    const key = model.toLowerCase();
+    const until = modelCooldownUntil.get(key) || 0;
+    if (until > now) {
+      coolingDown.push(model);
+    } else {
+      if (until > 0) modelCooldownUntil.delete(key);
+      healthy.push(model);
+    }
+  }
+  coolingDown.sort(
+    (a, b) => (modelCooldownUntil.get(a.toLowerCase()) || 0) - (modelCooldownUntil.get(b.toLowerCase()) || 0)
+  );
+  return [...healthy, ...coolingDown];
+}
 
 export function splitRawKeyString(raw: string | undefined | null): string[] {
   if (!raw) return [];
@@ -156,6 +204,7 @@ export function reportGeminiKeyFailure(
 export function resetGeminiKeyPoolStateForTests(): void {
   roundRobinCursor = 0;
   keyCooldownUntil.clear();
+  modelCooldownUntil.clear();
 }
 
 export function extractTextFromGeminiResponse(data: unknown): string {
@@ -183,6 +232,25 @@ export function stripJsonFences(raw: string): string {
   return clean;
 }
 
+export function buildThinkingConfigForModel(
+  model: string,
+  withThinking: boolean,
+  thinkingBudget: number
+): Record<string, unknown> {
+  if (withThinking && thinkingBudget > 0) {
+    return { thinkingBudget };
+  }
+  const normalizedModel = model.toLowerCase();
+  if (normalizedModel.includes('gemini-2.5-pro')) {
+    return { thinkingBudget: 128 };
+  }
+  if (/gemini-(?:3|4)|flash-latest/.test(normalizedModel)) {
+    return { thinkingLevel: 'low' };
+  }
+  // Gemini 2.5 Flash disables dynamic thinking cleanly via thinkingBudget: 0.
+  return { thinkingBudget: 0 };
+}
+
 export interface GenerateGeminiOptions {
   prompt: string;
   systemInstruction?: string;
@@ -193,6 +261,7 @@ export interface GenerateGeminiOptions {
   temperature?: number;
   maxOutputTokens?: number;
   responseMimeType?: string;
+  googleSearch?: boolean;
   timeoutMs?: number;
   /** Hard deadline across all model and API-key retries. */
   totalTimeoutMs?: number;
@@ -218,12 +287,12 @@ export interface GenerateGeminiResult {
  * Single unified helper for calling Gemini across the entire Kinova application.
  *
  * Enforces:
- * - Strict model order: process.env.GEMINI_MODEL -> gemini-2.5-flash -> gemini-flash-latest
+ * - Healthy model order with automatic sanitization of known-stalling models
  * - Load-balanced key rotation and cooldown on 429/401/403
+ * - Immediate model failover and cooldown on timeouts or 5xx overload
  * - Transparent retry on 400 when thinkingConfig/thinkingBudget is unsupported
  * - Concatenation of all non-thought parts (ignores `thought: true`)
- * - Clean stripping of markdown code fences
- * - Timeouts: default 20s (thinking=false) / 45s (thinking=true)
+ * - Bounded total deadline across all retries
  */
 export async function generateGeminiContent(
   options: GenerateGeminiOptions
@@ -249,16 +318,20 @@ export async function generateGeminiContent(
     }
   }
 
-  const models = options.models && options.models.length > 0
+  const rawModels = options.models && options.models.length > 0
     ? options.models
     : getStandardGeminiModelOrder(env);
+  const models = orderModelsByHealth(rawModels);
 
   const fetchImpl = options.fetchFn || fetch;
   const isThinkingTurn = options.thinking !== false;
-  const defaultTimeout = isThinkingTurn ? 45_000 : 20_000;
+  const defaultTimeout = isThinkingTurn ? 20_000 : 10_000;
   const timeoutMs = options.timeoutMs ?? defaultTimeout;
-  const totalTimeoutMs = options.totalTimeoutMs;
-  const deadline = totalTimeoutMs && totalTimeoutMs > 0 ? Date.now() + totalTimeoutMs : Infinity;
+  const totalTimeoutMs =
+    options.totalTimeoutMs && options.totalTimeoutMs > 0
+      ? options.totalTimeoutMs
+      : Math.max(timeoutMs + 8_000, isThinkingTurn ? 45_000 : 25_000);
+  const deadline = Date.now() + totalTimeoutMs;
 
   const defaultTemp = isThinkingTurn ? 0.4 : 0.1;
   const temperature = options.temperature ?? defaultTemp;
@@ -275,16 +348,22 @@ export async function generateGeminiContent(
 
   let lastError = 'No response from model';
 
-  modelsLoop: for (const model of models) {
-    let shouldTryNextModel = false;
+  modelsLoop: for (let modelIdx = 0; modelIdx < models.length; modelIdx += 1) {
+    const model = models[modelIdx];
+    const hasMoreModels = modelIdx + 1 < models.length;
 
     for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx += 1) {
-      if (Date.now() >= deadline) {
+      const remainingTotalMs = deadline - Date.now();
+      if (remainingTotalMs <= 0) {
         lastError = `Gemini request exceeded its ${totalTimeoutMs}ms total timeout`;
         break modelsLoop;
       }
 
       const apiKey = apiKeys[keyIdx];
+      // Leave time budget for fallback models so one stalling model never exhausts the deadline.
+      const perAttemptBudgetMs = hasMoreModels
+        ? Math.min(timeoutMs, remainingTotalMs, Math.max(4_500, Math.floor(remainingTotalMs * 0.65)))
+        : Math.min(timeoutMs, remainingTotalMs);
 
       const callModel = async (withThinking: boolean, omitThinkingConfig = false) => {
         const parts: Array<Record<string, unknown>> = [];
@@ -302,29 +381,21 @@ export async function generateGeminiContent(
           temperature,
           maxOutputTokens,
         };
-        if (options.responseMimeType) {
+        if (options.responseMimeType && !options.googleSearch) {
           generationConfig.responseMimeType = options.responseMimeType;
         }
         if (!omitThinkingConfig) {
-          if (withThinking && thinkingBudget > 0) {
-            generationConfig.thinkingConfig = { thinkingBudget };
-          } else if (!withThinking) {
-            const normalizedModel = model.toLowerCase();
-            if (normalizedModel.includes('gemini-2.5-pro')) {
-              generationConfig.thinkingConfig = { thinkingBudget: 128 };
-            } else if (/gemini-(?:3|4)|flash-latest/.test(normalizedModel)) {
-              generationConfig.thinkingConfig = { thinkingLevel: 'low' };
-            } else {
-              // Gemini 2.5 Flash supports zero to disable its dynamic default thinking.
-              generationConfig.thinkingConfig = { thinkingBudget: 0 };
-            }
-          }
+          generationConfig.thinkingConfig = buildThinkingConfigForModel(model, withThinking, thinkingBudget);
         }
 
         const reqBody: Record<string, unknown> = {
           contents: [{ role: 'user', parts }],
           generationConfig,
         };
+
+        if (options.googleSearch) {
+          reqBody.tools = [{ google_search: {} }];
+        }
 
         if (options.systemInstruction) {
           reqBody.systemInstruction = {
@@ -333,9 +404,7 @@ export async function generateGeminiContent(
         }
 
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
-        const remainingTimeoutMs = Number.isFinite(deadline)
-          ? Math.max(1, Math.min(timeoutMs, deadline - Date.now()))
-          : timeoutMs;
+        const remainingTimeoutMs = Math.max(1, Math.min(perAttemptBudgetMs, deadline - Date.now()));
         return fetchImpl(url, {
           method: 'POST',
           headers: {
@@ -350,29 +419,35 @@ export async function generateGeminiContent(
       try {
         let res = await callModel(isThinkingTurn);
 
-        // Transient 503 / 500 quick retry
-        if (res && (res.status === 503 || res.status === 500)) {
-          await new Promise((r) => setTimeout(r, 600));
-          res = await callModel(isThinkingTurn);
+        // Transient 503 / 500 quick retry only when enough time budget remains
+        if (res && (res.status === 503 || res.status === 500) && deadline - Date.now() > 2_500) {
+          await new Promise((r) => setTimeout(r, 450));
+          if (deadline - Date.now() > 1_000) {
+            res = await callModel(isThinkingTurn);
+          }
         }
 
         if (res.status === 400) {
           const errBody = await res.text().catch(() => '');
           console.warn(`[Gemini] Model ${model} returned 400:`, errBody.slice(0, 300));
           if (errBody.includes('thinkingConfig') || errBody.includes('thinkingBudget') || errBody.includes('thinkingLevel')) {
-            console.warn(`[Gemini] Retrying ${model} without thinkingConfig...`);
-            const retryRes = await callModel(false, true);
-            if (retryRes.ok) {
-              res = retryRes;
+            if (deadline - Date.now() > 1_000) {
+              console.warn(`[Gemini] Retrying ${model} without thinkingConfig...`);
+              const retryRes = await callModel(false, true);
+              if (retryRes.ok) {
+                res = retryRes;
+              } else {
+                const retryErr = await retryRes.text().catch(() => '');
+                console.warn(`[Gemini] Retry without thinkingConfig failed: ${retryRes.status} ${retryErr.slice(0, 200)}`);
+                lastError = `Gemini ${retryRes.status}`;
+                break;
+              }
             } else {
-              const retryErr = await retryRes.text().catch(() => '');
-              console.warn(`[Gemini] Retry without thinkingConfig failed: ${retryRes.status} ${retryErr.slice(0, 200)}`);
-              shouldTryNextModel = true;
+              lastError = `Gemini 400: ${errBody.slice(0, 100)}`;
               break;
             }
           } else {
             lastError = `Gemini 400: ${errBody.slice(0, 100)}`;
-            shouldTryNextModel = true;
             break;
           }
         }
@@ -381,13 +456,17 @@ export async function generateGeminiContent(
           lastError = `Gemini ${res.status}`;
           if (res.status === 429 || res.status === 401 || res.status === 403 || res.status >= 500) {
             reportGeminiKeyFailure(apiKey, res.status);
+            if (res.status >= 500 && hasMoreModels) {
+              reportGeminiModelFailure(model, 'server');
+              break; // Switch immediately to a healthier model on 5xx
+            }
             if (keyIdx + 1 < apiKeys.length) {
               continue; // try next key
             }
           }
-          if (res.status === 404 || res.status >= 500) {
-            shouldTryNextModel = true;
-            break;
+          // On 404 (e.g. gemini-2.5-flash on newer keys), try remaining keys only for 2.5 models before falling back
+          if (res.status === 404 && keyIdx + 1 < apiKeys.length && model.toLowerCase().includes('gemini-2.5')) {
+            continue;
           }
           break;
         }
@@ -396,7 +475,10 @@ export async function generateGeminiContent(
         const rawText = extractTextFromGeminiResponse(responseData);
         if (!rawText) {
           lastError = 'Empty response from model';
-          continue;
+          if (keyIdx + 1 < apiKeys.length && deadline - Date.now() > 1_200) {
+            continue;
+          }
+          break;
         }
 
         const cleanText = stripJsonFences(rawText);
@@ -409,21 +491,129 @@ export async function generateGeminiContent(
         };
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : String(err);
+        const isTimeout =
+          err instanceof Error &&
+          (err.name === 'TimeoutError' || err.name === 'AbortError' || /timeout|aborted/i.test(errorMsg));
         lastError = errorMsg;
         console.warn(`[Gemini] Attempt with model ${model} failed:`, errorMsg);
         if (Date.now() >= deadline) {
           lastError = `Gemini request exceeded its ${totalTimeoutMs}ms total timeout`;
           break modelsLoop;
         }
+        reportGeminiModelFailure(model, isTimeout ? 'timeout' : 'network');
+        // Fail over to the next model immediately instead of burning every key on a stalled model
+        if (hasMoreModels) {
+          break;
+        }
       }
-    }
-
-    if (!shouldTryNextModel) {
-      // Completed key loop without requiring model fallback
     }
   }
 
   throw new Error(lastError || 'Gemini request failed across all keys and models');
+}
+
+export interface GroundedWebSource {
+  title: string;
+  uri: string;
+}
+
+function sanitizeSourceText(value: unknown, maxLength: number): string {
+  return typeof value === 'string'
+    ? value.trim().replace(/[\u0000-\u001f]/g, ' ').slice(0, maxLength)
+    : '';
+}
+
+export function extractGroundedSourcesFromCandidates(candidates: unknown, maxSources = 5): GroundedWebSource[] {
+  if (!Array.isArray(candidates) || candidates.length === 0) return [];
+  const firstCandidate = candidates[0] as { groundingMetadata?: { groundingChunks?: unknown } } | undefined;
+  const groundingChunks = firstCandidate?.groundingMetadata?.groundingChunks;
+  if (!Array.isArray(groundingChunks)) return [];
+
+  return groundingChunks
+    .flatMap((chunk: unknown) => {
+      const web = (chunk as { web?: Record<string, unknown> } | null)?.web;
+      const uri = sanitizeSourceText(web?.uri, 500);
+      const title = sanitizeSourceText(web?.title, 160);
+      if (!uri || !/^https:\/\//i.test(uri)) return [];
+      try {
+        return [{ title: title || new URL(uri).hostname, uri }];
+      } catch {
+        return [];
+      }
+    })
+    .filter((source, index, all) => all.findIndex((cand) => cand.uri === source.uri) === index)
+    .slice(0, maxSources);
+}
+
+/**
+ * Runs a fast Google-Search-grounded Gemini query with a bounded budget,
+ * automatically falling back to direct generation if Search grounding is unavailable or times out.
+ */
+export async function generateGeminiWithSearchFallback(options: {
+  prompt: string;
+  maxOutputTokens?: number;
+  temperature?: number;
+  searchTimeoutMs?: number;
+  searchTotalTimeoutMs?: number;
+  directTimeoutMs?: number;
+  directTotalTimeoutMs?: number;
+  preferredSearchModel?: string;
+  fetchFn?: typeof fetch;
+  env?: Record<string, string | undefined>;
+}): Promise<{ summary: string; sources: GroundedWebSource[]; model: string; grounded: boolean }> {
+  const env = options.env || process.env;
+  const baseOrder = getStandardGeminiModelOrder(env);
+  const preferredSearch = sanitizeGeminiModelName(options.preferredSearchModel);
+  // gemini-2.5-flash supports free-tier Google Search grounding reliably; keep fast lite fallbacks after it.
+  const searchModels = [
+    preferredSearch,
+    'gemini-2.5-flash',
+    ...baseOrder,
+  ].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
+
+  try {
+    const searchRes = await generateGeminiContent({
+      prompt: options.prompt,
+      thinking: false,
+      temperature: options.temperature ?? 0.1,
+      maxOutputTokens: options.maxOutputTokens ?? 1000,
+      googleSearch: true,
+      models: searchModels,
+      timeoutMs: options.searchTimeoutMs ?? 4_500,
+      totalTimeoutMs: options.searchTotalTimeoutMs ?? 7_500,
+      fetchFn: options.fetchFn,
+      env,
+    });
+    const text = searchRes.rawText.trim();
+    if (text) {
+      return {
+        summary: text,
+        sources: extractGroundedSourcesFromCandidates(searchRes.candidates),
+        model: searchRes.model,
+        grounded: true,
+      };
+    }
+  } catch {
+    // Fall back immediately to direct generation
+  }
+
+  const directRes = await generateGeminiContent({
+    prompt: options.prompt,
+    thinking: false,
+    temperature: options.temperature ?? 0.1,
+    maxOutputTokens: options.maxOutputTokens ?? 1000,
+    timeoutMs: options.directTimeoutMs ?? 8_000,
+    totalTimeoutMs: options.directTotalTimeoutMs ?? 12_000,
+    fetchFn: options.fetchFn,
+    env,
+  });
+
+  return {
+    summary: directRes.rawText.trim(),
+    sources: [],
+    model: directRes.model,
+    grounded: false,
+  };
 }
 
 /**

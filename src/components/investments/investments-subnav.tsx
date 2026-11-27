@@ -43,7 +43,7 @@ export function InvestmentsSubnav() {
           aria-current={!isBinance ? 'page' : undefined}
           className={`flex items-center gap-2 min-h-[38px] px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
             !isBinance
-              ? 'cockpit-segmented-pill border text-indigo-800 dark:text-indigo-200'
+              ? 'cockpit-segmented-pill border text-emerald-800 dark:text-emerald-200'
               : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
           }`}
         >
@@ -70,7 +70,7 @@ export function InvestmentsSubnav() {
           title="Read-only combined summary across Stocks & Moomoo and Binance (kept separate from normal Flow cashflow)"
         >
           <span className="inline-flex items-center gap-1.5 font-semibold text-slate-600 dark:text-zinc-400">
-            <Layers className="h-3.5 w-3.5 text-indigo-500" aria-hidden="true" />
+            <Layers className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
             <span>Combined Investments:</span>
           </span>
           <span className="font-mono font-bold text-slate-950 dark:text-white">

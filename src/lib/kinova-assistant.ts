@@ -783,7 +783,7 @@ export async function runKinovaTurn(
   const res = await fetch('/api/ai/assistant', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    signal: options.signal || AbortSignal.timeout(useExtendedReasoning ? 50_000 : 20_000),
+    signal: options.signal || AbortSignal.timeout(useExtendedReasoning ? 50_000 : 32_000),
     body: JSON.stringify({
       text: text || undefined,
       imageBase64: options.imageBase64 || undefined,

@@ -536,7 +536,7 @@ export function BinanceDashboard() {
                   setCalcModalAsset(calculatorOptions[0] || null);
                   setIsCalcModalOpen(true);
                 }}
-                className="min-h-[40px] px-3.5 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white text-xs font-semibold shadow-lg shadow-indigo-500/20 flex items-center gap-1.5 cursor-pointer"
+                className="min-h-[40px] px-3.5 py-2 rounded-xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg flex items-center gap-1.5 cursor-pointer"
               >
                 <Target className="h-3.5 w-3.5" />
                 <span>Target Price</span>
@@ -635,7 +635,7 @@ export function BinanceDashboard() {
                   onClick={() => setCostBasisMethod(m)}
                   className={`px-2.5 py-1 rounded-lg font-semibold cursor-pointer ${
                     costBasisMethod === m
-                      ? 'bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                      ? 'bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
                       : 'text-slate-600 dark:text-zinc-400'
                   }`}
                 >
@@ -679,7 +679,7 @@ export function BinanceDashboard() {
         >
           <div className="flex items-center justify-between">
             <span className="text-[11px] uppercase tracking-wider text-slate-600 dark:text-zinc-400 font-semibold">Net Funded In</span>
-            <div className="h-8 w-8 rounded-xl bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 flex items-center justify-center border border-indigo-500/20">
+            <div className="h-8 w-8 rounded-xl -emerald-/10 text-emerald-700 dark:text-emerald-400 flex items-center justify-center border border-emerald-500/20">
               <Wallet className="h-4 w-4" />
             </div>
           </div>
@@ -752,7 +752,7 @@ export function BinanceDashboard() {
         >
           <div className="flex items-center justify-between">
             <span className="text-[11px] uppercase tracking-wider text-slate-600 dark:text-zinc-400 font-semibold">True Net Return</span>
-            <div className="h-8 w-8 rounded-xl bg-purple-500/10 text-purple-700 dark:text-purple-400 flex items-center justify-center border border-purple-500/20">
+            <div className="h-8 w-8 rounded-xl bg-amber-600 -amber-/10 text-amber-700 dark:text-amber-400 flex items-center justify-center border border-amber-500/20">
               <DollarSign className="h-4 w-4" />
             </div>
           </div>
@@ -862,7 +862,7 @@ export function BinanceDashboard() {
               onClick={() => setActiveTab(tab.id)}
               className={`relative z-10 min-h-[38px] px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-semibold transition-colors cursor-pointer ${
                 activeTab === tab.id
-                  ? 'cockpit-segmented-pill border text-indigo-800 dark:text-indigo-200'
+                  ? 'cockpit-segmented-pill border text-emerald-800 dark:text-emerald-200'
                   : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
@@ -879,7 +879,7 @@ export function BinanceDashboard() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search coin or symbol..."
-              className="w-full pl-8 pr-3 py-2 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+              className="w-full pl-8 pr-3 py-2 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
             />
           </div>
         )}
@@ -905,7 +905,7 @@ export function BinanceDashboard() {
                   onClick={() => setHoldingFilter(f.id)}
                   className={`px-3 py-1.5 rounded-xl font-semibold cursor-pointer ${
                     holdingFilter === f.id
-                      ? 'bg-indigo-600 text-white'
+                      ? 'bg-[#0D6E52] dark:bg-emerald-600 text-white'
                       : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
@@ -956,10 +956,10 @@ export function BinanceDashboard() {
                         <div>
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="font-bold text-base text-slate-950 dark:text-white">{h.asset}</span>
-                            {h.assetKind === 'Stock' && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/15 text-indigo-800 dark:text-indigo-300">Stock</span>}
+                            {h.assetKind === 'Stock' && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold -emerald-/15 text-emerald-800 dark:text-emerald-300">Stock</span>}
                             {h.spotQty > 0 && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/15 text-amber-800 dark:text-amber-300">Spot</span>}
                             {h.fundingQty > 0 && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-500/15 text-blue-800 dark:text-blue-300">Funding</span>}
-                            {h.equityQty > 0 && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-500/15 text-purple-800 dark:text-purple-300">Equity</span>}
+                            {h.equityQty > 0 && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-600 -amber-/15 text-amber-800 dark:text-amber-300">Equity</span>}
                             {h.status === 'closed' && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">Closed</span>}
                           </div>
                           <div className="text-xs font-mono text-slate-500 dark:text-zinc-400 mt-0.5">
@@ -1004,7 +1004,7 @@ export function BinanceDashboard() {
                                 });
                                 setIsCalcModalOpen(true);
                               }}
-                              className="px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 font-sans font-semibold text-[11px]"
+                              className="px-2.5 py-1 rounded-lg -emerald-/10 text-emerald-700 dark:text-emerald-300 font-sans font-semibold text-[11px]"
                             >
                               Target Price
                             </button>
@@ -1048,7 +1048,7 @@ export function BinanceDashboard() {
                             <div className="flex items-center gap-2">
                               <span className="font-bold text-slate-950 dark:text-white">{h.asset}</span>
                               {h.assetKind === 'Stock' && (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/15 text-indigo-700 dark:text-indigo-300">Stock</span>
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold -emerald-/15 text-emerald-700 dark:text-emerald-300">Stock</span>
                               )}
                               {h.isStablecoin && (
                                 <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">Cash</span>
@@ -1076,7 +1076,7 @@ export function BinanceDashboard() {
                                 </span>
                               )}
                               {h.equityQty > 1e-8 && (
-                                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-purple-500/15 text-purple-800 dark:text-purple-300">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-600 -amber-/15 text-amber-800 dark:text-amber-300">
                                   Equity: {fmtQty(h.equityQty)}
                                 </span>
                               )}
@@ -1148,7 +1148,7 @@ export function BinanceDashboard() {
                                   });
                                   setIsCalcModalOpen(true);
                                 }}
-                                className="px-2.5 py-1.5 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                                className="px-2.5 py-1.5 rounded-xl -emerald-/10 -emerald-/20 text-emerald-700 dark:text-emerald-300 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
                               >
                                 <Calculator className="h-3.5 w-3.5" />
                                 <span>Target</span>
@@ -1184,7 +1184,7 @@ export function BinanceDashboard() {
             </div>
             <div className="p-4 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/40">
               <span className="text-[11px] uppercase text-slate-500 font-semibold">On-Chain Deposits</span>
-              <div className="text-lg font-bold font-mono text-indigo-700 dark:text-indigo-400 mt-1">
+              <div className="text-lg font-bold font-mono text-emerald-700 dark:text-emerald-400 mt-1">
                 {fmtUsd(fundingSummary?.cryptoDepositUsd || 0)}
               </div>
             </div>
@@ -1208,7 +1208,7 @@ export function BinanceDashboard() {
                 type="button"
                 onClick={() => setFundingFilter(f.id)}
                 className={`px-3 py-1.5 rounded-xl font-semibold cursor-pointer ${
-                  fundingFilter === f.id ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-zinc-400'
+                  fundingFilter === f.id ? 'bg-[#0D6E52] dark:bg-emerald-600 text-white' : 'text-slate-600 dark:text-zinc-400'
                 }`}
               >
                 {f.label}
@@ -1303,7 +1303,7 @@ export function BinanceDashboard() {
                   type="button"
                   onClick={() => setTradeSourceFilter(s.id)}
                   className={`px-3 py-1.5 rounded-xl font-semibold cursor-pointer ${
-                    tradeSourceFilter === s.id ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-zinc-400'
+                    tradeSourceFilter === s.id ? 'bg-[#0D6E52] dark:bg-emerald-600 text-white' : 'text-slate-600 dark:text-zinc-400'
                   }`}
                 >
                   {s.label}
@@ -1483,7 +1483,7 @@ export function BinanceDashboard() {
                   });
                   setIsCalcModalOpen(true);
                 }}
-                className="py-2.5 px-4 rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+                className="py-2.5 px-4 rounded-2xl bg-[#0D6E52] hover:bg-[#0A5740] dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <Target className="h-4 w-4" />
                 <span>Target Price</span>
@@ -1548,7 +1548,7 @@ export function BinanceDashboard() {
               type="button"
               disabled={isSavingOverride}
               onClick={handleSaveOverride}
-              className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-semibold cursor-pointer disabled:opacity-50"
+              className="px-4 py-2 rounded-xl bg-[#0D6E52] dark:bg-emerald-600 text-white text-xs font-semibold cursor-pointer disabled:opacity-50"
             >
               {isSavingOverride ? 'Saving...' : 'Save Cost'}
             </button>
