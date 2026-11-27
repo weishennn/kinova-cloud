@@ -729,7 +729,7 @@ export default function InvoicesPage() {
                 >
                   <div className="relative mx-auto h-48 w-48">
                     <svg className="h-full w-full" viewBox="0 0 100 100">
-                      <circle cx="50" cy="50" r="45" fill="none" stroke="#27272a" strokeWidth="8" />
+                      <circle cx="50" cy="50" r="45" fill="none" strokeWidth="8" className="stroke-slate-200 dark:stroke-zinc-800" />
                       <motion.circle
                         cx="50"
                         cy="50"
@@ -754,8 +754,8 @@ export default function InvoicesPage() {
                       <span className="text-2xl font-black text-slate-950 dark:text-white mt-0.5 font-mono tabular-nums">
                         <AnimatedNumber value={taxReliefSummary.totalClaimable} decimals={0} animateOnMount />
                       </span>
-                      <span className="text-emerald-800 dark:text-emerald-400 text-[11px] mt-0.5 font-bold font-mono tabular-nums">
-                        <AnimatedNumber value={taxReliefSummary.estimatedTaxSaved} prefix="Saves ~RM " suffix=" tax" decimals={0} animateOnMount />
+                      <span className="text-emerald-800 dark:text-emerald-400 text-[11px] mt-0.5 font-bold font-mono tabular-nums whitespace-nowrap">
+                        <AnimatedNumber value={taxReliefSummary.estimatedTaxSaved} prefix={'Saves ~RM\u00A0'} suffix=" tax" decimals={0} animateOnMount />
                       </span>
                     </div>
                   </div>
@@ -911,12 +911,12 @@ export default function InvoicesPage() {
                       <span>🇲🇾 LHDN e-Filing Tax &amp; PCB Refund Estimator (Form BE — YA {selectedTaxYear})</span>
                     </h3>
                     <p className="text-[11px] text-slate-600 dark:text-zinc-400 mt-0.5">
-                      Estimates your Form BE settlement using Annual Income, RM 9,000 Self Relief, Tracked &amp; Custom Reliefs, Rebates (RM 400 / Zakat / Spouse), and PCB Paid
+                      Estimates your Form BE settlement using Annual Income, RM{'\u00A0'}9,000 Self Relief, Tracked &amp; Custom Reliefs, Rebates (RM{'\u00A0'}400 / Zakat / Spouse), and PCB Paid
                     </p>
                   </div>
 
                   {/* Settlement Status Badge */}
-                  <span className={`text-xs font-extrabold px-3 py-1 rounded-full font-mono ${
+                  <span className={`text-xs font-extrabold px-3 py-1 rounded-full font-mono whitespace-nowrap ${
                     taxReliefSummary.settlementStatus === 'refund'
                       ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/40'
                       : taxReliefSummary.settlementStatus === 'pay_extra'
@@ -924,10 +924,10 @@ export default function InvoicesPage() {
                       : 'bg-indigo-500/20 text-indigo-800 dark:text-indigo-300 border border-indigo-500/40'
                   }`}>
                     {taxReliefSummary.settlementStatus === 'refund'
-                      ? `🎉 Est. Tax Refund: +RM ${taxReliefSummary.refundAmount.toFixed(2)}`
+                      ? `🎉 Est. Tax Refund: +RM\u00A0${taxReliefSummary.refundAmount.toFixed(2)}`
                       : taxReliefSummary.settlementStatus === 'pay_extra'
-                      ? `⚠️ Est. Extra Tax: RM ${taxReliefSummary.extraTaxToPay.toFixed(2)}`
-                      : `✅ Est. RM 0.00 Extra Tax`}
+                      ? `⚠️ Est. Extra Tax: RM\u00A0${taxReliefSummary.extraTaxToPay.toFixed(2)}`
+                      : `✅ Est. RM\u00A00.00 Extra Tax`}
                   </span>
                 </div>
 

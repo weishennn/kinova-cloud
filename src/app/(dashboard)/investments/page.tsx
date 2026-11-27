@@ -1272,15 +1272,15 @@ export default function InvestmentsPage() {
       />
 
       {/* Monthly Investment & Savings Execution Goal Bar */}
-      <div className="p-4 sm:p-5 rounded-3xl border border-indigo-500/20 bg-gradient-to-br from-indigo-950/20 via-white/80 dark:via-zinc-900/60 to-purple-950/20 backdrop-blur-xl shadow-sm space-y-3">
+      <div className="p-4 sm:p-5 rounded-3xl border border-indigo-500/20 bg-gradient-to-br from-indigo-50/90 dark:from-indigo-950/20 via-white/80 dark:via-zinc-900/60 to-purple-50/80 dark:to-purple-950/20 backdrop-blur-xl shadow-sm space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-indigo-500" />
+          <div className="flex items-center gap-2 min-w-0">
+            <Sparkles className="h-4 w-4 text-indigo-500 shrink-0" />
             <span className="text-xs font-bold text-slate-900 dark:text-white">
               Monthly Wealth Building Plan ({allocation.savingsTargetPct + allocation.investmentTargetPct}% of RM{'\u00A0'}{allocation.baselineIncome.toLocaleString()} Income)
             </span>
           </div>
-          <span className="text-xs font-mono font-bold text-indigo-700 dark:text-indigo-300">
+          <span className="text-xs font-mono font-bold whitespace-nowrap tabular-nums text-indigo-700 dark:text-indigo-300">
             RM{'\u00A0'}{(allocation.actualInvestedThisMonth + allocation.actualSavedThisMonth).toFixed(0)} / RM{'\u00A0'}{(allocation.targetInvestmentAmount + allocation.targetSavingsAmount).toLocaleString()} achieved
           </span>
         </div>
@@ -1288,11 +1288,11 @@ export default function InvestmentsPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
           {/* Market Investment Target */}
           <div className="p-3 rounded-2xl bg-white/70 dark:bg-zinc-800/40 border border-slate-200/60 dark:border-zinc-700/50 space-y-1.5">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-medium text-slate-700 dark:text-zinc-300 flex items-center gap-1.5">
-                <span>📈 Market Investments ({allocation.investmentTargetPct}% goal)</span>
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="font-medium text-slate-700 dark:text-zinc-300 flex items-center gap-1.5 min-w-0 truncate">
+                <span>📈 Market ({allocation.investmentTargetPct}% goal)</span>
               </span>
-              <span className="font-mono font-bold text-slate-900 dark:text-white">
+              <span className="font-mono font-bold text-slate-900 dark:text-white shrink-0 whitespace-nowrap tabular-nums">
                 RM{'\u00A0'}{allocation.actualInvestedThisMonth.toFixed(0)} / RM{'\u00A0'}{allocation.targetInvestmentAmount.toLocaleString()}
               </span>
             </div>
@@ -1308,11 +1308,11 @@ export default function InvestmentsPage() {
 
           {/* Cash / Safe Savings Target */}
           <div className="p-3 rounded-2xl bg-white/70 dark:bg-zinc-800/40 border border-slate-200/60 dark:border-zinc-700/50 space-y-1.5">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-medium text-slate-700 dark:text-zinc-300 flex items-center gap-1.5">
-                <span>🛡️ Cash & Fixed Deposits ({allocation.savingsTargetPct}% goal)</span>
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="font-medium text-slate-700 dark:text-zinc-300 flex items-center gap-1.5 min-w-0 truncate">
+                <span>🛡️ Cash &amp; FD ({allocation.savingsTargetPct}% goal)</span>
               </span>
-              <span className="font-mono font-bold text-slate-900 dark:text-white">
+              <span className="font-mono font-bold text-slate-900 dark:text-white shrink-0 whitespace-nowrap tabular-nums">
                 RM{'\u00A0'}{allocation.actualSavedThisMonth.toFixed(0)} / RM{'\u00A0'}{allocation.targetSavingsAmount.toLocaleString()}
               </span>
             </div>

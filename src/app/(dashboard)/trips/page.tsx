@@ -905,7 +905,7 @@ export default function TripsPage() {
                   )
                 }
                 maxLength={8}
-                placeholder="Invite code (e.g. A1B2C3D4)"
+                placeholder="e.g. A1B2C3D4"
                 className="h-10 w-full sm:w-44 rounded-xl border border-slate-300 dark:border-white/10 bg-white/90 dark:bg-zinc-950/80 px-3 text-xs font-mono uppercase tracking-widest text-slate-950 dark:text-white outline-none focus:border-indigo-500"
               />
               <button
