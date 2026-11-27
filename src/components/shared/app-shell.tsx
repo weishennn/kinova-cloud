@@ -410,7 +410,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [queryClient]);
 
   return (
-    <div className="relative min-h-screen bg-background text-foreground selection:-emerald-/30 overflow-x-clip antialiased money-cockpit-shell">
+    <div className="relative min-h-screen bg-background text-foreground selection:bg-emerald-500/30 overflow-x-clip antialiased money-cockpit-shell">
       {/* Background Layer: Kinova AI & Pull-down Pill (Inspired by Ryt Bank) */}
       {!isReceiptPriceSearchPage && (
         <div

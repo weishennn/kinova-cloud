@@ -292,12 +292,12 @@ export function SplitwiseTripPanel({
 
   return (
     <section
-      className="rounded-3xl border border-emerald-300/50 dark:border-emerald-400/15 bg-emerald-50/65 -emerald-/[0.045] p-4 sm:p-5 space-y-4"
+      className="rounded-3xl border border-emerald-300/50 dark:border-emerald-400/15 bg-emerald-50/65 dark:bg-emerald-500/[0.045] p-4 sm:p-5 space-y-4"
       aria-labelledby={`splitwise-heading-${domKey}`}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-3 min-w-0">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl -emerald-/10 text-emerald-700 dark:text-emerald-300">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
             <Link2 className="h-5 w-5" aria-hidden="true" />
           </span>
           <div>
@@ -314,7 +314,7 @@ export function SplitwiseTripPanel({
                     Linked · {connection.inviteCode}
                   </span>
                   {connection.includeInBudget !== false && (
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full -emerald-/15 text-emerald-800 dark:text-emerald-300 border border-emerald-500/25">
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border border-emerald-500/25">
                       ✓ Synced to Flow &amp; Overview
                     </span>
                   )}
@@ -565,7 +565,7 @@ export function SplitwiseTripPanel({
                   {renderSecondaryEquivalent('groupTotal', memberSummary.groupTotal)}
                 </div>
 
-                <div className="rounded-2xl border border-emerald-500/30 -emerald-/[0.08] -emerald-/[0.12] p-3">
+                <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/[0.08] dark:bg-emerald-500/[0.12] p-3">
                   <p className="text-[11px] font-semibold text-emerald-900 dark:text-emerald-200">
                     Your share
                   </p>
@@ -611,7 +611,7 @@ export function SplitwiseTripPanel({
 
               {/* Exact Paid Currency Breakdown (Zero FX Conversion Drift) */}
               {memberSummary.nativeByCurrency.length > 0 && (
-                <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.06] -emerald-/[0.08] p-3 space-y-2">
+                <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.06] dark:bg-emerald-500/[0.08] p-3 space-y-2">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <span className="text-[11px] font-bold text-emerald-950 dark:text-emerald-200">
                       💱 Exact Paid Currency Breakdown (Zero FX Conversion Error)

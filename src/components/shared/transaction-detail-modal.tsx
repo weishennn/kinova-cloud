@@ -437,14 +437,14 @@ function TransactionDetailContent({
 
           {/* Installment Badge Banner */}
           {isInstallment && (
-            <div className="p-3 rounded-2xl bg-amber-600 -amber-/10 border border-amber-500/25 flex items-center justify-between">
+            <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <CreditCard className="h-4 w-4 text-amber-800 dark:text-amber-400" />
                 <span className="text-xs font-bold text-amber-800 dark:text-amber-300 uppercase tracking-wider">
                   {installmentMatch ? `Installment ${installmentMatch[1]} of ${installmentMatch[2]}` : 'Installment Plan'}
                 </span>
               </div>
-              <span className="text-[11px] font-semibold text-amber-800 dark:text-amber-400 bg-amber-600 -amber-/15 px-2 py-0.5 rounded-full border border-amber-500/30">
+              <span className="text-[11px] font-semibold text-amber-800 dark:text-amber-400 bg-amber-500/15 px-2 py-0.5 rounded-full border border-amber-500/30">
                 Monthly Commitment
               </span>
             </div>
@@ -608,7 +608,7 @@ function TransactionDetailContent({
                     href={transaction.receiptUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex-1 flex items-center justify-between p-2.5 rounded-xl -emerald-/10 -emerald-/20 border border-emerald-500/20 text-emerald-800 dark:text-emerald-300 transition-colors"
+                    className="flex-1 flex items-center justify-between p-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-800 dark:text-emerald-300 transition-colors"
                   >
                     <div className="flex items-center gap-2">
                       <Receipt className="h-4 w-4" />

@@ -9,27 +9,24 @@ import { useAppStore } from '@/stores/app-store';
 import { AnimatedNumber } from '@/components/shared/animated-number';
 import { CockpitPageHeading } from '@/components/money-cockpit/cockpit-page-heading';
 import { PeriodBar } from '@/components/shared/period-bar';
+import { ThemeChartTooltip } from '@/components/shared/theme-chart-tooltip';
 import {
-  BarChart3,
-  TrendingUp,
   Inbox,
-  DollarSign,
   PieChart,
   ArrowUpRight,
   ArrowDownRight,
   PiggyBank,
   ChevronRight,
-  Check,
-  Sparkles
+  Sparkles,
 } from 'lucide-react';
 
-const BarChart = dynamic(() => import('recharts').then(m => m.BarChart), { ssr: false });
-const Bar = dynamic(() => import('recharts').then(m => m.Bar), { ssr: false });
-const XAxis = dynamic(() => import('recharts').then(m => m.XAxis), { ssr: false });
-const YAxis = dynamic(() => import('recharts').then(m => m.YAxis), { ssr: false });
-const Tooltip = dynamic(() => import('recharts').then(m => m.Tooltip), { ssr: false });
-const ResponsiveContainer = dynamic(() => import('recharts').then(m => m.ResponsiveContainer), { ssr: false });
-const CartesianGrid = dynamic(() => import('recharts').then(m => m.CartesianGrid), { ssr: false });
+const BarChart = dynamic(() => import('recharts').then((m) => m.BarChart), { ssr: false });
+const Bar = dynamic(() => import('recharts').then((m) => m.Bar), { ssr: false });
+const XAxis = dynamic(() => import('recharts').then((m) => m.XAxis), { ssr: false });
+const YAxis = dynamic(() => import('recharts').then((m) => m.YAxis), { ssr: false });
+const Tooltip = dynamic(() => import('recharts').then((m) => m.Tooltip), { ssr: false });
+const ResponsiveContainer = dynamic(() => import('recharts').then((m) => m.ResponsiveContainer), { ssr: false });
+const CartesianGrid = dynamic(() => import('recharts').then((m) => m.CartesianGrid), { ssr: false });
 
 import { CATEGORY_COLORS } from '@/lib/design-tokens';
 import { getAmountInBaseCurrency } from '@/lib/currency';
@@ -42,7 +39,9 @@ export default function AnalyticsPage() {
   const [savingsYearFilter, setSavingsYearFilter] = useState<string>('all');
   const { selectedMonth, setSelectedMonth } = useAppStore();
   const { data: sheetMonths = [] } = useMonthList();
-  const { transactions = [], isLoading } = useTransactions(selectedMonth ? { period: selectedMonth } : undefined);
+  const { transactions = [], isLoading } = useTransactions(
+    selectedMonth ? { period: selectedMonth } : undefined
+  );
 
   const { currentMonth: currentMonthStr, orderedYears: availableYears } = useMemo(
     () => buildPeriodCatalog(sheetMonths, selectedMonth, transactions),
@@ -54,36 +53,41 @@ export default function AnalyticsPage() {
   // Scoped transactions & expenses for selected month or full year
   const scopedTransactions = useMemo(() => {
     if (selectedMonth === 'all') {
-      return transactions.filter(t => t.id !== 'tx_sample' && !!t.date);
+      return transactions.filter((t) => t.id !== 'tx_sample' && !!t.date);
     }
     if (selectedMonth.startsWith('year-')) {
       const y = selectedMonth.replace('year-', '');
-      return transactions.filter(t => t.id !== 'tx_sample' && !!t.date && t.date.startsWith(y));
+      return transactions.filter((t) => t.id !== 'tx_sample' && !!t.date && t.date.startsWith(y));
     }
-    return transactions.filter(t => t.id !== 'tx_sample' && !!t.date && t.date.startsWith(selectedMonth));
+    return transactions.filter(
+      (t) => t.id !== 'tx_sample' && !!t.date && t.date.startsWith(selectedMonth)
+    );
   }, [transactions, selectedMonth]);
 
   const scopedExpenses = useMemo(() => {
-    return scopedTransactions.filter(t => t.type === 'expense');
+    return scopedTransactions.filter((t) => t.type === 'expense');
   }, [scopedTransactions]);
 
   const allExpenses = useMemo(() => {
-    return transactions.filter(t => t.id !== 'tx_sample' && t.type === 'expense');
+    return transactions.filter((t) => t.id !== 'tx_sample' && t.type === 'expense');
   }, [transactions]);
 
   // Statistics scoped to the selected period
   const stats = useMemo(() => {
-    const totalExpense = scopedExpenses.reduce((sum, t) => sum + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount), 0);
+    const totalExpense = scopedExpenses.reduce(
+      (sum, t) => sum + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount),
+      0
+    );
     const count = scopedExpenses.length;
     const maxExpense = scopedExpenses.reduce(
-      (max, t) => (getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount) > max.amount
-        ? { ...t, amount: getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount) }
-        : max),
+      (max, t) =>
+        getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount) > max.amount
+          ? { ...t, amount: getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount) }
+          : max,
       { amount: 0, description: 'None', category: 'None' }
     );
 
-    // Distinct active spending days in selected period
-    const uniqueDays = new Set(scopedExpenses.map(t => t.date)).size;
+    const uniqueDays = new Set(scopedExpenses.map((t) => t.date)).size;
     const avgDaily = uniqueDays > 0 ? totalExpense / uniqueDays : 0;
 
     return { totalExpense, count, maxExpense, avgDaily };
@@ -92,7 +96,7 @@ export default function AnalyticsPage() {
   // Scoped category breakdown for selected month
   const breakdown = useMemo(() => {
     const catMap: Record<string, number> = {};
-    scopedExpenses.forEach(t => {
+    scopedExpenses.forEach((t) => {
       const cat = t.category || 'Other';
       catMap[cat] = (catMap[cat] || 0) + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount);
     });
@@ -101,13 +105,13 @@ export default function AnalyticsPage() {
       .sort((a, b) => b.value - a.value);
   }, [scopedExpenses]);
 
-  // Process chart data: Days of Week uses scopedExpenses, Monthly Trend uses allExpenses
+  // Chart data: Days of Week uses scopedExpenses, Monthly Trend uses allExpenses
   const chartData = useMemo(() => {
     if (period === 'Daily') {
       if (scopedExpenses.length === 0) return [];
       const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
       const dayTotals = [0, 0, 0, 0, 0, 0, 0];
-      scopedExpenses.forEach(t => {
+      scopedExpenses.forEach((t) => {
         if (!t.date) return;
         const d = parseLocalDate(t.date);
         if (!isNaN(d.getTime())) {
@@ -115,36 +119,38 @@ export default function AnalyticsPage() {
         }
       });
       return days.map((day, idx) => ({ name: day, value: dayTotals[idx] }));
-    } else {
-      if (allExpenses.length === 0) return [];
-      // Monthly aggregation chronologically sorted
-      const monthlyMap: Record<string, number> = {};
-      const sortedExpenses = [...allExpenses].sort((a, b) => parseLocalDate(a.date).getTime() - parseLocalDate(b.date).getTime());
-
-      sortedExpenses.forEach(t => {
-        if (!t.date) return;
-        const monthKey = t.date.substring(0, 7);
-        monthlyMap[monthKey] = (monthlyMap[monthKey] || 0) + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount);
-      });
-
-      return Object.entries(monthlyMap).map(([key, value]) => {
-        const [year, month] = key.split('-');
-        const dateObj = new Date(parseInt(year), parseInt(month) - 1, 1);
-        const name = !isNaN(dateObj.getTime())
-          ? dateObj.toLocaleString('default', { month: 'short', year: '2-digit' })
-          : key;
-        return { name, value };
-      });
     }
+
+    if (allExpenses.length === 0) return [];
+    const monthlyMap: Record<string, number> = {};
+    const sortedExpenses = [...allExpenses].sort(
+      (a, b) => parseLocalDate(a.date).getTime() - parseLocalDate(b.date).getTime()
+    );
+
+    sortedExpenses.forEach((t) => {
+      if (!t.date) return;
+      const monthKey = t.date.substring(0, 7);
+      monthlyMap[monthKey] =
+        (monthlyMap[monthKey] || 0) + getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount);
+    });
+
+    return Object.entries(monthlyMap).map(([key, value]) => {
+      const [year, month] = key.split('-');
+      const dateObj = new Date(parseInt(year, 10), parseInt(month, 10) - 1, 1);
+      const name = !isNaN(dateObj.getTime())
+        ? dateObj.toLocaleString('default', { month: 'short', year: '2-digit' })
+        : key;
+      return { name, value };
+    });
   }, [scopedExpenses, allExpenses, period]);
 
-  const hasData = chartData.some(d => d.value > 0);
+  const hasData = chartData.some((d) => d.value > 0);
 
-  // Monthly Savings Tracker & History: track back which month you saved how much
+  // Monthly Savings Tracker & History
   const monthlySavingsHistory = useMemo(() => {
     const monthMap: Record<string, { income: number; expense: number; count: number }> = {};
 
-    transactions.forEach(t => {
+    transactions.forEach((t) => {
       if (t.id === 'tx_sample' || !t.date || t.date.length < 7) return;
       const mKey = t.date.substring(0, 7);
       if (!monthMap[mKey]) {
@@ -152,7 +158,8 @@ export default function AnalyticsPage() {
       }
       monthMap[mKey].count += 1;
       const baseAmount = getAmountInBaseCurrency(t.amount, t.currency, t.baseAmount);
-      const isTrade = String(t.id || '').startsWith('tx_trade_') ||
+      const isTrade =
+        String(t.id || '').startsWith('tx_trade_') ||
         t.category === 'Stocks & Crypto' ||
         t.subCategory?.toUpperCase() === 'SELL' ||
         t.subCategory?.toUpperCase() === 'BUY' ||
@@ -188,17 +195,17 @@ export default function AnalyticsPage() {
       .sort((a, b) => b.monthKey.localeCompare(a.monthKey));
   }, [transactions, currentMonthStr]);
 
-  // Multi-year filter and annual summary for Savings History
   const displayedSavingsMonths = useMemo(() => {
     if (savingsYearFilter === 'all') return monthlySavingsHistory;
-    return monthlySavingsHistory.filter(m => m.monthKey.startsWith(savingsYearFilter));
+    return monthlySavingsHistory.filter((m) => m.monthKey.startsWith(savingsYearFilter));
   }, [monthlySavingsHistory, savingsYearFilter]);
 
   const annualSummary = useMemo(() => {
-    const targetYear = savingsYearFilter === 'all'
-      ? (availableYears[0] || currentMonthStr.substring(0, 4))
-      : savingsYearFilter;
-    const yearMonths = monthlySavingsHistory.filter(m => m.monthKey.startsWith(targetYear));
+    const targetYear =
+      savingsYearFilter === 'all'
+        ? availableYears[0] || currentMonthStr.substring(0, 4)
+        : savingsYearFilter;
+    const yearMonths = monthlySavingsHistory.filter((m) => m.monthKey.startsWith(targetYear));
     const income = yearMonths.reduce((s, m) => s + m.income, 0);
     const expense = yearMonths.reduce((s, m) => s + m.expense, 0);
     const saved = income - expense;
@@ -207,40 +214,44 @@ export default function AnalyticsPage() {
   }, [monthlySavingsHistory, savingsYearFilter, availableYears, currentMonthStr]);
 
   return (
-    <div className="cockpit-module-page">
+    <div className="cockpit-module-page space-y-6 sm:space-y-8 pb-8">
       <CockpitPageHeading
-        title="Expense & Savings Analytics"
-        description="Analyze monthly spending, category distribution, and track back historical savings across years"
-        action={(
-          <div className="cockpit-segmented-control relative flex space-x-1 rounded-xl bg-black/[0.035] dark:bg-white/[0.04] p-1 border border-black/[0.06] dark:border-white/[0.08]">
-          {(['Daily', 'Monthly'] as const).map((tab) => {
-            const isActive = period === tab;
-            return (
-              <button
-                key={tab}
-                type="button"
-                onClick={() => setPeriod(tab)}
-                className={`relative z-10 min-h-[40px] px-4 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer touch-manipulation active:scale-[0.97] ${
-                  isActive ? 'text-emerald-800 dark:text-emerald-300 font-bold' : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {isActive && (
-                  <motion.div
-                    layoutId="analytics-period-pill"
-                    className="cockpit-segmented-pill absolute inset-0 rounded-lg border pointer-events-none"
-                    transition={{ type: 'spring' as const, stiffness: 450, damping: 32 }}
-                  />
-                )}
-                <span className="relative z-10">{tab === 'Daily' ? 'Days of Week' : 'Monthly Trend'}</span>
-              </button>
-            );
-          })}
+        title="Analytics"
+        description="Spending cadence, category weight, and multi-year net savings"
+        action={
+          <div className="relative inline-flex items-center rounded-2xl bg-black/[0.04] dark:bg-white/[0.05] p-1 border border-black/[0.06] dark:border-white/[0.08]">
+            {(['Daily', 'Monthly'] as const).map((tab) => {
+              const isActive = period === tab;
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setPeriod(tab)}
+                  className={`relative z-10 min-h-[38px] px-4 py-1.5 text-xs font-semibold rounded-xl transition-colors cursor-pointer touch-manipulation ${
+                    isActive
+                      ? 'text-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {isActive && (
+                    <motion.div
+                      layoutId="analytics-period-pill"
+                      className="absolute inset-0 rounded-xl bg-white dark:bg-zinc-900 shadow-sm border border-black/[0.06] dark:border-white/[0.1] pointer-events-none"
+                      transition={{ type: 'spring', stiffness: 460, damping: 34 }}
+                    />
+                  )}
+                  <span className="relative z-10">
+                    {tab === 'Daily' ? 'Days of Week' : 'Monthly Trend'}
+                  </span>
+                </button>
+              );
+            })}
           </div>
-        )}
+        }
       />
 
-      {/* Unified Period Selector */}
-      <div className="bg-card p-3.5 sm:p-4 rounded-[20px] border border-black/[0.08] dark:border-white/[0.08] shadow-[0_1px_2px_rgba(17,20,24,0.03)]">
+      {/* Period Selector Strip */}
+      <div className="rounded-2xl border border-black/[0.07] dark:border-white/[0.08] bg-card px-4 py-3">
         <PeriodBar
           selectedMonth={selectedMonth}
           onSelectMonth={setSelectedMonth}
@@ -251,338 +262,411 @@ export default function AnalyticsPage() {
         />
       </div>
 
-      {/* Summary KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <motion.div
-          whileHover={{ y: -2 }}
-          transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
-          className="p-5 rounded-[20px] border border-black/[0.08] dark:border-white/[0.08] bg-card transition-all duration-300 shadow-[0_1px_2px_rgba(17,20,24,0.03)]"
-        >
-          <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Total Expenses</span>
-          <div className="text-xl sm:text-2xl font-extrabold font-mono tabular-nums tracking-tight text-foreground mt-1.5">
-            <AnimatedNumber value={stats.totalExpense} animateOnMount />
-          </div>
-          <span className="text-[11px] text-muted-foreground mt-1 block font-medium font-mono">
-            {stats.count} recorded payments in {selectedMonth === 'all' ? 'all time' : formatMonthLabel(selectedMonth).split(' ')[0]}
-          </span>
-        </motion.div>
-
-        <motion.div
-          whileHover={{ y: -2 }}
-          transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
-          className="p-5 rounded-[20px] border border-black/[0.08] dark:border-white/[0.08] bg-card transition-all duration-300 hover:border-amber-500/40 shadow-[0_1px_2px_rgba(17,20,24,0.03)]"
-        >
-          <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Average Daily Spend</span>
-          <div className="text-xl sm:text-2xl font-extrabold font-mono tabular-nums tracking-tight text-amber-700 dark:text-amber-400 mt-1.5">
-            <AnimatedNumber value={stats.avgDaily} animateOnMount />
-          </div>
-          <span className="text-[11px] text-muted-foreground mt-1 block font-medium">per active spending day</span>
-        </motion.div>
-
-        <motion.div
-          whileHover={{ y: -2 }}
-          transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
-          className="p-5 rounded-[20px] border border-black/[0.08] dark:border-white/[0.08] bg-card transition-all duration-300 hover:border-rose-500/40 shadow-[0_1px_2px_rgba(17,20,24,0.03)]"
-        >
-          <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Highest Single Expense</span>
-          <div className="text-xl sm:text-2xl font-extrabold font-mono tabular-nums tracking-tight text-rose-700 dark:text-rose-400 mt-1.5">
-            <AnimatedNumber value={stats.maxExpense.amount} animateOnMount />
-          </div>
-          <span className="text-[11px] text-muted-foreground mt-1 block line-clamp-2 break-words font-medium" title={stats.maxExpense.description || stats.maxExpense.category}>
-            {stats.maxExpense.description || stats.maxExpense.category}
-          </span>
-        </motion.div>
-
-        <motion.div
-          whileHover={{ y: -2 }}
-          transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
-          className="p-5 rounded-[20px] border border-black/[0.08] dark:border-white/[0.08] bg-card transition-all duration-300 hover:border-emerald-500/40 shadow-[0_1px_2px_rgba(17,20,24,0.03)]"
-        >
-          <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Top Category</span>
-          <div className="min-w-0 text-xl sm:text-2xl font-extrabold text-emerald-700 dark:text-emerald-400 mt-1.5 break-words leading-tight" title={breakdown[0]?.name || 'None'}>
-            {breakdown[0]?.name || 'None'}
-          </div>
-          <span className="text-[11px] text-muted-foreground mt-1 block font-medium">
-            {breakdown[0] && stats.totalExpense > 0
-              ? `${((breakdown[0].value / stats.totalExpense) * 100).toFixed(1)}% of spending`
-              : 'No categorized data'}
-          </span>
-        </motion.div>
-      </div>
-
-      {/* Main Chart */}
-      <div className="h-[360px] w-full rounded-3xl border border-black/[0.08] dark:border-white/[0.08] bg-card  p-5 sm:p-6 flex flex-col justify-center shadow-[0_1px_2px_rgba(17,20,24,0.03)]">
-        <div className="mb-2 flex items-center justify-between">
-          <span className="text-xs text-slate-600 dark:text-zinc-400 font-semibold uppercase tracking-wider">
-            {period === 'Daily'
-              ? `Spending by Day of Week (${formatMonthLabel(selectedMonth)})`
-              : 'Monthly Spending Trend Over Time'}
-          </span>
-        </div>
-        {!hasData ? (
-          <div className="text-center py-12">
-            <div className="h-12 w-12 rounded-2xl bg-slate-100 dark:bg-zinc-800/80 text-slate-600 dark:text-zinc-400 mx-auto flex items-center justify-center mb-3">
-              <Inbox className="h-6 w-6" />
+      {/* Unified KPI Strip */}
+      <section
+        aria-label="Spending summary metrics"
+        className="rounded-3xl border border-black/[0.07] dark:border-white/[0.08] bg-card overflow-hidden"
+      >
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:gap-px bg-black/[0.06] dark:bg-white/[0.06]">
+          <div className="bg-card p-5 sm:p-6 flex flex-col justify-between gap-2 min-w-0">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              Total Expenses
+            </span>
+            <div className="text-2xl sm:text-[26px] font-bold font-mono tabular-nums tracking-tight text-foreground">
+              <AnimatedNumber value={stats.totalExpense} animateOnMount />
             </div>
-            <h3 className="text-base font-semibold text-slate-950 dark:text-white">No Expense Records for Selected Period</h3>
-            <p className="text-xs text-slate-600 dark:text-zinc-400 max-w-sm mx-auto mt-1">
-              Select another month or record expenses to visualize spending trends.
-            </p>
+            <span className="text-xs text-muted-foreground font-mono truncate">
+              {stats.count} {stats.count === 1 ? 'entry' : 'entries'} ·{' '}
+              {selectedMonth === 'all' ? 'All time' : formatMonthLabel(selectedMonth)}
+            </span>
           </div>
-        ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-              <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
-              <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `RM ${val}`} />
-              <Tooltip
-                cursor={{ fill: '#1e293b', opacity: 0.4 }}
-                contentStyle={{
-                  backgroundColor: '#0f172a',
-                  borderColor: 'rgba(255,255,255,0.1)',
-                  borderRadius: '16px',
-                  color: '#f8fafc',
-                  boxShadow: '0 10px 25px -5px rgba(0,0,0,0.5)'
-                }}
-                formatter={(val: unknown) => [`RM ${Number(val || 0).toFixed(2)}`, 'Expense']}
-              />
-              <Bar dataKey="value" fill="#6366f1" radius={[8, 8, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        )}
-      </div>
 
-      {/* Category Spending Breakdown List */}
-      <div className="rounded-[20px] border border-black/[0.08] dark:border-white/[0.08] bg-card p-6 space-y-4 shadow-[0_1px_2px_rgba(17,20,24,0.03)]">
-        <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-foreground flex items-center gap-2">
-            <PieChart className="h-4 w-4 text-emerald-700 dark:text-emerald-400" />
-            <span>Category Spending Breakdown ({formatMonthLabel(selectedMonth)})</span>
-          </h2>
-          <span className="text-xs text-muted-foreground font-mono">{breakdown.length} Categories</span>
+          <div className="bg-card p-5 sm:p-6 flex flex-col justify-between gap-2 min-w-0">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              Daily Average
+            </span>
+            <div className="text-2xl sm:text-[26px] font-bold font-mono tabular-nums tracking-tight text-amber-700 dark:text-amber-400">
+              <AnimatedNumber value={stats.avgDaily} animateOnMount />
+            </div>
+            <span className="text-xs text-muted-foreground">
+              Per active spending day
+            </span>
+          </div>
+
+          <div className="bg-card p-5 sm:p-6 flex flex-col justify-between gap-2 min-w-0">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              Largest Expense
+            </span>
+            <div className="text-2xl sm:text-[26px] font-bold font-mono tabular-nums tracking-tight text-rose-700 dark:text-rose-400">
+              <AnimatedNumber value={stats.maxExpense.amount} animateOnMount />
+            </div>
+            <span
+              className="text-xs text-muted-foreground truncate"
+              title={stats.maxExpense.description || stats.maxExpense.category}
+            >
+              {stats.maxExpense.description || stats.maxExpense.category}
+            </span>
+          </div>
+
+          <div className="bg-card p-5 sm:p-6 flex flex-col justify-between gap-2 min-w-0">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              Top Category
+            </span>
+            <div
+              className="text-xl sm:text-2xl font-bold tracking-tight text-emerald-700 dark:text-emerald-400 truncate"
+              title={breakdown[0]?.name || 'None'}
+            >
+              {breakdown[0]?.name || 'None'}
+            </div>
+            <span className="text-xs text-muted-foreground font-mono truncate">
+              {breakdown[0] && stats.totalExpense > 0
+                ? `${((breakdown[0].value / stats.totalExpense) * 100).toFixed(1)}% of total spend`
+                : 'No categorized spend'}
+            </span>
+          </div>
         </div>
+      </section>
 
-        {breakdown.length === 0 ? (
-          <p className="text-xs text-muted-foreground text-center py-6">No categorized expenses recorded for {formatMonthLabel(selectedMonth)}</p>
-        ) : (
-          <div className="space-y-3.5">
-            {breakdown.map((item) => {
-              const percent = stats.totalExpense > 0 ? (item.value / stats.totalExpense) * 100 : 0;
-              const color = CATEGORY_COLORS[item.name] || '#0D6E52';
-              return (
-                <Link
-                  key={item.name}
-                  href={`/transactions?category=${encodeURIComponent(item.name)}`}
-                  className="block space-y-1.5 rounded-xl p-2 -mx-2 hover:bg-black/[0.03] dark:hover:bg-white/[0.04] transition-colors group"
-                >
-                  <div className="flex items-center justify-between gap-2 text-xs">
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                      <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
-                      <span className="font-semibold text-foreground truncate group-hover:text-emerald-700 dark:group-hover:text-emerald-300 transition-colors">
-                        {item.name}
-                      </span>
-                    </div>
-                    <div className="text-muted-foreground shrink-0 whitespace-nowrap tabular-nums">
-                      <strong className="text-foreground font-mono tabular-nums tracking-tight">RM{'\u00A0'}{item.value.toFixed(2)}</strong>
-                      <span className="text-muted-foreground font-mono ml-1.5">({percent.toFixed(1)}%)</span>
-                    </div>
-                  </div>
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-black/[0.07] dark:bg-white/[0.07]">
-                    <div
-                      className="h-full rounded-full transition-all duration-500"
-                      style={{ width: `${percent}%`, backgroundColor: color }}
-                    />
-                  </div>
-                </Link>
-              );
-            })}
+      {/* Primary Visuals: 12-col Asymmetric Split */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+        {/* Main Bar Chart */}
+        <section className="lg:col-span-7 rounded-3xl border border-black/[0.07] dark:border-white/[0.08] bg-card p-5 sm:p-6 flex flex-col min-h-[380px] min-w-0">
+          <div className="mb-5 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-foreground">
+                {period === 'Daily' ? 'Spending by Day of Week' : 'Monthly Spending Trend'}
+              </h2>
+              <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                {period === 'Daily'
+                  ? formatMonthLabel(selectedMonth)
+                  : 'Chronological outflow across all recorded months'}
+              </p>
+            </div>
+            {isLoading && (
+              <span className="text-[11px] font-mono text-muted-foreground animate-pulse shrink-0">
+                Syncing…
+              </span>
+            )}
           </div>
-        )}
+
+          {!hasData ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center py-12">
+              <div className="h-12 w-12 rounded-2xl bg-black/[0.04] dark:bg-white/[0.05] text-muted-foreground flex items-center justify-center mb-3">
+                <Inbox className="h-5 w-5" />
+              </div>
+              <h3 className="text-sm font-semibold text-foreground">No expenses in this period</h3>
+              <p className="text-xs text-muted-foreground max-w-xs mt-1 leading-relaxed">
+                Switch to another month or record a payment to see your spending cadence here.
+              </p>
+            </div>
+          ) : (
+            <div className="flex-1 w-full min-h-[280px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="analyticsBarJade" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#10b981" stopOpacity={0.95} />
+                      <stop offset="100%" stopColor="#0d6e52" stopOpacity={0.85} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    vertical={false}
+                    stroke="currentColor"
+                    className="text-black/[0.07] dark:text-white/[0.07]"
+                  />
+                  <XAxis
+                    dataKey="name"
+                    stroke="currentColor"
+                    className="text-muted-foreground"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                    dy={8}
+                  />
+                  <YAxis
+                    stroke="currentColor"
+                    className="text-muted-foreground"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(val) => `RM ${val}`}
+                  />
+                  <Tooltip
+                    cursor={{ fill: 'currentColor', opacity: 0.05 }}
+                    content={<ThemeChartTooltip />}
+                  />
+                  <Bar
+                    dataKey="value"
+                    fill="url(#analyticsBarJade)"
+                    radius={[10, 10, 4, 4]}
+                    maxBarSize={44}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </section>
+
+        {/* Category Breakdown */}
+        <section className="lg:col-span-5 rounded-3xl border border-black/[0.07] dark:border-white/[0.08] bg-card p-5 sm:p-6 flex flex-col min-w-0">
+          <div className="flex items-center justify-between gap-2 mb-5">
+            <div className="flex items-center gap-2 min-w-0">
+              <PieChart className="h-4 w-4 text-emerald-700 dark:text-emerald-400 shrink-0" />
+              <h2 className="text-sm font-semibold text-foreground truncate">
+                Category Breakdown
+              </h2>
+            </div>
+            <span className="text-[11px] font-mono text-muted-foreground shrink-0">
+              {breakdown.length} {breakdown.length === 1 ? 'category' : 'categories'}
+            </span>
+          </div>
+
+          {breakdown.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center py-10">
+              <p className="text-xs text-muted-foreground text-center">
+                No categorized expenses for {formatMonthLabel(selectedMonth)}.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-1.5 overflow-y-auto max-h-[300px] pr-1">
+              {breakdown.map((item) => {
+                const percent = stats.totalExpense > 0 ? (item.value / stats.totalExpense) * 100 : 0;
+                const color = CATEGORY_COLORS[item.name] || '#0D6E52';
+                return (
+                  <Link
+                    key={item.name}
+                    href={`/transactions?category=${encodeURIComponent(item.name)}`}
+                    className="block rounded-2xl px-3 py-2.5 hover:bg-black/[0.03] dark:hover:bg-white/[0.04] transition-colors group"
+                  >
+                    <div className="flex items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <span
+                          className="h-2.5 w-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: color }}
+                        />
+                        <span className="font-medium text-foreground truncate group-hover:text-emerald-700 dark:group-hover:text-emerald-400 transition-colors">
+                          {item.name}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0 font-mono tabular-nums">
+                        <span className="font-semibold text-foreground">
+                          RM{'\u00A0'}{item.value.toFixed(2)}
+                        </span>
+                        <span className="text-[11px] text-muted-foreground w-11 text-right">
+                          {percent.toFixed(1)}%
+                        </span>
+                      </div>
+                    </div>
+                    <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-black/[0.06] dark:bg-white/[0.07]">
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{ width: `${percent}%`, backgroundColor: color }}
+                      />
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </section>
       </div>
 
-      {/* Monthly Savings History & Multi-Year Track Back */}
-      <div className="rounded-[20px] border border-black/[0.08] dark:border-white/[0.08] bg-card p-6 space-y-5 shadow-[0_1px_2px_rgba(17,20,24,0.03)]">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      {/* Monthly Savings History & Multi-Year Track-Back */}
+      <section className="space-y-5">
+        <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h2 className="text-base sm:text-lg font-bold text-slate-950 dark:text-white flex items-center gap-2.5">
-              <PiggyBank className="h-5 w-5 text-emerald-800 dark:text-emerald-400" />
-              <span>Monthly Savings History & Annual Track-Back</span>
+            <h2 className="text-base sm:text-lg font-semibold text-foreground flex items-center gap-2">
+              <PiggyBank className="h-5 w-5 text-emerald-700 dark:text-emerald-400" />
+              <span>Savings History</span>
             </h2>
-            <p className="text-xs text-slate-600 dark:text-zinc-400 mt-1">
-              Track back your historical income, expenses, and exact net savings across months and years
+            <p className="text-xs text-muted-foreground mt-1">
+              Click any month to inspect its spending breakdown above
             </p>
           </div>
 
-          {/* Multi-Year Filter Tabs */}
           <div className="flex items-center gap-1.5 flex-wrap">
             <button
               type="button"
               onClick={() => setSavingsYearFilter('all')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition-all active:scale-95 ${
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition-colors ${
                 savingsYearFilter === 'all'
-                  ? 'bg-[#0D6E52] dark:bg-emerald-600 text-white shadow-sm'
-                  : 'bg-black/[0.04] dark:bg-white/[0.05] text-muted-foreground hover:text-foreground border border-black/[0.07] dark:border-white/[0.07]'
+                  ? 'bg-[#0D6E52] dark:bg-emerald-600 text-white'
+                  : 'bg-card text-muted-foreground hover:text-foreground border border-black/[0.08] dark:border-white/[0.08]'
               }`}
             >
               All Years
             </button>
-            {availableYears.map(year => (
+            {availableYears.map((year) => (
               <button
                 key={year}
                 type="button"
                 onClick={() => setSavingsYearFilter(year)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition-all active:scale-95 ${
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition-colors ${
                   savingsYearFilter === year
-                    ? 'bg-[#0D6E52] dark:bg-emerald-600 text-white shadow-sm'
-                    : 'bg-black/[0.04] dark:bg-white/[0.05] text-muted-foreground hover:text-foreground border border-black/[0.07] dark:border-white/[0.07]'
+                    ? 'bg-[#0D6E52] dark:bg-emerald-600 text-white'
+                    : 'bg-card text-muted-foreground hover:text-foreground border border-black/[0.08] dark:border-white/[0.08]'
                 }`}
               >
-                Year {year}
+                {year}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Annual Overview Highlight Banner — Obsidian & Jade Atelier Card */}
-        <div className="p-5 rounded-2xl bg-gradient-to-br from-[#0E1513] via-[#101C18] to-[#0A0F0D] border border-emerald-500/20 text-[#F5F4EF] flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-emerald-400" />
-              <span className="text-xs font-semibold text-emerald-300 uppercase tracking-[0.12em] block">
-                {annualSummary.targetYear} Annual Savings Summary
-              </span>
+        {/* Annual Summary Hero Banner */}
+        <div className="atelier-hero rounded-3xl bg-gradient-to-br from-[#0E1513] via-[#11201B] to-[#0A0F0D] border border-emerald-500/20 p-5 sm:p-7 text-[#F5F4EF] flex flex-wrap items-center justify-between gap-5 sm:gap-6">
+          <div className="space-y-1.5 min-w-0">
+            <div className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-300">
+              <Sparkles className="h-3.5 w-3.5 shrink-0" />
+              <span>{annualSummary.targetYear} Net Savings</span>
             </div>
-            <span className="text-2xl sm:text-3xl font-extrabold font-mono tabular-nums whitespace-nowrap tracking-tight text-[#F5F4EF] mt-1 block">
-              {annualSummary.saved >= 0 ? '+' : '-'}RM{'\u00A0'}{Math.abs(annualSummary.saved).toFixed(2)}
-            </span>
-            <span className="text-[11px] text-[#9AA6A1] font-mono">
-              Total Net Saved in {annualSummary.targetYear} across {annualSummary.monthCount} recorded months
-            </span>
+            <div className="text-2xl sm:text-4xl font-bold font-mono tabular-nums tracking-tight text-white">
+              {annualSummary.saved >= 0 ? '+' : '-'}RM{'\u00A0'}
+              {Math.abs(annualSummary.saved).toLocaleString('en-MY', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
+            </div>
+            <p className="text-xs text-[#9AA6A1] font-mono">
+              Across {annualSummary.monthCount} recorded{' '}
+              {annualSummary.monthCount === 1 ? 'month' : 'months'}
+            </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-xs font-mono ml-auto">
-            <div>
-              <span className="text-[#9AA6A1] block text-[10px] uppercase font-semibold">Earned</span>
-              <span className="text-emerald-400 font-bold text-sm whitespace-nowrap tabular-nums">RM{'\u00A0'}{annualSummary.income.toFixed(2)}</span>
+          <div className="grid grid-cols-3 gap-3 sm:gap-8 text-xs font-mono w-full sm:w-auto min-w-0">
+            <div className="min-w-0">
+              <span className="text-[#9AA6A1] block text-[10px] uppercase tracking-wider font-semibold">
+                Earned
+              </span>
+              <span className="text-emerald-400 font-semibold text-xs sm:text-base tabular-nums mt-1 block truncate">
+                RM{'\u00A0'}{annualSummary.income.toLocaleString('en-MY', { maximumFractionDigits: 0 })}
+              </span>
             </div>
-            <div className="w-px h-7 bg-white/10" />
-            <div>
-              <span className="text-[#9AA6A1] block text-[10px] uppercase font-semibold">Spent</span>
-              <span className="text-rose-400 font-bold text-sm whitespace-nowrap tabular-nums">RM{'\u00A0'}{annualSummary.expense.toFixed(2)}</span>
+            <div className="min-w-0">
+              <span className="text-[#9AA6A1] block text-[10px] uppercase tracking-wider font-semibold">
+                Spent
+              </span>
+              <span className="text-rose-400 font-semibold text-xs sm:text-base tabular-nums mt-1 block truncate">
+                RM{'\u00A0'}{annualSummary.expense.toLocaleString('en-MY', { maximumFractionDigits: 0 })}
+              </span>
             </div>
-            <div className="w-px h-7 bg-white/10" />
-            <div>
-              <span className="text-[#9AA6A1] block text-[10px] uppercase font-semibold">Saved Rate</span>
-              <span className="text-[#E5B85C] font-bold text-sm whitespace-nowrap tabular-nums">{annualSummary.savingsRate.toFixed(1)}%</span>
+            <div className="min-w-0">
+              <span className="text-[#9AA6A1] block text-[10px] uppercase tracking-wider font-semibold">
+                Saved Rate
+              </span>
+              <span className="text-[#E5B85C] font-semibold text-xs sm:text-base tabular-nums mt-1 block truncate">
+                {annualSummary.savingsRate.toFixed(1)}%
+              </span>
             </div>
           </div>
         </div>
 
-        {/* Monthly Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+        {/* Monthly Savings Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {displayedSavingsMonths.map((m) => {
             const isSelected = selectedMonth === m.monthKey;
             const isNetPositive = m.saved >= 0;
 
             return (
-              <motion.div
+              <button
                 key={m.monthKey}
-                whileHover={{ y: -2 }}
-                transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
+                type="button"
                 onClick={() => {
                   setSelectedMonth(m.monthKey);
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
-                role="button"
-                tabIndex={0}
                 aria-label={`View savings for ${m.monthName}, saved RM ${m.saved.toFixed(2)}`}
-                className={`p-4 sm:p-5 rounded-2xl border transition-all cursor-pointer group ${
+                className={`text-left w-full p-5 rounded-3xl border transition-colors duration-200 cursor-pointer group ${
                   isSelected
-                    ? 'border-emerald-500/45 bg-emerald-500/[0.06] ring-1 ring-emerald-500/25'
-                    : 'border-black/[0.07] dark:border-white/[0.07] bg-black/[0.015] dark:bg-white/[0.02] hover:border-black/[0.15] dark:hover:border-white/[0.15]'
+                    ? 'border-emerald-500/50 bg-emerald-500/[0.06] ring-1 ring-emerald-500/20'
+                    : 'border-black/[0.07] dark:border-white/[0.08] bg-card hover:border-black/[0.16] dark:hover:border-white/[0.18]'
                 }`}
               >
-                {/* Top Row: Month Name & Badges */}
                 <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-sm sm:text-base text-foreground group-hover:text-emerald-700 dark:group-hover:text-emerald-300 transition-colors">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-semibold text-sm sm:text-base text-foreground truncate group-hover:text-emerald-700 dark:group-hover:text-emerald-400 transition-colors">
                       {m.monthName}
                     </span>
                     {m.isCurrent && (
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/12 text-amber-800 dark:text-amber-300 border border-amber-500/25">
-                        Current
-                      </span>
-                    )}
-                    {isSelected && (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-800 dark:text-emerald-400 border border-emerald-500/25">
-                        Selected
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-800 dark:text-amber-300 shrink-0">
+                        Now
                       </span>
                     )}
                   </div>
 
-                  <span className={`text-[11px] font-bold font-mono px-2.5 py-0.5 rounded-full ${
-                    isNetPositive
-                      ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-400 border border-emerald-500/30'
-                      : 'bg-rose-500/15 text-rose-800 dark:text-rose-400 border border-rose-500/30'
-                  }`}>
-                    {isNetPositive ? `${m.savingsRate.toFixed(1)}% Saved` : 'Deficit'}
+                  <span
+                    className={`text-[11px] font-semibold font-mono px-2.5 py-0.5 rounded-full shrink-0 ${
+                      isNetPositive
+                        ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-400'
+                        : 'bg-rose-500/15 text-rose-800 dark:text-rose-400'
+                    }`}
+                  >
+                    {isNetPositive ? `${m.savingsRate.toFixed(1)}% saved` : 'Deficit'}
                   </span>
                 </div>
 
-                {/* Net Saved Highlight */}
-                <div className="mt-3 flex items-baseline justify-between gap-2">
-                  <span className="text-xs text-slate-600 dark:text-zinc-400 uppercase tracking-wider font-semibold">Net Saved</span>
-                  <span className={`text-xl sm:text-2xl font-black font-mono tabular-nums whitespace-nowrap tracking-tight ${
-                    isNetPositive ? 'text-emerald-800 dark:text-emerald-400' : 'text-rose-800 dark:text-rose-400'
-                  }`}>
-                    {isNetPositive ? '+' : '-'}RM{'\u00A0'}{Math.abs(m.saved).toFixed(2)}
+                <div className="mt-4 flex items-baseline justify-between gap-2">
+                  <span className="text-xs text-muted-foreground font-medium">Net Saved</span>
+                  <span
+                    className={`text-xl sm:text-2xl font-bold font-mono tabular-nums tracking-tight ${
+                      isNetPositive
+                        ? 'text-emerald-700 dark:text-emerald-400'
+                        : 'text-rose-700 dark:text-rose-400'
+                    }`}
+                  >
+                    {isNetPositive ? '+' : '-'}RM{'\u00A0'}
+                    {Math.abs(m.saved).toLocaleString('en-MY', {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </span>
                 </div>
 
-                {/* Breakdown Bar (Income vs Expense) */}
-                <div className="mt-3 space-y-1.5">
+                <div className="mt-4 space-y-2">
                   <div className="flex items-center justify-between gap-2 text-xs font-mono tabular-nums">
-                    <span className="text-emerald-800 dark:text-emerald-400 flex items-center gap-1 font-medium whitespace-nowrap">
+                    <span className="text-emerald-700 dark:text-emerald-400 inline-flex items-center gap-1">
                       <ArrowDownRight className="h-3.5 w-3.5 shrink-0" />
                       RM{'\u00A0'}{m.income.toFixed(2)}
                     </span>
-                    <span className="text-rose-800 dark:text-rose-400 flex items-center gap-1 font-medium whitespace-nowrap">
+                    <span className="text-rose-700 dark:text-rose-400 inline-flex items-center gap-1">
                       <ArrowUpRight className="h-3.5 w-3.5 shrink-0" />
                       RM{'\u00A0'}{m.expense.toFixed(2)}
                     </span>
                   </div>
 
-                  <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden flex">
+                  <div className="h-1.5 w-full rounded-full bg-black/[0.06] dark:bg-white/[0.08] overflow-hidden flex">
                     {m.income > 0 ? (
                       <>
                         <div
-                          className="h-full bg-rose-500 transition-all"
+                          className="h-full bg-rose-500/85 transition-all duration-500"
                           style={{ width: `${Math.min(100, (m.expense / m.income) * 100)}%` }}
                         />
                         <div
-                          className="h-full bg-emerald-500 transition-all"
-                          style={{ width: `${Math.max(0, 100 - (m.expense / m.income) * 100)}%` }}
+                          className="h-full bg-emerald-500/85 transition-all duration-500"
+                          style={{
+                            width: `${Math.max(0, 100 - (m.expense / m.income) * 100)}%`,
+                          }}
                         />
                       </>
                     ) : (
-                      <div className="h-full w-full bg-slate-200 dark:bg-zinc-700" />
+                      <div className="h-full w-full bg-black/[0.08] dark:bg-white/[0.1]" />
                     )}
                   </div>
                 </div>
 
-                {/* Footer with transaction count and inspect cue */}
-                <div className="mt-3.5 pt-2.5 border-t border-black/[0.06] dark:border-white/[0.06] flex items-center justify-between text-[11px] text-muted-foreground font-mono">
+                <div className="mt-4 pt-3 border-t border-black/[0.06] dark:border-white/[0.06] flex items-center justify-between text-[11px] text-muted-foreground font-mono">
                   <span>{m.count} records</span>
-                  <span className="text-emerald-700 dark:text-emerald-400 font-semibold transition-colors flex items-center gap-0.5">
-                    <span>{isSelected ? 'Viewing Analytics' : 'Inspect Month'}</span>
+                  <span className="text-emerald-700 dark:text-emerald-400 font-semibold inline-flex items-center gap-0.5">
+                    <span>{isSelected ? 'Selected' : 'Inspect'}</span>
                     <ChevronRight className="h-3.5 w-3.5 group-hover:translate-x-0.5 transition-transform" />
                   </span>
                 </div>
-              </motion.div>
+              </button>
             );
           })}
         </div>
-      </div>
+      </section>
     </div>
   );
 }

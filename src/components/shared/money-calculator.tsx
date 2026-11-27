@@ -128,7 +128,7 @@ export function MoneyCalculator({
           aria-expanded={isOpen}
           className={`inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-[11px] font-bold border transition-all cursor-pointer touch-manipulation active:scale-95 ${
             isOpen
-              ? 'border-emerald-500 -emerald-/20 text-emerald-800 dark:text-emerald-200 shadow-sm'
+              ? 'border-emerald-500 bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 shadow-sm'
               : 'border-slate-200 dark:border-zinc-800 bg-slate-100/90 dark:bg-zinc-900/70 text-slate-700 dark:text-zinc-300 hover:border-emerald-500/40 hover:text-slate-950 dark:hover:text-white'
           }`}
         >
@@ -148,7 +148,7 @@ export function MoneyCalculator({
             <Check className="h-3 w-3" />
           </button>
         ) : lastHistory ? (
-          <span className="text-[10px] font-mono text-emerald-700 dark:text-emerald-300 -emerald-/10 border border-emerald-500/20 px-2 py-0.5 rounded-lg truncate max-w-[220px]">
+          <span className="text-[10px] font-mono text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-lg truncate max-w-[220px]">
             🧾 {lastHistory}
           </span>
         ) : null}
@@ -229,7 +229,7 @@ export function MoneyCalculator({
                 <button
                   type="button"
                   onClick={() => appendToken('÷')}
-                  className="min-h-[38px] rounded-xl border border-emerald-500/30 -emerald-/15 text-sm font-mono font-bold text-emerald-800 dark:text-emerald-300 -emerald-/25 transition-all cursor-pointer active:scale-95"
+                  className="min-h-[38px] rounded-xl border border-emerald-500/30 bg-emerald-500/15 text-sm font-mono font-bold text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/25 transition-all cursor-pointer active:scale-95"
                 >
                   ÷
                 </button>
@@ -248,7 +248,7 @@ export function MoneyCalculator({
                 <button
                   type="button"
                   onClick={() => appendToken('×')}
-                  className="min-h-[38px] rounded-xl border border-emerald-500/30 -emerald-/15 text-sm font-mono font-bold text-emerald-800 dark:text-emerald-300 -emerald-/25 transition-all cursor-pointer active:scale-95"
+                  className="min-h-[38px] rounded-xl border border-emerald-500/30 bg-emerald-500/15 text-sm font-mono font-bold text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/25 transition-all cursor-pointer active:scale-95"
                 >
                   ×
                 </button>

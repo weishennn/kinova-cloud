@@ -36,7 +36,7 @@ export default function NotFound() {
     <div className="min-h-[80vh] flex items-center justify-center p-4">
       <div className="w-full max-w-md rounded-3xl border border-emerald-500/20 bg-slate-900/90 dark:bg-zinc-950/90 backdrop-blur-2xl p-6 sm:p-8 text-center shadow-2xl space-y-5">
         {/* Animated Compass / Radar Icon */}
-        <div className="relative mx-auto w-16 h-16 rounded-2xl -emerald-/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-inner">
+        <div className="relative mx-auto w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-inner">
           <Compass className="w-8 h-8 animate-spin" style={{ animationDuration: '10s' }} />
           <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -46,7 +46,7 @@ export default function NotFound() {
 
         {/* Copy */}
         <div className="space-y-2">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full -emerald-/15 border border-emerald-500/25 text-emerald-300 text-xs font-mono font-medium">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/25 text-emerald-300 text-xs font-mono font-medium">
             <span>HTTP 404 · 找不到页面</span>
           </div>
           <h1 className="text-xl font-bold tracking-tight text-white">

@@ -144,7 +144,7 @@ export function WhatKinovaKnows() {
                 onClick={() => handleLanguageChange(opt.id as any)}
                 className={`py-2 px-3 rounded-xl text-xs font-medium border text-center transition-all cursor-pointer ${
                   profile.language === opt.id
-                    ? '-emerald-/15 border-emerald-500/40 text-emerald-900 dark:text-emerald-200 font-semibold'
+                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-900 dark:text-emerald-200 font-semibold'
                     : 'bg-slate-50 dark:bg-zinc-800/50 border-slate-200 dark:border-zinc-700/60 text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800'
                 }`}
               >

@@ -19,7 +19,7 @@ export default function PrivacyPolicyPage() {
           </div>
           <Link
             href="/"
-            className="text-xs font-semibold px-3 py-1.5 rounded-xl -emerald-/10 text-emerald-600 dark:text-emerald-400 -emerald-/20"
+            className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20"
           >
             Back to App
           </Link>

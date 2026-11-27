@@ -36,8 +36,8 @@ const CATEGORY_ICONS: Record<string, { icon: any; color: string }> = {
   'Family': { icon: Heart, color: 'text-rose-800 dark:text-rose-400 bg-rose-500/10 border-rose-500/20' },
   'Housing & Bills': { icon: Home, color: 'text-amber-800 dark:text-amber-400 bg-amber-500/10 border-amber-500/20' },
   'Bills': { icon: Wifi, color: 'text-cyan-800 dark:text-cyan-400 bg-cyan-500/10 border-cyan-500/20' },
-  'Transport': { icon: Car, color: 'text-emerald-800 dark:text-emerald-400 -emerald-/10 border-emerald-500/20' },
-  'Entertainment': { icon: Film, color: 'text-amber-800 dark:text-amber-400 bg-amber-600 -amber-/10 border-amber-500/20' },
+  'Transport': { icon: Car, color: 'text-emerald-800 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20' },
+  'Entertainment': { icon: Film, color: 'text-amber-800 dark:text-amber-400 bg-amber-500/10 border-amber-500/20' },
   'Food & Dining': { icon: Coffee, color: 'text-orange-800 dark:text-orange-400 bg-orange-500/10 border-orange-500/20' },
   'Shopping': { icon: ShoppingBag, color: 'text-emerald-800 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20' },
   'Sport': { icon: Activity, color: 'text-sky-800 dark:text-sky-400 bg-sky-500/10 border-sky-500/20' },
@@ -392,7 +392,7 @@ export function RecurringCommitments() {
           const earliestEffective = getCommitmentEarliestEffectiveMonth(item);
           const isScheduledFuture = !isCommitmentActiveInMonth(item, currentMonthStr);
           const currentRate = getCommitmentRateForMonth(item, currentMonthStr);
-          const iconConfig = CATEGORY_ICONS[item.category] || { icon: Shield, color: 'text-emerald-800 dark:text-emerald-400 -emerald-/10 border-emerald-500/20' };
+          const iconConfig = CATEGORY_ICONS[item.category] || { icon: Shield, color: 'text-emerald-800 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20' };
           const IconComponent = iconConfig.icon;
 
           // Check if recorded for this month

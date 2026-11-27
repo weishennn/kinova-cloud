@@ -265,7 +265,7 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
       <div className="rounded-3xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 p-5 backdrop-blur-xl space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-2xl -emerald-/15 border border-emerald-500/20 flex items-center justify-center text-emerald-800 dark:text-emerald-400 shrink-0">
+            <div className="h-10 w-10 rounded-2xl bg-emerald-500/15 border border-emerald-500/20 flex items-center justify-center text-emerald-800 dark:text-emerald-400 shrink-0">
               <CalendarIcon className="h-5 w-5" />
             </div>
             <div>
@@ -426,7 +426,7 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
                   onClick={() => setSelectedDateStr(dateStr)}
                   className={`min-h-[64px] sm:min-h-[72px] p-1.5 sm:p-2 rounded-2xl border text-left flex flex-col justify-between transition-all cursor-pointer select-none ${
                     isSelected
-                      ? 'border-emerald-500 -emerald-/20 shadow-lg scale-[1.02] z-10'
+                      ? 'border-emerald-500 bg-emerald-500/20 shadow-lg scale-[1.02] z-10'
                       : isToday
                       ? 'border-slate-400 dark:border-zinc-600 bg-white/90 dark:bg-zinc-900/90 shadow-sm'
                       : hasReceipt
@@ -449,7 +449,7 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
                       {hasReceipt && (
                         <span
                           title={`${dayData.receiptCount} receipt${dayData.receiptCount > 1 ? 's' : ''} attached`}
-                          className="inline-flex items-center justify-center h-4 min-w-[16px] px-1 rounded-full -emerald-/25 text-emerald-800 dark:text-emerald-300 border border-emerald-500/40 text-[9px] font-bold font-mono shadow-[0_0_8px_rgba(99,102,241,0.25)]"
+                          className="inline-flex items-center justify-center h-4 min-w-[16px] px-1 rounded-full bg-emerald-500/25 text-emerald-800 dark:text-emerald-300 border border-emerald-500/40 text-[9px] font-bold font-mono shadow-[0_0_8px_rgba(99,102,241,0.25)]"
                         >
                           <Receipt className="h-2.5 w-2.5" />
                           {dayData.receiptCount > 1 && <span className="ml-0.5">{dayData.receiptCount}</span>}
@@ -506,7 +506,7 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
                   <button
                     type="button"
                     onClick={() => onOpenRangeDownload?.(selectedDateStr, selectedDateStr)}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg -emerald-/20 -emerald-/30 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold transition-colors cursor-pointer"
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold transition-colors cursor-pointer"
                     title="Download receipts for this day"
                   >
                     <Download className="h-3 w-3" />
@@ -528,7 +528,7 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
                   <button
                     type="button"
                     onClick={handleAddOnSelectedDate}
-                    className="mt-1 px-3 py-1.5 rounded-xl -emerald-/20 -emerald-/30 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                    className="mt-1 px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
                     <Plus className="h-3.5 w-3.5" />
                     <span>Record on {selectedDateStr}</span>
@@ -567,7 +567,7 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
                                 {t.description || t.category}
                               </p>
                               {hasReceipt && (
-                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md -emerald-/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30 text-[9px] font-bold shrink-0">
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30 text-[9px] font-bold shrink-0">
                                   <CheckCircle2 className="h-2.5 w-2.5 text-emerald-800 dark:text-emerald-400" />
                                   <span>Receipt</span>
                                 </span>
@@ -642,7 +642,7 @@ export function ClaimsCalendar({ transactions, invoices = [], onOpenRangeDownloa
                               onClick={() => {
                                 downloadReceiptFile(t.receiptUrl!, claimFileName);
                               }}
-                              className="min-h-[36px] px-2.5 py-1.5 rounded-xl -emerald-/20 -emerald-/30 text-emerald-800 dark:text-emerald-300 hover:text-emerald-800 dark:hover:text-emerald-200 text-xs font-semibold flex items-center gap-1.5 border border-emerald-500/30 transition-colors cursor-pointer active:scale-[0.96]"
+                              className="min-h-[36px] px-2.5 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-800 dark:text-emerald-300 hover:text-emerald-800 dark:hover:text-emerald-200 text-xs font-semibold flex items-center gap-1.5 border border-emerald-500/30 transition-colors cursor-pointer active:scale-[0.96]"
                               title="Download receipt for claim"
                             >
                               <Download className="h-3.5 w-3.5" />

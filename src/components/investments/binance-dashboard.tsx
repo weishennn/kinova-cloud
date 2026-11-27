@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { AnimatedNumber } from '@/components/shared/animated-number';
+import { ThemeChartTooltip } from '@/components/shared/theme-chart-tooltip';
 import { CockpitPageHeading } from '@/components/money-cockpit/cockpit-page-heading';
 import { CockpitModal, CockpitModalHeader } from '@/components/money-cockpit/cockpit-modal';
 import { confirmAction } from '@/stores/confirm-dialog-store';
@@ -679,7 +680,7 @@ export function BinanceDashboard() {
         >
           <div className="flex items-center justify-between">
             <span className="text-[11px] uppercase tracking-wider text-slate-600 dark:text-zinc-400 font-semibold">Net Funded In</span>
-            <div className="h-8 w-8 rounded-xl -emerald-/10 text-emerald-700 dark:text-emerald-400 flex items-center justify-center border border-emerald-500/20">
+            <div className="h-8 w-8 rounded-xl bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 flex items-center justify-center border border-emerald-500/20">
               <Wallet className="h-4 w-4" />
             </div>
           </div>
@@ -752,7 +753,7 @@ export function BinanceDashboard() {
         >
           <div className="flex items-center justify-between">
             <span className="text-[11px] uppercase tracking-wider text-slate-600 dark:text-zinc-400 font-semibold">True Net Return</span>
-            <div className="h-8 w-8 rounded-xl bg-amber-600 -amber-/10 text-amber-700 dark:text-amber-400 flex items-center justify-center border border-amber-500/20">
+            <div className="h-8 w-8 rounded-xl bg-amber-500/10 text-amber-700 dark:text-amber-400 flex items-center justify-center border border-amber-500/20">
               <DollarSign className="h-4 w-4" />
             </div>
           </div>
@@ -796,18 +797,7 @@ export function BinanceDashboard() {
                       <Cell key={`cell-${idx}`} fill={entry.color} />
                     ))}
                   </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#0f172a',
-                      borderColor: 'rgba(255,255,255,0.12)',
-                      borderRadius: '14px',
-                      color: '#f8fafc',
-                    }}
-                    formatter={(val: unknown) => [
-                      `${moneyPrefix}${Number(val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-                      'Value',
-                    ]}
-                  />
+                  <Tooltip content={<ThemeChartTooltip currencyPrefix={moneyPrefix} />} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
@@ -956,10 +946,10 @@ export function BinanceDashboard() {
                         <div>
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="font-bold text-base text-slate-950 dark:text-white">{h.asset}</span>
-                            {h.assetKind === 'Stock' && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold -emerald-/15 text-emerald-800 dark:text-emerald-300">Stock</span>}
+                            {h.assetKind === 'Stock' && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/15 text-emerald-800 dark:text-emerald-300">Stock</span>}
                             {h.spotQty > 0 && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/15 text-amber-800 dark:text-amber-300">Spot</span>}
                             {h.fundingQty > 0 && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-500/15 text-blue-800 dark:text-blue-300">Funding</span>}
-                            {h.equityQty > 0 && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-600 -amber-/15 text-amber-800 dark:text-amber-300">Equity</span>}
+                            {h.equityQty > 0 && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/15 text-amber-800 dark:text-amber-300">Equity</span>}
                             {h.status === 'closed' && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">Closed</span>}
                           </div>
                           <div className="text-xs font-mono text-slate-500 dark:text-zinc-400 mt-0.5">
@@ -1004,7 +994,7 @@ export function BinanceDashboard() {
                                 });
                                 setIsCalcModalOpen(true);
                               }}
-                              className="px-2.5 py-1 rounded-lg -emerald-/10 text-emerald-700 dark:text-emerald-300 font-sans font-semibold text-[11px]"
+                              className="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-sans font-semibold text-[11px]"
                             >
                               Target Price
                             </button>
@@ -1048,7 +1038,7 @@ export function BinanceDashboard() {
                             <div className="flex items-center gap-2">
                               <span className="font-bold text-slate-950 dark:text-white">{h.asset}</span>
                               {h.assetKind === 'Stock' && (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold -emerald-/15 text-emerald-700 dark:text-emerald-300">Stock</span>
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">Stock</span>
                               )}
                               {h.isStablecoin && (
                                 <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">Cash</span>
@@ -1076,7 +1066,7 @@ export function BinanceDashboard() {
                                 </span>
                               )}
                               {h.equityQty > 1e-8 && (
-                                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-600 -amber-/15 text-amber-800 dark:text-amber-300">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/15 text-amber-800 dark:text-amber-300">
                                   Equity: {fmtQty(h.equityQty)}
                                 </span>
                               )}
@@ -1148,7 +1138,7 @@ export function BinanceDashboard() {
                                   });
                                   setIsCalcModalOpen(true);
                                 }}
-                                className="px-2.5 py-1.5 rounded-xl -emerald-/10 -emerald-/20 text-emerald-700 dark:text-emerald-300 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                                className="px-2.5 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
                               >
                                 <Calculator className="h-3.5 w-3.5" />
                                 <span>Target</span>

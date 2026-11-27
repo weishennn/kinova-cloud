@@ -285,6 +285,32 @@ input[type="date"]::-webkit-date-and-time-value {
   55%, 100% { background-position: -120% 0; opacity: 0; }
 }
 
+/* Obsidian & Jade Wealth Atelier utilities */
+.atelier-surface {
+  border-radius: 1.5rem;
+  border: 1px solid var(--border);
+  background-color: var(--card);
+}
+
+.atelier-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1.75rem;
+  background: linear-gradient(135deg, #0B1210 0%, #101D18 52%, #080C0A 100%);
+  border: 1px solid rgba(16, 185, 129, 0.22);
+  color: #F5F4EF;
+  box-shadow: 0 20px 50px -24px rgba(4, 24, 18, 0.65);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 /* Mobile iOS Safe Area Utilities */
 .pb-safe {
   padding-bottom: 1rem;

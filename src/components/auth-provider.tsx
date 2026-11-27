@@ -547,7 +547,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Welcome / Login Choice Screen (No PIN required)
   if (!authenticated) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-black p-4 text-slate-950 dark:text-white selection:-emerald-/30">
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-black p-4 text-slate-950 dark:text-white selection:bg-emerald-500/30">
         <motion.div
           initial={{ opacity: 0, scale: 0.95, y: 15 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -568,13 +568,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           </div>
 
           {/* Option 1: Sign in with Google (Recommended) */}
-          <div className="rounded-2xl border border-emerald-500/30 -emerald-/[0.04] p-4 space-y-3">
+          <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/[0.04] p-4 space-y-3">
             <div className="flex items-start gap-2.5">
               <HardDrive className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
               <div className="text-xs space-y-0.5">
                 <div className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <span>Google Drive Cloud Sync</span>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold -emerald-/15 text-emerald-600 dark:text-emerald-300">
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-300">
                     Recommended
                   </span>
                 </div>

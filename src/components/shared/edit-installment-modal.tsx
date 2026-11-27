@@ -360,7 +360,7 @@ function EditInstallmentContent({
                   <button
                     type="button"
                     onClick={shiftToNextMonth}
-                    className="px-2.5 py-1 rounded-lg bg-amber-600 -amber-/20 hover:bg-amber-600 -amber-/30 text-amber-800 dark:text-amber-300 border border-amber-500/30 text-[11px] font-semibold transition-all cursor-pointer shadow-sm active:scale-95"
+                    className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-800 dark:text-amber-300 border border-amber-500/30 text-[11px] font-semibold transition-all cursor-pointer shadow-sm active:scale-95"
                     title="Move start date +1 month forward"
                   >
                     📅 Start Next Month
@@ -486,7 +486,7 @@ function EditInstallmentContent({
                     onClick={() => setHasInterest(true)}
                     className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
                       hasInterest
-                        ? 'border-amber-500 bg-amber-600 -amber-/20 text-amber-800 dark:text-amber-300'
+                        ? 'border-amber-500 bg-amber-500/20 text-amber-800 dark:text-amber-300'
                         : 'border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-500 dark:text-zinc-400 hover:text-slate-700 dark:hover:text-zinc-300'
                     }`}
                   >

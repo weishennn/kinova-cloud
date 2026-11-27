@@ -369,7 +369,7 @@ export function DateRangeDownloadModal({
                         onClick={() => applyPreset(preset)}
                         className={`px-2.5 py-1 rounded-lg text-[10px] sm:text-[11px] font-medium transition-all cursor-pointer ${
                           isActive
-                            ? '-emerald-/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/50 shadow-[0_0_10px_rgba(99,102,241,0.2)] font-semibold'
+                            ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/50 shadow-[0_0_10px_rgba(99,102,241,0.2)] font-semibold'
                             : 'bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white border border-transparent'
                         }`}
                       >
@@ -466,7 +466,7 @@ export function DateRangeDownloadModal({
                         onClick={() => toggleSelectOne(inv.id)}
                         className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 hover:shadow-lg hover:shadow-emerald-500/10 active:scale-[0.99] ${
                           isChecked
-                            ? 'border-emerald-500/50 -emerald-/10 shadow-[0_0_15px_rgba(99,102,241,0.15)]'
+                            ? 'border-emerald-500/50 bg-emerald-500/10 shadow-[0_0_15px_rgba(99,102,241,0.15)]'
                             : 'border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 hover:bg-white/90 dark:hover:bg-zinc-900/80'
                         }`}
                       >

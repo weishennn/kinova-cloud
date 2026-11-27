@@ -281,7 +281,7 @@ export function AttachReceiptModal({
                 className="h-12 w-12 rounded-xl object-cover border border-slate-200 dark:border-white/10 shrink-0"
               />
             ) : (
-              <div className="h-12 w-12 rounded-xl -emerald-/15 border border-emerald-500/30 flex items-center justify-center text-emerald-800 dark:text-emerald-400 shrink-0">
+              <div className="h-12 w-12 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-800 dark:text-emerald-400 shrink-0">
                 <FileText className="h-6 w-6" />
               </div>
             )}
@@ -337,7 +337,7 @@ export function AttachReceiptModal({
                       onClick={() => setFilterAllDates(!filterAllDates)}
                       className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border transition-all cursor-pointer ${
                         filterAllDates
-                          ? '-emerald-/20 text-emerald-800 dark:text-emerald-200 border-emerald-500/40'
+                          ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 border-emerald-500/40'
                           : 'bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 border-slate-200 dark:border-zinc-800 hover:text-slate-950 dark:hover:text-white'
                       }`}
                     >
@@ -401,7 +401,7 @@ export function AttachReceiptModal({
                           onClick={() => setSelectedTxId(tx.id)}
                           className={`flex items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer touch-manipulation ${
                             isSelected
-                              ? '-emerald-/15 border-emerald-500/50 shadow-md ring-1 ring-emerald-500/30'
+                              ? 'bg-emerald-500/15 border-emerald-500/50 shadow-md ring-1 ring-emerald-500/30'
                               : 'bg-white/90 dark:bg-zinc-900/50 border-slate-200 dark:border-white/[0.06] hover:bg-white dark:hover:bg-zinc-900 hover:border-slate-300 dark:hover:border-zinc-700'
                           }`}
                         >

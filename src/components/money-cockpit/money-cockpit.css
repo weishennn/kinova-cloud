@@ -64,8 +64,8 @@
 .cockpit-module-page [class*="border-slate-200"] { border-color: var(--cockpit-line); }
 .cockpit-module-page [class*="shadow-xl"][class*="rounded-3xl"],
 .cockpit-module-page [class*="shadow-lg"][class*="rounded-3xl"] { box-shadow: 0 1px 3px rgba(18, 20, 23, 0.04), 0 8px 24px -12px rgba(18, 20, 23, 0.06); }
-.cockpit-module-page [class*="rounded-3xl"][class*="border"][class*="bg-"]:not([class*="border-dashed"]) { border-color: var(--cockpit-line); background: var(--cockpit-surface) !important; box-shadow: 0 1px 3px rgba(18, 20, 23, 0.04), 0 8px 24px -12px rgba(18, 20, 23, 0.05); }
-.dark .cockpit-module-page [class*="rounded-3xl"][class*="border"][class*="bg-"]:not([class*="border-dashed"]) { box-shadow: 0 2px 14px rgba(0, 0, 0, .24), inset 0 1px 0 rgba(255, 255, 255, .04); }
+.cockpit-module-page [class*="rounded-3xl"][class*="border"][class*="bg-"]:not([class*="border-dashed"]):not([class*="bg-gradient-"]):not(.atelier-hero) { border-color: var(--cockpit-line); background: var(--cockpit-surface) !important; box-shadow: 0 1px 3px rgba(18, 20, 23, 0.04), 0 8px 24px -12px rgba(18, 20, 23, 0.05); }
+.dark .cockpit-module-page [class*="rounded-3xl"][class*="border"][class*="bg-"]:not([class*="border-dashed"]):not([class*="bg-gradient-"]):not(.atelier-hero) { box-shadow: 0 2px 14px rgba(0, 0, 0, .24), inset 0 1px 0 rgba(255, 255, 255, .04); }
 .cockpit-module-page .cockpit-segmented-control { background: var(--cockpit-well) !important; border-color: var(--cockpit-line) !important; }
 .cockpit-module-page .cockpit-segmented-pill { background: var(--cockpit-surface) !important; border-color: var(--cockpit-line-strong) !important; box-shadow: 0 1px 3px rgba(18, 20, 23, .08) !important; }
 .cockpit-page-actions .cockpit-primary-action,

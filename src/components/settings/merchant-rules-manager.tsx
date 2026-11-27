@@ -317,7 +317,7 @@ export function MerchantRulesManager() {
           <div className="min-w-0 flex-1">
             <h2 className="text-base font-bold text-slate-950 dark:text-white tracking-tight flex flex-wrap items-center gap-2">
               <span>Gemini 习惯记忆与智能体规则中心</span>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-600 -amber-/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 shrink-0">
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 shrink-0">
                 {habits.length} 项已记住
               </span>
             </h2>
@@ -366,7 +366,7 @@ export function MerchantRulesManager() {
 
       {/* Staged candidates hint */}
       {candidates.length > 0 && !pendingPlan && (
-        <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 rounded-2xl bg-emerald-50/80 -emerald-/10 border border-emerald-200/80 dark:border-emerald-500/25 text-xs text-emerald-900 dark:text-emerald-200">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 rounded-2xl bg-emerald-50/80 dark:bg-emerald-500/10 border border-emerald-200/80 dark:border-emerald-500/25 text-xs text-emerald-900 dark:text-emerald-200">
           <span>
             💡 当前有 <strong>{candidates.length}</strong> 条消费词正在观察区待筛选，可点击「<strong>AI 优化记忆</strong>」让 Gemini 筛选真正值得记住的模式与字眼。
           </span>
@@ -402,7 +402,7 @@ export function MerchantRulesManager() {
           </div>
 
           {!pendingPlan.plan.hasChanges ? (
-            <div className="p-3 rounded-xl bg-emerald-50 -emerald-/10 border border-emerald-200 dark:border-emerald-500/30 text-xs text-emerald-900 dark:text-emerald-200 flex items-center justify-between gap-2">
+            <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/30 text-xs text-emerald-900 dark:text-emerald-200 flex items-center justify-between gap-2">
               <span>✅ 当前习惯记忆已经很精简且触发字眼合理，暂无需清理或调整。</span>
               <button
                 type="button"
@@ -452,7 +452,7 @@ export function MerchantRulesManager() {
                 return (
                   <label
                     key={key}
-                    className="flex items-start gap-2.5 p-2.5 rounded-xl bg-amber-50/90 -amber-/10 border border-amber-200 dark:border-amber-500/30 text-xs cursor-pointer"
+                    className="flex items-start gap-2.5 p-2.5 rounded-xl bg-amber-50/90 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 text-xs cursor-pointer"
                   >
                     <input
                       type="checkbox"
@@ -507,7 +507,7 @@ export function MerchantRulesManager() {
                     />
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="font-semibold text-slate-900 dark:text-white flex flex-wrap items-center gap-1.5">
-                        <span className="px-1.5 py-0.5 rounded -emerald-/20 text-emerald-700 dark:text-emerald-300 text-[10px]">
+                        <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px]">
                           优化字眼/别名
                         </span>
                         <span className="break-words">{u.rawPattern}</span>
@@ -521,7 +521,7 @@ export function MerchantRulesManager() {
                           {u.keywords.map((kw) => (
                             <span
                               key={kw}
-                              className="px-1.5 py-0.5 rounded -emerald-/10 border border-emerald-500/25 text-[10px] font-medium text-emerald-800 dark:text-emerald-200"
+                              className="px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/25 text-[10px] font-medium text-emerald-800 dark:text-emerald-200"
                             >
                               字眼: {kw}
                             </span>
@@ -543,7 +543,7 @@ export function MerchantRulesManager() {
                 return (
                   <label
                     key={key}
-                    className="flex items-start gap-2.5 p-2.5 rounded-xl bg-emerald-50/90 -emerald-/10 border border-emerald-200 dark:border-emerald-500/30 text-xs cursor-pointer"
+                    className="flex items-start gap-2.5 p-2.5 rounded-xl bg-emerald-50/90 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/30 text-xs cursor-pointer"
                   >
                     <input
                       type="checkbox"
@@ -743,7 +743,7 @@ export function MerchantRulesManager() {
                       {isAlias ? (
                         <>
                           <ArrowRight className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                          <span className="font-bold text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded-md bg-amber-600 -amber-/15 border border-amber-500/30 break-words max-w-full">
+                          <span className="font-bold text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 break-words max-w-full">
                             {item.preferredAlias}
                           </span>
                         </>
@@ -751,7 +751,7 @@ export function MerchantRulesManager() {
                         <span className="text-slate-400 dark:text-zinc-500">➔</span>
                       )}
 
-                      <span className="px-2 py-0.5 rounded-md bg-emerald-50 -emerald-/15 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30 text-[11px] font-medium shrink-0">
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30 text-[11px] font-medium shrink-0">
                         {item.category}
                       </span>
 
@@ -787,7 +787,7 @@ export function MerchantRulesManager() {
                             setEditingKeywordsText((item.keywords || []).join(', '));
                           }
                         }}
-                        className="px-2 py-1 rounded-lg text-[10px] font-medium text-emerald-600 dark:text-emerald-300 hover:bg-emerald-50 -emerald-/15 transition-colors cursor-pointer flex items-center gap-1"
+                        className="px-2 py-1 rounded-lg text-[10px] font-medium text-emerald-600 dark:text-emerald-300 hover:bg-emerald-50 dark:bg-emerald-500/15 transition-colors cursor-pointer flex items-center gap-1"
                         title="编辑触发字眼 / 简称"
                       >
                         <Tag className="h-3 w-3" />

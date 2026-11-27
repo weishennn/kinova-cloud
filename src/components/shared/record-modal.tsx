@@ -1736,7 +1736,7 @@ export function RecordPaymentModal() {
             className="mt-3 space-y-2.5 sm:mt-5 sm:space-y-5"
           >
             {shortcutDraft && (
-              <div className="rounded-2xl border border-emerald-500/35 -emerald-/10 p-3 sm:p-3.5 space-y-2.5 text-xs">
+              <div className="rounded-2xl border border-emerald-500/35 bg-emerald-500/10 p-3 sm:p-3.5 space-y-2.5 text-xs">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <span className="font-bold text-emerald-950 dark:text-emerald-200 flex items-center gap-1.5">
                     <Sparkles className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
@@ -1949,7 +1949,7 @@ export function RecordPaymentModal() {
                 {type === 'Investment' && (
                   <motion.div
                     layoutId="record-modal-type-indicator"
-                    className="absolute inset-0 z-0 rounded-xl -emerald-/20 border border-emerald-500/40 shadow-sm pointer-events-none"
+                    className="absolute inset-0 z-0 rounded-xl bg-emerald-500/20 border border-emerald-500/40 shadow-sm pointer-events-none"
                     transition={{ type: 'spring' as const, stiffness: 450, damping: 30 }}
                   />
                 )}
@@ -1979,7 +1979,7 @@ export function RecordPaymentModal() {
                         onClick={() => setTransactionCurrency(code)}
                         className={`px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold border transition-all cursor-pointer ${
                           transactionCurrency === code
-                            ? 'border-emerald-500 -emerald-/20 text-emerald-900 dark:text-emerald-200'
+                            ? 'border-emerald-500 bg-emerald-500/20 text-emerald-900 dark:text-emerald-200'
                             : 'border-slate-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
                         }`}
                       >
@@ -2046,7 +2046,7 @@ export function RecordPaymentModal() {
                     proactiveHabit.matchedVia === 'compact' ||
                     proactiveHabit.matchedVia === 'stem') &&
                   description.trim().toLowerCase() !== proactiveHabit.resolvedDescription.toLowerCase() && (
-                  <div className="mt-1 flex items-center justify-between gap-1.5 p-1.5 rounded-lg bg-amber-600 -amber-/15 border border-amber-500/30 text-[11px] text-amber-900 dark:text-amber-200">
+                  <div className="mt-1 flex items-center justify-between gap-1.5 p-1.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-[11px] text-amber-900 dark:text-amber-200">
                     <span className="truncate">
                       ✨ {proactiveHabit.matchedVia === 'keyword' || proactiveHabit.matchedVia === 'compact' || proactiveHabit.matchedVia === 'stem'
                         ? <>字眼 <strong>{proactiveHabit.matchedToken || proactiveHabit.matchedPattern}</strong></>
@@ -2090,7 +2090,7 @@ export function RecordPaymentModal() {
               <div className="flex items-center justify-between gap-2">
                 <span id="record-category-label" className="text-xs font-semibold text-slate-700 dark:text-zinc-300 uppercase tracking-wider">Category</span>
                 {type === 'Expense' && (tripTag || activeTripForDate || category === 'Stay & Hotel' || category === 'Flights') && (
-                  <span className="text-[10px] font-semibold text-emerald-800 dark:text-emerald-300 -emerald-/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
+                  <span className="text-[10px] font-semibold text-emerald-800 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
                     ✈️ Trip Categories Synced (Stay &amp; Flights)
                   </span>
                 )}
@@ -2111,7 +2111,7 @@ export function RecordPaymentModal() {
                     aria-label={`Select category ${cat.name}`}
                     className={`min-h-[54px] sm:min-h-[58px] flex flex-col items-center justify-center px-1.5 py-2 sm:p-2 rounded-xl sm:rounded-2xl border text-center transition-all cursor-pointer touch-manipulation select-none active:scale-[0.95] ${
                       category === cat.name
-                        ? 'border-emerald-500 -emerald-/25 text-slate-950 dark:text-white shadow-[0_0_15px_rgba(99,102,241,0.25)] ring-1 ring-emerald-500/50'
+                        ? 'border-emerald-500 bg-emerald-500/25 text-slate-950 dark:text-white shadow-[0_0_15px_rgba(99,102,241,0.25)] ring-1 ring-emerald-500/50'
                         : 'border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/50 text-slate-700 dark:text-zinc-300 hover:border-slate-300 dark:hover:border-zinc-700 hover:text-slate-950 dark:hover:text-white'
                     }`}
                   >
@@ -2276,7 +2276,7 @@ export function RecordPaymentModal() {
 
             {/* Merchant Category Rule Memory Toggle ("我改过一次，下次更省事") */}
             {showRememberCategoryPrompt && (
-              <div className="flex items-center gap-2.5 p-3 rounded-2xl -emerald-/10 border border-emerald-500/25 text-xs text-emerald-900 dark:text-emerald-200 shadow-sm">
+              <div className="flex items-center gap-2.5 p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 text-xs text-emerald-900 dark:text-emerald-200 shadow-sm">
                 <input
                   type="checkbox"
                   id="rememberMerchantRule"
@@ -2295,7 +2295,7 @@ export function RecordPaymentModal() {
               <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/40 p-2.5 sm:p-3.5 space-y-2.5">
                 <div className="flex items-center justify-between gap-2.5">
                   <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <div className="p-1.5 sm:p-2 rounded-xl bg-amber-600 -amber-/15 text-amber-800 dark:text-amber-400 border border-amber-500/20 shrink-0">
+                    <div className="p-1.5 sm:p-2 rounded-xl bg-amber-500/15 text-amber-800 dark:text-amber-400 border border-amber-500/20 shrink-0">
                       <CreditCard className="h-4 w-4" />
                     </div>
                     <div className="min-w-0">
@@ -2343,7 +2343,7 @@ export function RecordPaymentModal() {
                             onClick={() => setFirstPaymentDate(date)}
                             className={`px-2 py-0.5 rounded-lg text-[10px] font-semibold border transition-all cursor-pointer ${
                               firstPaymentDate === date
-                                ? 'border-amber-500 bg-amber-600 -amber-/30 text-amber-800 dark:text-amber-200'
+                                ? 'border-amber-500 bg-amber-500/30 text-amber-800 dark:text-amber-200'
                                 : 'border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200'
                             }`}
                           >
@@ -2363,7 +2363,7 @@ export function RecordPaymentModal() {
                             }}
                             className={`px-2 py-0.5 rounded-lg text-[10px] font-semibold border transition-all cursor-pointer ${
                               firstPaymentDate !== date
-                                ? 'border-amber-500 bg-amber-600 -amber-/30 text-amber-800 dark:text-amber-200'
+                                ? 'border-amber-500 bg-amber-500/30 text-amber-800 dark:text-amber-200'
                                 : 'border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200'
                             }`}
                           >
@@ -2448,7 +2448,7 @@ export function RecordPaymentModal() {
                             onClick={() => setHasInterest(true)}
                             className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
                               hasInterest
-                                ? 'border-amber-500 bg-amber-600 -amber-/20 text-amber-800 dark:text-amber-300'
+                                ? 'border-amber-500 bg-amber-500/20 text-amber-800 dark:text-amber-300'
                                 : 'border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-500 dark:text-zinc-400 hover:text-slate-700 dark:hover:text-zinc-300'
                             }`}
                           >
@@ -2512,7 +2512,7 @@ export function RecordPaymentModal() {
             {type === 'Investment' && (
               <div className="space-y-3">
                 {/* Stock/Crypto Guidance Banner */}
-                <div className="flex items-center justify-between p-3 rounded-2xl -emerald-/10 border border-emerald-500/25 text-xs text-emerald-800 dark:text-emerald-300">
+                <div className="flex items-center justify-between p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 text-xs text-emerald-800 dark:text-emerald-300">
                   <div className="flex items-center gap-2">
                     <TrendingUp className="h-4 w-4 text-emerald-800 dark:text-emerald-400 shrink-0" />
                     <span>Trading US Stocks, Bursa or Crypto?</span>
@@ -2534,7 +2534,7 @@ export function RecordPaymentModal() {
                         <Lock className="h-4 w-4 text-emerald-800 dark:text-emerald-400" />
                         <span className="text-xs font-bold text-slate-950 dark:text-white uppercase tracking-wider">Fixed Deposit Terms</span>
                       </div>
-                      <span className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-400 -emerald-/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
+                      <span className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
                         Smart Calculator
                       </span>
                     </div>
@@ -2550,7 +2550,7 @@ export function RecordPaymentModal() {
                             onClick={() => handleFdBankChange(b)}
                             className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
                               fdBank === b
-                                ? 'border-emerald-500 -emerald-/20 text-emerald-800 dark:text-emerald-300'
+                                ? 'border-emerald-500 bg-emerald-500/20 text-emerald-800 dark:text-emerald-300'
                                 : 'border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/60 text-slate-600 dark:text-zinc-400 hover:border-slate-300 dark:hover:border-zinc-700'
                             }`}
                           >
@@ -2635,7 +2635,7 @@ export function RecordPaymentModal() {
                           onClick={() => handleAsnbFundChange(f)}
                           className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
                             asnbFund === f
-                              ? 'border-emerald-500 -emerald-/20 text-emerald-800 dark:text-emerald-300'
+                              ? 'border-emerald-500 bg-emerald-500/20 text-emerald-800 dark:text-emerald-300'
                               : 'border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 hover:border-slate-300 dark:hover:border-zinc-700'
                           }`}
                         >
@@ -2661,7 +2661,7 @@ export function RecordPaymentModal() {
                           onClick={() => handleEpfAccountChange(acc)}
                           className={`p-2.5 rounded-xl text-xs font-semibold border text-center transition-all cursor-pointer ${
                             epfAccount === acc
-                              ? 'border-emerald-500 -emerald-/20 text-emerald-800 dark:text-emerald-300 shadow-sm'
+                              ? 'border-emerald-500 bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 shadow-sm'
                               : 'border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 hover:border-slate-300 dark:hover:border-zinc-700'
                           }`}
                         >
@@ -2714,7 +2714,7 @@ export function RecordPaymentModal() {
 
                 {/* Case 1: In-Trip Date Auto-Detect (e.g. 20/9 - 30/9 Chengdu Trip) */}
                 {suggestedTrip ? (
-                  <div className="p-3.5 rounded-2xl -emerald-/10 border border-emerald-500/30 space-y-2">
+                  <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 space-y-2">
                     <label className="flex items-start gap-3 cursor-pointer">
                       <input
                         type="checkbox"
@@ -2739,7 +2739,7 @@ export function RecordPaymentModal() {
                             <span className="text-xs font-bold text-slate-950 dark:text-white">
                             Tag to {suggestedTrip.name}
                           </span>
-                          <span className="text-[10px] px-2 py-0.5 rounded-full font-bold -emerald-/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30">
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30">
                             Active Trip
                           </span>
                         </div>
@@ -3187,7 +3187,7 @@ export function RecordPaymentModal() {
                        type="button"
                        onClick={() => void handleScanReceipt()}
                        disabled={isScanningReceipt}
-                       className="inline-flex min-h-[36px] shrink-0 items-center gap-1.5 rounded-xl border border-emerald-500/30 -emerald-/10 px-2.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 -emerald-/20 disabled:opacity-50 cursor-pointer touch-manipulation"
+                       className="inline-flex min-h-[36px] shrink-0 items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-2.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50 cursor-pointer touch-manipulation"
                      >
                        {isScanningReceipt ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
                        <span>{isScanningReceipt ? 'Scanning' : 'Scan'}</span>

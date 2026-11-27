@@ -27,6 +27,7 @@ import {
 import { getLocalDateString } from '@/lib/date-helper';
 import { useLockBodyScroll } from '@/hooks/useLockBodyScroll';
 import { AnimatedNumber } from '@/components/shared/animated-number';
+import { ThemeChartTooltip } from '@/components/shared/theme-chart-tooltip';
 import { CockpitPageHeading } from '@/components/money-cockpit/cockpit-page-heading';
 import { CockpitModal, CockpitModalHeader } from '@/components/money-cockpit/cockpit-modal';
 import { MoneyCalculator } from '@/components/shared/money-calculator';
@@ -1398,8 +1399,7 @@ export default function InvestmentsPage() {
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          whileHover={{ y: -4, scale: 1.01 }}
-          transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
+          transition={{ duration: 0.2 }}
           className="p-4 sm:p-5 rounded-3xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 backdrop-blur-xl shadow-lg hover:border-emerald-500/40 transition-colors specular-card"
         >
           <div className="flex items-center justify-between">
@@ -1426,8 +1426,7 @@ export default function InvestmentsPage() {
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          whileHover={{ y: -4, scale: 1.01 }}
-          transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
+          transition={{ duration: 0.2 }}
           className="p-4 sm:p-5 rounded-3xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 backdrop-blur-xl shadow-lg hover:border-emerald-500/40 transition-colors specular-card"
         >
           <div className="flex items-center justify-between">
@@ -1454,13 +1453,12 @@ export default function InvestmentsPage() {
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          whileHover={{ y: -4, scale: 1.01 }}
-          transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
+          transition={{ duration: 0.2 }}
           className="p-4 sm:p-5 rounded-3xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 backdrop-blur-xl shadow-lg hover:border-amber-500/40 transition-colors specular-card"
         >
           <div className="flex items-center justify-between">
             <span className="text-[11px] sm:text-xs uppercase tracking-wider text-slate-600 dark:text-zinc-400 font-semibold">Capital Invested</span>
-            <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-xl bg-amber-600 -amber-/10 flex items-center justify-center text-amber-800 dark:text-amber-400 border border-amber-500/20 shadow-sm">
+            <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-xl bg-amber-500/10 flex items-center justify-center text-amber-800 dark:text-amber-400 border border-amber-500/20 shadow-sm">
               <DollarSign className="h-4 w-4" />
             </div>
           </div>
@@ -1476,8 +1474,7 @@ export default function InvestmentsPage() {
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          whileHover={{ y: -4, scale: 1.01 }}
-          transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
+          transition={{ duration: 0.2 }}
           className="p-4 sm:p-5 rounded-3xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 backdrop-blur-xl shadow-lg hover:border-amber-500/40 transition-colors specular-card col-span-2 sm:col-span-1"
         >
           <div className="flex items-center justify-between">
@@ -1580,10 +1577,7 @@ export default function InvestmentsPage() {
                           <Cell key={`cell-${index}`} fill={entry.color} />
                         ))}
                       </Pie>
-                      <Tooltip
-                        contentStyle={{ backgroundColor: '#0f172a', borderColor: 'rgba(255,255,255,0.12)', borderRadius: '16px', color: '#f8fafc', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}
-                        formatter={(val: any) => [`RM ${Number(val).toFixed(2)}`, 'Market Value']}
-                      />
+                      <Tooltip content={<ThemeChartTooltip />} />
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
@@ -1661,7 +1655,7 @@ export default function InvestmentsPage() {
           {/* Holdings Table */}
           {displayedPositions.length === 0 ? (
             <div className="py-16 text-center rounded-3xl border border-dashed border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/20 p-8">
-              <div className="h-12 w-12 rounded-2xl -emerald-/10 text-emerald-800 dark:text-emerald-400 mx-auto flex items-center justify-center mb-3">
+              <div className="h-12 w-12 rounded-2xl bg-emerald-500/10 text-emerald-800 dark:text-emerald-400 mx-auto flex items-center justify-center mb-3">
                 <TrendingUp className="h-6 w-6" />
               </div>
               <h3 className="text-base font-semibold text-slate-950 dark:text-white">
@@ -1915,7 +1909,7 @@ export default function InvestmentsPage() {
         <div className="space-y-4">
           {trades.length === 0 ? (
             <div className="py-16 text-center rounded-3xl border border-dashed border-slate-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/20 p-8">
-              <div className="h-12 w-12 rounded-2xl -emerald-/10 text-emerald-800 dark:text-emerald-400 mx-auto flex items-center justify-center mb-3">
+              <div className="h-12 w-12 rounded-2xl bg-emerald-500/10 text-emerald-800 dark:text-emerald-400 mx-auto flex items-center justify-center mb-3">
                 <History className="h-6 w-6" />
               </div>
               <h3 className="text-base font-semibold text-slate-950 dark:text-white">No Trades Logged Yet</h3>
@@ -1938,7 +1932,7 @@ export default function InvestmentsPage() {
                       <div className="flex items-center gap-3">
                         <span className={`px-2.5 py-1 rounded-xl text-xs font-bold ${
                           t.action === 'BUY'
-                            ? '-emerald-/20 text-emerald-800 dark:text-emerald-300'
+                            ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300'
                             : t.action === 'SELL'
                             ? 'bg-rose-500/20 text-rose-800 dark:text-rose-300'
                             : (t.action === 'REINVEST' || t.isReinvested || t.notes.toLowerCase().includes('reinvest'))
@@ -2004,7 +1998,7 @@ export default function InvestmentsPage() {
                           <td className="p-4">
                             <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
                               t.action === 'BUY'
-                                ? '-emerald-/20 text-emerald-800 dark:text-emerald-300'
+                                ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300'
                                 : t.action === 'SELL'
                                 ? 'bg-rose-500/20 text-rose-800 dark:text-rose-300'
                                 : (t.action === 'REINVEST' || t.isReinvested || t.notes.toLowerCase().includes('reinvest'))
@@ -2147,7 +2141,7 @@ export default function InvestmentsPage() {
                               isSelected
                                 ? tradeAction === 'SELL'
                                   ? 'bg-rose-500/20 border-rose-500/50 text-rose-800 dark:text-rose-300'
-                                  : '-emerald-/20 border-emerald-500/50 text-emerald-800 dark:text-emerald-300'
+                                  : 'bg-emerald-500/20 border-emerald-500/50 text-emerald-800 dark:text-emerald-300'
                                 : 'bg-white/80 dark:bg-zinc-900/60 border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-emerald-500/40'
                             }`}
                           >
@@ -2245,7 +2239,7 @@ export default function InvestmentsPage() {
                             key={item.symbol}
                             type="button"
                             onClick={() => selectStockItem(item)}
-                            className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left -emerald-/20 transition-colors group cursor-pointer"
+                            className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left hover:bg-emerald-500/20 transition-colors group cursor-pointer"
                           >
                             <div className="min-w-0 pr-2">
                               <div className="flex items-center gap-1.5">
@@ -2404,7 +2398,7 @@ export default function InvestmentsPage() {
                         {tradeAction === 'BUY' ? `Net Total Paid (${currency})` : `Net Proceeds (${currency})`}
                       </label>
                     </div>
-                    <div className="w-full rounded-xl border border-emerald-500/30 -emerald-/10 dark:bg-emerald-950/20 p-2.5 text-sm text-emerald-900 dark:text-emerald-300 font-mono font-bold flex items-center justify-between">
+                    <div className="w-full rounded-xl border border-emerald-500/30 bg-emerald-500/10 dark:bg-emerald-950/20 p-2.5 text-sm text-emerald-900 dark:text-emerald-300 font-mono font-bold flex items-center justify-between">
                       <span>{currency}</span>
                       <span>
                         {(() => {
@@ -2884,7 +2878,7 @@ export default function InvestmentsPage() {
                     setTargetCalcAsset(found);
                     setIsTargetCalcOpen(true);
                   }}
-                  className="w-full py-2.5 px-4 rounded-2xl border border-emerald-500/30 -emerald-/10 -emerald-/20 active:scale-[0.98] text-emerald-800 dark:text-emerald-300 font-semibold text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full py-2.5 px-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 active:scale-[0.98] text-emerald-800 dark:text-emerald-300 font-semibold text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Target className="h-4 w-4" />
                   <span>Target Cost Price Calculator</span>

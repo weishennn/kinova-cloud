@@ -218,7 +218,7 @@ export function TargetCostCalculatorCard({
                 key={pct}
                 type="button"
                 onClick={() => applyTargetDiscount(pct)}
-                className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-100 dark:bg-zinc-800 -emerald-/15 text-slate-700 dark:text-zinc-300 cursor-pointer"
+                className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-100 dark:bg-zinc-800 hover:bg-emerald-500/15 text-slate-700 dark:text-zinc-300 cursor-pointer"
               >
                 -{pct}%
               </button>

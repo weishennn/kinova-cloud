@@ -787,7 +787,7 @@ export default function SettingsPage() {
         <div className="rounded-3xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 p-6 backdrop-blur-xl space-y-6 specular-card">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl -emerald-/15 text-emerald-800 dark:text-emerald-400 border border-emerald-500/30 shadow-lg">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-800 dark:text-emerald-400 border border-emerald-500/30 shadow-lg">
                 <Database className="h-6 w-6" />
               </div>
               <div>
@@ -1135,7 +1135,7 @@ export default function SettingsPage() {
                       </div>
                     )}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-                      <div className="p-2 rounded-lg -emerald-/10 border border-emerald-500/20 text-emerald-800 dark:text-emerald-200">
+                      <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-800 dark:text-emerald-200">
                         <div className="font-semibold">This Device Edit:</div>
                         <div className="truncate font-mono text-[10px] mt-0.5">
                           {JSON.stringify(c.clientRecord)}
@@ -1293,7 +1293,7 @@ export default function SettingsPage() {
                 <div>
                   <h3 className="text-sm font-bold text-slate-950 dark:text-white flex items-center gap-2">
                     <span>Google Sheet Full Synchronization</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold -emerald-/10 text-emerald-800 dark:text-emerald-400 border border-emerald-500/20">
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-800 dark:text-emerald-400 border border-emerald-500/20">
                       Cloud SOT
                     </span>
                   </h3>
@@ -1427,7 +1427,7 @@ export default function SettingsPage() {
                       type="button"
                       onClick={handleCreateDriveSnapshot}
                       disabled={isBackingUp}
-                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-500/30 -emerald-/10 -emerald-/20 text-emerald-800 dark:text-emerald-300 text-xs font-semibold transition-all cursor-pointer disabled:opacity-50"
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 text-xs font-semibold transition-all cursor-pointer disabled:opacity-50"
                     >
                       <Archive className="h-3.5 w-3.5" />
                       <span>{isBackingUp ? 'Saving...' : 'Create Snapshot Now'}</span>
@@ -1497,7 +1497,7 @@ export default function SettingsPage() {
                               type="button"
                               onClick={() => handleTestRestoreBackup(snap.id, snap.name)}
                               disabled={isTestingRestoreId !== null || isRestoringBackupId !== null}
-                              className="px-2.5 py-1 rounded-lg -emerald-/15 -emerald-/25 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                              className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
                             >
                               {isTestingRestoreId === snap.id ? 'Testing...' : 'Test Restore (Dry Run)'}
                             </button>
@@ -1758,7 +1758,7 @@ export default function SettingsPage() {
                                 {item.differingRecords.map(({ phoneRecord }: any, idx: number) => (
                                   <span
                                     key={phoneRecord.id || idx}
-                                    className="px-2 py-1 rounded-lg -emerald-/10 border border-emerald-500/20 text-emerald-800 dark:text-emerald-200 text-[11px]"
+                                    className="px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-800 dark:text-emerald-200 text-[11px]"
                                   >
                                     {phoneRecord.name} (Device: {phoneRecord.currency || 'MYR'} {phoneRecord.amount ?? phoneRecord.monthlyAmount ?? 0})
                                   </span>
@@ -1887,7 +1887,7 @@ export default function SettingsPage() {
 
         <div className="rounded-3xl border border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40 p-6 backdrop-blur-xl space-y-5 specular-card">
           <div className="flex items-start gap-3">
-            <div className="h-10 w-10 rounded-xl -emerald-/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+            <div className="h-10 w-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
               <Smartphone className="h-5 w-5" />
             </div>
             <div className="space-y-1">
@@ -1901,7 +1901,7 @@ export default function SettingsPage() {
           </div>
 
           {/* Privacy & AI Disclosure */}
-          <div className="rounded-2xl border border-emerald-500/25 -emerald-/5 p-3.5 text-xs text-slate-700 dark:text-zinc-300 space-y-1">
+          <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/5 p-3.5 text-xs text-slate-700 dark:text-zinc-300 space-y-1">
             <div className="font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
               <ShieldCheck className="h-4 w-4 shrink-0" />
               隐私、密钥与第三方 AI 处理说明
@@ -2018,7 +2018,7 @@ export default function SettingsPage() {
           <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-950/60 p-4 space-y-2.5">
             <div className="font-bold text-xs text-slate-900 dark:text-white flex items-center justify-between">
               <span>方案一：背面轻点两下截图 →「Kinova 快速记账」</span>
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full -emerald-/15 text-emerald-600 dark:text-emerald-400">支持快捷指令 iCloud 同步</span>
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">支持快捷指令 iCloud 同步</span>
             </div>
             <ol className="list-decimal list-inside text-xs text-slate-600 dark:text-zinc-400 space-y-1.5 leading-relaxed">
               <li>打开 iPhone <strong>快捷指令 (Shortcuts)</strong> App，新建快捷指令并命名为 <strong>「Kinova 快速记账」</strong>。</li>

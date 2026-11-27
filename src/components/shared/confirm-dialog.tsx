@@ -83,7 +83,7 @@ export function ConfirmDialog() {
                   ? 'bg-rose-500/15 text-rose-800 dark:text-rose-400 border-rose-500/30 shadow-[0_0_24px_rgba(244,63,94,0.25)]'
                   : isWarning
                   ? 'bg-amber-500/15 text-amber-800 dark:text-amber-400 border-amber-500/30 shadow-[0_0_24px_rgba(245,158,11,0.25)]'
-                  : '-emerald-/15 text-emerald-800 dark:text-emerald-400 border-emerald-500/30 shadow-[0_0_24px_rgba(99,102,241,0.25)]'
+                  : 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-400 border-emerald-500/30 shadow-[0_0_24px_rgba(99,102,241,0.25)]'
               }`}>
                 {options.icon === 'alert' || isWarning ? (
                   <AlertTriangle className="h-7 w-7" />

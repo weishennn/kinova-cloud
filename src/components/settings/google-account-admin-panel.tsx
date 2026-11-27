@@ -122,7 +122,7 @@ export function GoogleAccountAndAdminPanel() {
                 className="h-12 w-12 rounded-2xl object-cover border border-slate-200 dark:border-zinc-700"
               />
             ) : (
-              <div className="h-12 w-12 rounded-2xl -emerald-/10 border border-emerald-500/20 flex items-center justify-center text-emerald-500 font-bold text-lg">
+              <div className="h-12 w-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-500 font-bold text-lg">
                 {googleUser?.name ? googleUser.name.charAt(0).toUpperCase() : isLocalMode ? 'L' : 'G'}
               </div>
             )}

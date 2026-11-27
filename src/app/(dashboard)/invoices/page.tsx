@@ -723,8 +723,7 @@ export default function InvoicesPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Card 1: Circular Relief Gauge */}
                 <motion.div
-                  whileHover={{ y: -4, scale: 1.01 }}
-                  transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
+                  transition={{ duration: 0.2 }}
                   className="rounded-3xl border border-black/[0.08] dark:border-white/[0.08] bg-card p-6 text-center  flex flex-col justify-between shadow-[0_1px_2px_rgba(17,20,24,0.03)] hover:border-emerald-500/40 transition-colors specular-card"
                 >
                   <div className="relative mx-auto h-48 w-48">
@@ -779,8 +778,7 @@ export default function InvoicesPage() {
 
                 {/* Card 2: LHDN Receipt Readiness & Missing Receipt Alert Card */}
                 <motion.div
-                  whileHover={{ y: -4, scale: 1.01 }}
-                  transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
+                  transition={{ duration: 0.2 }}
                   className={`rounded-3xl border p-6 backdrop-blur-xl shadow-xl transition-colors flex flex-col justify-between space-y-4 specular-card ${
                     taxReliefSummary.missingReceiptCount > 0
                       ? 'border-amber-500/30 bg-gradient-to-br from-amber-950/25 via-slate-100 dark:via-zinc-900/50 to-white dark:to-zinc-950 hover:border-amber-500/50'
@@ -921,7 +919,7 @@ export default function InvoicesPage() {
                       ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/40'
                       : taxReliefSummary.settlementStatus === 'pay_extra'
                       ? 'bg-rose-500/20 text-rose-800 dark:text-rose-300 border border-rose-500/40'
-                      : '-emerald-/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/40'
+                      : 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/40'
                   }`}>
                     {taxReliefSummary.settlementStatus === 'refund'
                       ? `🎉 Est. Tax Refund: +RM\u00A0${taxReliefSummary.refundAmount.toFixed(2)}`
@@ -1196,7 +1194,7 @@ export default function InvoicesPage() {
                         <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-zinc-400">
                           3. Estimated LHDN Tax
                         </span>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded -emerald-/15 text-emerald-800 dark:text-emerald-300 font-mono">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 font-mono">
                           {taxReliefSummary.effectiveMarginalTaxRate}% Bracket
                         </span>
                       </div>
@@ -1412,7 +1410,7 @@ export default function InvoicesPage() {
                         onClick={() => setTaxViewFilter(f.id)}
                         className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
                           taxViewFilter === f.id
-                            ? '-emerald-/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30'
+                            ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30'
                             : 'text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white'
                         }`}
                       >
@@ -1465,7 +1463,7 @@ export default function InvoicesPage() {
                             </span>
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                               isMaxedOut
-                                ? '-emerald-/20 text-emerald-800 dark:text-emerald-300'
+                                ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300'
                                 : percentUsed > 70
                                 ? 'bg-amber-500/20 text-amber-800 dark:text-amber-300'
                                 : totalSpent > 0
@@ -1668,7 +1666,7 @@ export default function InvoicesPage() {
                                                 <button
                                                   type="button"
                                                   onClick={() => downloadReceiptFile(tx.receiptUrl!, claimFileName)}
-                                                  className="p-1.5 rounded-lg bg-slate-100 dark:bg-zinc-800 -emerald-/20 text-slate-700 dark:text-zinc-300 hover:text-emerald-800 dark:hover:text-emerald-300 transition-colors cursor-pointer"
+                                                  className="p-1.5 rounded-lg bg-slate-100 dark:bg-zinc-800 hover:bg-emerald-500/20 text-slate-700 dark:text-zinc-300 hover:text-emerald-800 dark:hover:text-emerald-300 transition-colors cursor-pointer"
                                                   title="Download Receipt"
                                                 >
                                                   <Download className="h-3.5 w-3.5" />
@@ -1732,7 +1730,7 @@ export default function InvoicesPage() {
                     fileInputRef.current?.click();
                   }
                 }}
-                className="group relative flex cursor-pointer flex-col items-center justify-center rounded-3xl border-2 border-dashed border-slate-200 dark:border-zinc-800/60 bg-white/90 dark:bg-zinc-900/30 backdrop-blur-sm py-10 transition-all hover:border-emerald-500/40 -emerald-/5 overflow-hidden"
+                className="group relative flex cursor-pointer flex-col items-center justify-center rounded-3xl border-2 border-dashed border-slate-200 dark:border-zinc-800/60 bg-white/90 dark:bg-zinc-900/30 backdrop-blur-sm py-10 transition-all hover:border-emerald-500/40 hover:bg-emerald-500/5 overflow-hidden"
               >
                 {/* Subtle particle/sparkle effect background on hover */}
                 <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-700 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-emerald-500/10 via-transparent to-transparent" />
@@ -1902,7 +1900,7 @@ export default function InvoicesPage() {
                               {/* Download Button */}
                               <button
                                 onClick={() => downloadReceiptFile(inv.url, claimFileName)}
-                                className="p-1.5 rounded-lg text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white -emerald-/20 hover:text-emerald-800 dark:hover:text-emerald-300 transition-colors cursor-pointer"
+                                className="p-1.5 rounded-lg text-slate-600 dark:text-zinc-400 hover:text-slate-950 dark:hover:text-white hover:bg-emerald-500/20 hover:text-emerald-800 dark:hover:text-emerald-300 transition-colors cursor-pointer"
                                 title="Download for Claim"
                               >
                                 <Download className="h-3.5 w-3.5" />
