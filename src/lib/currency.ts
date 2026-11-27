@@ -80,17 +80,17 @@ export function formatCurrency(
   if (!showSymbol) return formatted;
   
   const symbol = currencyInfo?.symbol || currencyCode;
-  return `${symbol} ${formatted}`;
+  return `${symbol}\u00A0${formatted}`;
 }
 
 export function formatAssetCurrency(val: number, curr = 'USD'): string {
   const c = (curr || 'USD').toUpperCase();
   if (c === 'USD') return `$${val.toFixed(2)}`;
-  if (c === 'MYR') return `RM ${val.toFixed(2)}`;
+  if (c === 'MYR') return `RM\u00A0${val.toFixed(2)}`;
   if (c === 'SGD') return `S$${val.toFixed(2)}`;
   if (c === 'CNY') return `¥${val.toFixed(2)}`;
   if (c === 'HKD') return `HK$${val.toFixed(2)}`;
-  return `${c} ${val.toFixed(2)}`;
+  return `${c}\u00A0${val.toFixed(2)}`;
 }
 
 export function formatPnl(pnl: number, curr = 'USD'): string {
@@ -98,11 +98,11 @@ export function formatPnl(pnl: number, curr = 'USD'): string {
   const absVal = Math.abs(pnl);
   const c = (curr || 'USD').toUpperCase();
   if (c === 'USD') return `${sign}$${absVal.toFixed(2)}`;
-  if (c === 'MYR') return `${sign}RM ${absVal.toFixed(2)}`;
+  if (c === 'MYR') return `${sign}RM\u00A0${absVal.toFixed(2)}`;
   if (c === 'SGD') return `${sign}S$${absVal.toFixed(2)}`;
   if (c === 'CNY') return `${sign}¥${absVal.toFixed(2)}`;
   if (c === 'HKD') return `${sign}HK$${absVal.toFixed(2)}`;
-  return `${sign}${c} ${absVal.toFixed(2)}`;
+  return `${sign}${c}\u00A0${absVal.toFixed(2)}`;
 }
 
 /**

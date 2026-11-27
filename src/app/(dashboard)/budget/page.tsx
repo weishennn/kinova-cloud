@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import Link from 'next/link';
 import { motion } from 'framer-motion';
 import {
   AlertCircle, Wallet, Edit2, Check, Inbox, Sparkles,
   Clock, TrendingDown, TrendingUp, ShieldAlert, ArrowUpRight, DollarSign, X,
-  Calendar, ChevronLeft, ChevronRight, RotateCcw,
+  RotateCcw,
   ShieldCheck, Utensils, Info, CheckCircle2, Sliders, Lock, Unlock
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -14,7 +15,9 @@ import { addUnifiedRow, applyOptimisticAddToQueryCache } from '@/hooks/useSheets
 import { useTransactions } from '@/hooks/useTransactions';
 import { AnimatedNumber } from '@/components/shared/animated-number';
 import { CockpitPageHeading } from '@/components/money-cockpit/cockpit-page-heading';
+import { PeriodBar } from '@/components/shared/period-bar';
 import { getAmountInBaseCurrency } from '@/lib/currency';
+import { buildPeriodCatalog, formatPeriodDisplay } from '@/lib/period-helper';
 import { useAppStore } from '@/stores/app-store';
 import { RecurringCommitments } from '@/components/dashboard/recurring-commitments';
 import { InstallmentDashboard } from '@/components/dashboard/installment-dashboard';
@@ -60,125 +63,12 @@ export default function BudgetPage() {
   const { transactions = [] } = useTransactions(selectedMonth ? { period: selectedMonth } : undefined);
   const { transactions: allTransactions = [] } = useTransactions({ period: 'all' });
 
-  // Active month in YYYY-MM format, e.g. "2026-10"
-  const currentMonthStr = useMemo(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  }, []);
+  const { currentMonth: currentMonthStr, months: allAvailableMonths } = useMemo(
+    () => buildPeriodCatalog(sheetMonths, selectedMonth, transactions),
+    [sheetMonths, selectedMonth, transactions]
+  );
 
-  const currentMonthShort = useMemo(() => {
-    const [y, m] = currentMonthStr.split('-').map(Number);
-    if (!isNaN(y) && !isNaN(m)) {
-      return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'short' });
-    }
-    return 'Current';
-  }, [currentMonthStr]);
-
-  // Extract all available years and months from transactions + current year/month
-  const { availableYears, monthsByYear, allAvailableMonths } = useMemo(() => {
-    const [curY] = currentMonthStr.split('-').map(Number);
-    const curYStr = String(curY);
-    const activeYears = new Set<number>([curY, curY - 1, curY + 1]);
-
-    sheetMonths.forEach(m => {
-      if (/^\d{4}-\d{2}$/.test(m)) activeYears.add(Number(m.substring(0, 4)));
-    });
-
-    transactions.forEach(t => {
-      if (t.date && t.date.length >= 7 && /^\d{4}-\d{2}/.test(t.date)) {
-        activeYears.add(Number(t.date.substring(0, 4)));
-      }
-    });
-
-    if (selectedMonth?.startsWith('year-')) {
-      const selY = Number(selectedMonth.slice(5));
-      if (Number.isFinite(selY) && selY >= 2000 && selY <= 2100) activeYears.add(selY);
-    } else if (selectedMonth && /^\d{4}-\d{2}$/.test(selectedMonth)) {
-      const selY = Number(selectedMonth.slice(0, 4));
-      if (Number.isFinite(selY) && selY >= 2000 && selY <= 2100) activeYears.add(selY);
-    }
-
-    const monthSet = new Set<string>([currentMonthStr]);
-    activeYears.forEach(yr => {
-      for (let m = 1; m <= 12; m++) {
-        monthSet.add(`${yr}-${String(m).padStart(2, '0')}`);
-      }
-    });
-
-    const sortedMonths = Array.from(monthSet).sort((a, b) => b.localeCompare(a));
-
-    const byYear: Record<string, string[]> = {};
-    const yearSet = new Set<string>();
-
-    sortedMonths.forEach(m => {
-      const y = m.substring(0, 4);
-      yearSet.add(y);
-      if (!byYear[y]) byYear[y] = [];
-      byYear[y].push(m);
-    });
-
-    const sortedYears = Array.from(yearSet).sort((a, b) => {
-      if (a === curYStr) return -1;
-      if (b === curYStr) return 1;
-      return b.localeCompare(a);
-    });
-
-    return {
-      availableYears: sortedYears,
-      monthsByYear: byYear,
-      allAvailableMonths: sortedMonths
-    };
-  }, [transactions, sheetMonths, currentMonthStr, selectedMonth]);
-
-  const handlePrevMonth = () => {
-    if (selectedMonth.startsWith('year-')) {
-      const y = selectedMonth.replace('year-', '');
-      setSelectedMonth(`${y}-12`);
-      return;
-    }
-    if (selectedMonth === 'all') {
-      const [y, m] = currentMonthStr.split('-').map(Number);
-      const prevDate = new Date(y, m - 2, 1);
-      const prevStr = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
-      setSelectedMonth(prevStr);
-      return;
-    }
-    const [y, m] = selectedMonth.split('-').map(Number);
-    if (!isNaN(y) && !isNaN(m)) {
-      const prevDate = new Date(y, m - 2, 1);
-      const prevStr = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
-      setSelectedMonth(prevStr);
-    }
-  };
-
-  const handleNextMonth = () => {
-    if (selectedMonth.startsWith('year-')) {
-      const y = selectedMonth.replace('year-', '');
-      setSelectedMonth(`${y}-01`);
-      return;
-    }
-    if (selectedMonth === 'all') {
-      setSelectedMonth(currentMonthStr);
-      return;
-    }
-    const [y, m] = selectedMonth.split('-').map(Number);
-    if (!isNaN(y) && !isNaN(m)) {
-      const nextDate = new Date(y, m, 1);
-      const nextStr = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
-      setSelectedMonth(nextStr);
-    }
-  };
-
-  const formatMonthLabel = (mStr: string) => {
-    if (mStr === 'all') return 'All Time (Accumulated)';
-    if (mStr.startsWith('year-')) {
-      return `Full Year ${mStr.replace('year-', '')}`;
-    }
-    const [y, m] = mStr.split('-').map(Number);
-    if (isNaN(y) || isNaN(m)) return mStr;
-    const d = new Date(y, m - 1, 1);
-    return d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-  };
+  const formatMonthLabel = (mStr: string) => formatPeriodDisplay(mStr);
 
   // Scoped transactions & expenses for selected month or full year
   const monthlyTransactions = useMemo(() => {
@@ -562,100 +452,16 @@ export default function BudgetPage() {
         )}
       />
 
-      {/* Month Selector Bar with Year Optgroups */}
-      <div className="bg-white/90 dark:bg-zinc-900/60 p-3.5 sm:p-4 rounded-3xl border border-slate-200 dark:border-white/[0.08] backdrop-blur-xl shadow-lg space-y-3 specular-card">
-        {/* Header: Label + Selected Month */}
-        <div className="flex items-center justify-between gap-2 min-h-[44px]">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="p-2 rounded-xl bg-indigo-500/15 text-indigo-700 dark:text-indigo-400 border border-indigo-500/20 shrink-0">
-              <Calendar className="h-4 w-4" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider block">Budgeting Period</span>
-                {selectedMonth === currentMonthStr && (
-                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/25">
-                    Current
-                  </span>
-                )}
-              </div>
-              <span className="text-sm sm:text-base font-bold text-slate-950 dark:text-white tracking-tight truncate block">{formatMonthLabel(selectedMonth)}</span>
-            </div>
-          </div>
-          {selectedMonth !== currentMonthStr ? (
-            <button
-              type="button"
-              onClick={() => setSelectedMonth(currentMonthStr)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 active:scale-95 text-indigo-700 dark:text-indigo-300 border border-indigo-500/25 text-xs font-semibold transition-all cursor-pointer shadow-xs shrink-0"
-              title={`Jump back to current month (${formatMonthLabel(currentMonthStr)})`}
-              aria-label={`Jump back to current month (${formatMonthLabel(currentMonthStr)})`}
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              <span>{currentMonthShort} (Current)</span>
-            </button>
-          ) : (
-            <span className="text-[11px] text-slate-500 dark:text-zinc-400 hidden sm:inline">Filter monthly budget</span>
-          )}
-        </div>
-
-        {/* Navigation Box: Stepper (Prev/Next) + Dropdown */}
-        <div className="flex items-center gap-1.5 rounded-2xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-950/60 p-1 w-full max-w-full overflow-hidden">
-          <div className="flex items-center gap-1 shrink-0">
-            <button
-              type="button"
-              onClick={handlePrevMonth}
-              className="min-w-[40px] min-h-[40px] p-2 rounded-xl bg-white/90 dark:bg-zinc-900/80 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white transition-colors cursor-pointer border border-slate-200 dark:border-white/[0.06] active:scale-95 flex items-center justify-center shrink-0"
-              title="Previous Month"
-              aria-label="Previous Month"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-
-            <button
-              type="button"
-              onClick={handleNextMonth}
-              className="min-w-[40px] min-h-[40px] p-2 rounded-xl bg-white/90 dark:bg-zinc-900/80 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white transition-colors cursor-pointer border border-slate-200 dark:border-white/[0.06] active:scale-95 flex items-center justify-center shrink-0"
-              title="Next Month"
-              aria-label="Next Month"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-
-          <select
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-            className="min-h-[40px] flex-1 min-w-0 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/90 px-3 py-1.5 text-xs font-semibold text-slate-950 dark:text-white outline-none focus:border-indigo-500 cursor-pointer transition-colors font-mono text-center truncate"
-            aria-label="Select month or year"
-          >
-            {availableYears.map(year => {
-              const curYStr = currentMonthStr.substring(0, 4);
-              const yLabel =
-                year === curYStr
-                  ? `── ${year} (Current Year) ──`
-                  : Number(year) === Number(curYStr) - 1
-                  ? `── ${year} (Last Year) ──`
-                  : Number(year) === Number(curYStr) + 1
-                  ? `── ${year} (Next Year) ──`
-                  : `── Year ${year} ──`;
-              return (
-                <optgroup key={year} label={yLabel} className="bg-white dark:bg-zinc-950 text-indigo-800 dark:text-indigo-400 font-bold">
-                  <option value={`year-${year}`} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono font-semibold">
-                    Full Year {year} (Annual Target)
-                  </option>
-                  {monthsByYear[year]?.map(m => (
-                    <option key={m} value={m} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono">
-                      {m === currentMonthStr ? `${formatMonthLabel(m)} (Current)` : formatMonthLabel(m)}
-                    </option>
-                  ))}
-                </optgroup>
-              );
-            })}
-            <option value="all" className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono">
-              All Time (Accumulated)
-            </option>
-          </select>
-        </div>
+      {/* Unified Period Selector */}
+      <div className="bg-white/90 dark:bg-zinc-900/60 p-3.5 sm:p-4 rounded-3xl border border-slate-200 dark:border-white/[0.08] backdrop-blur-xl shadow-lg specular-card">
+        <PeriodBar
+          selectedMonth={selectedMonth}
+          onSelectMonth={setSelectedMonth}
+          sheetMonths={sheetMonths}
+          transactions={transactions}
+          selectId="budget-period-select"
+          selectAriaLabel="Select month or year for budget"
+        />
       </div>
 
       {/* Hero Overview Grid: Circular Progress + Daily Safe-to-Spend Limit */}
@@ -668,7 +474,7 @@ export default function BudgetPage() {
         >
           <div className="relative mx-auto h-48 w-48">
             <svg className="h-full w-full" viewBox="0 0 100 100">
-              <circle cx="50" cy="50" r="45" fill="none" stroke="#27272a" strokeWidth="8" />
+              <circle cx="50" cy="50" r="45" fill="none" strokeWidth="8" className="stroke-slate-200 dark:stroke-zinc-800" />
               <motion.circle
                 cx="50" cy="50" r="45"
                 fill="none"
@@ -717,7 +523,7 @@ export default function BudgetPage() {
             <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-zinc-400">
               <span className="font-medium">Budget Protection Breakdown</span>
               <span className="font-mono text-slate-900 dark:text-white font-semibold">
-                RM {effectiveBudget.toLocaleString()}
+                RM{'\u00A0'}{effectiveBudget.toLocaleString()}
               </span>
             </div>
             <div className="h-2.5 w-full rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden flex">
@@ -745,12 +551,12 @@ export default function BudgetPage() {
             <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500 dark:text-zinc-400">
               <span className="flex items-center gap-1">
                 <span className="h-2 w-2 rounded-full bg-indigo-500" />
-                <span>Spent: <strong>RM {totalSpent.toFixed(0)}</strong></span>
+                <span>Spent: <strong>RM{'\u00A0'}{totalSpent.toFixed(0)}</strong></span>
               </span>
               {heroUnpaidReserve > 0 && (
                 <span className="flex items-center gap-1 text-amber-700 dark:text-amber-400 font-medium">
                   <span className="h-2 w-2 rounded-full bg-amber-500" />
-                  <span>Bills Reserved: <strong>RM {heroUnpaidReserve.toFixed(0)}</strong></span>
+                  <span>Bills Reserved: <strong>RM{'\u00A0'}{heroUnpaidReserve.toFixed(0)}</strong></span>
                 </span>
               )}
               <span className="flex items-center gap-1 text-emerald-700 dark:text-emerald-400 font-medium">
@@ -760,7 +566,7 @@ export default function BudgetPage() {
             </div>
             {tripQuarantinedSpent > 0 && (
               <div className="text-[10px] text-slate-500 dark:text-zinc-400 text-left">
-                ✈️ Trip spend <span className="font-mono font-semibold">RM {tripQuarantinedSpent.toFixed(0)}</span> quarantined in Trip Envelopes (excluded above)
+                ✈️ Trip spend <span className="font-mono font-semibold">RM{'\u00A0'}{tripQuarantinedSpent.toFixed(0)}</span> quarantined in Trip Envelopes (excluded above)
               </div>
             )}
           </div>
@@ -820,15 +626,15 @@ export default function BudgetPage() {
                 ? 'Choose a month or year to see a time-based daily allowance.'
                 : dailyInfo.isPastMonth
                 ? dailyInfo.isOverBudget
-                  ? `⚠️ This ${isYearMode ? 'year' : 'month'} concluded over budget by RM ${dailyInfo.overAmount.toFixed(2)} (${dailyInfo.spentPercent}% used).`
-                  : `🎉 This ${isYearMode ? 'year' : 'month'} concluded successfully with RM ${dailyInfo.remainingBudget.toFixed(2)} remaining under budget (${dailyInfo.spentPercent}% used).`
+                  ? `⚠️ This ${isYearMode ? 'year' : 'month'} concluded over budget by RM\u00A0${dailyInfo.overAmount.toFixed(2)} (${dailyInfo.spentPercent}% used).`
+                  : `🎉 This ${isYearMode ? 'year' : 'month'} concluded successfully with RM\u00A0${dailyInfo.remainingBudget.toFixed(2)} remaining under budget (${dailyInfo.spentPercent}% used).`
                 : dailyInfo.isOverBudget
-                ? `⚠️ You have exceeded your ${isYearMode ? 'annual' : 'monthly'} limit by RM ${dailyInfo.overAmount.toFixed(2)}. Avoid non-essential expenses for the next ${dailyInfo.daysRemaining} days.`
+                ? `⚠️ You have exceeded your ${isYearMode ? 'annual' : 'monthly'} limit by RM\u00A0${dailyInfo.overAmount.toFixed(2)}. Avoid non-essential expenses for the next ${dailyInfo.daysRemaining} days.`
                 : heroUnpaidReserve > 0 && dailyInfo.safeRemainingBudget <= 0
-                ? `📌 RM ${heroUnpaidReserve.toFixed(2)} is reserved for upcoming unpaid commitments/installments, leaving RM 0.00 in free discretionary allowance.`
+                ? `📌 RM\u00A0${heroUnpaidReserve.toFixed(2)} is reserved for upcoming unpaid commitments/installments, leaving RM\u00A00.00 in free discretionary allowance.`
                 : dailyInfo.spentPercent > 80
-                ? `⚠️ Approaching budget cap (${dailyInfo.spentPercent}% used). Keep daily expenses under RM ${dailyInfo.dailyAllowance.toFixed(2)} to stay within your goal.`
-                : `🎉 You are well on track! You can safely spend up to RM ${dailyInfo.dailyAllowance.toFixed(2)} each day until ${isYearMode ? 'year' : 'month'} end.`}
+                ? `⚠️ Approaching budget cap (${dailyInfo.spentPercent}% used). Keep daily expenses under RM\u00A0${dailyInfo.dailyAllowance.toFixed(2)} to stay within your goal.`
+                : `🎉 You are well on track! You can safely spend up to RM\u00A0${dailyInfo.dailyAllowance.toFixed(2)} each day until ${isYearMode ? 'year' : 'month'} end.`}
             </p>
           </div>
 
@@ -844,10 +650,10 @@ export default function BudgetPage() {
                 ? 'Remaining Year Cashflow:'
                 : 'Remaining Month Cashflow:'}
             </span>
-            <span className="font-mono font-bold text-slate-950 dark:text-white">
-              RM {(heroUnpaidReserve > 0 && !dailyInfo.isAllTime && !dailyInfo.isPastMonth
+            <span className="font-mono font-bold text-slate-950 dark:text-white whitespace-nowrap tabular-nums">
+              RM{'\u00A0'}{(heroUnpaidReserve > 0 && !dailyInfo.isAllTime && !dailyInfo.isPastMonth
                 ? dailyInfo.safeRemainingBudget
-                : dailyInfo.remainingBudget).toFixed(2)}
+                : dailyInfo.remainingBudget).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           </div>
         </motion.div>
@@ -857,7 +663,7 @@ export default function BudgetPage() {
       <motion.div
         whileHover={{ y: -2 }}
         transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
-        className="rounded-3xl border border-indigo-500/25 bg-gradient-to-br from-indigo-950/25 via-slate-50 dark:via-zinc-900/40 to-white dark:to-zinc-950 p-5 sm:p-6 backdrop-blur-xl shadow-xl specular-card space-y-4"
+        className="rounded-3xl border border-indigo-500/25 bg-gradient-to-br from-indigo-50/90 dark:from-indigo-950/25 via-slate-50 dark:via-zinc-900/40 to-white dark:to-zinc-950 p-5 sm:p-6 backdrop-blur-xl shadow-xl specular-card space-y-4"
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
@@ -892,13 +698,13 @@ export default function BudgetPage() {
                 </span>
               </div>
               <span className="text-[11px] text-slate-600 dark:text-zinc-400">
-                Daily living burn: <strong className="font-mono text-slate-900 dark:text-white">RM {savingsPrediction.currentDailySpend.toFixed(2)}/day</strong>
+                Daily living burn: <strong className="font-mono text-slate-900 dark:text-white">RM{'\u00A0'}{savingsPrediction.currentDailySpend.toFixed(2)}/day</strong>
                 {savingsPrediction.lumpSumSpent > 0 && (
                   <span className="text-indigo-700 dark:text-indigo-300 font-medium">
-                    {' '}· Lump sums: <strong className="font-mono">RM {savingsPrediction.lumpSumSpent.toFixed(2)}</strong> (absorbed flexibly)
+                    {' '}· Lump sums: <strong className="font-mono">RM{'\u00A0'}{savingsPrediction.lumpSumSpent.toFixed(2)}</strong> (absorbed flexibly)
                   </span>
                 )}
-                {' '}· Total: RM {savingsPrediction.spentSoFar.toFixed(2)} ({savingsPrediction.daysPassed}d passed, {savingsPrediction.daysRemaining}d left)
+                {' '}· Total: RM{'\u00A0'}{savingsPrediction.spentSoFar.toFixed(2)} ({savingsPrediction.daysPassed}d passed, {savingsPrediction.daysRemaining}d left)
               </span>
             </div>
           </div>
@@ -906,7 +712,7 @@ export default function BudgetPage() {
           <div className="text-right text-xs">
             <span className="text-slate-500 dark:text-zinc-400 block text-[11px]">Monthly Baseline Income</span>
             <span className="font-mono font-bold text-slate-900 dark:text-white">
-              RM {savingsPrediction.baselineIncome.toLocaleString()}
+              RM{'\u00A0'}{savingsPrediction.baselineIncome.toLocaleString()}
             </span>
           </div>
         </div>
@@ -924,11 +730,11 @@ export default function BudgetPage() {
               </span>
             </div>
             <div className="text-2xl font-black font-mono text-emerald-800 dark:text-emerald-400">
-              RM {savingsPrediction.predictedSavingsAmount.toLocaleString()}
+              RM{'\u00A0'}{savingsPrediction.predictedSavingsAmount.toLocaleString()}
             </div>
             <div className="space-y-1">
               <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-zinc-400">
-                <span>Target: {savingsPrediction.savingsTargetPct}% (RM {savingsPrediction.targetSavingsAmount.toLocaleString()})</span>
+                <span>Target: {savingsPrediction.savingsTargetPct}% (RM{'\u00A0'}{savingsPrediction.targetSavingsAmount.toLocaleString()})</span>
                 <span>{((savingsPrediction.predictedSavingsAmount / (savingsPrediction.targetSavingsAmount || 1)) * 100).toFixed(0)}%</span>
               </div>
               <div className="h-1.5 w-full bg-slate-200 dark:bg-zinc-800 rounded-full overflow-hidden">
@@ -951,11 +757,11 @@ export default function BudgetPage() {
               </span>
             </div>
             <div className="text-2xl font-black font-mono text-indigo-800 dark:text-indigo-400">
-              RM {savingsPrediction.predictedInvestmentAmount.toLocaleString()}
+              RM{'\u00A0'}{savingsPrediction.predictedInvestmentAmount.toLocaleString()}
             </div>
             <div className="space-y-1">
               <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-zinc-400">
-                <span>Target: {savingsPrediction.investmentTargetPct}% (RM {savingsPrediction.targetInvestmentAmount.toLocaleString()})</span>
+                <span>Target: {savingsPrediction.investmentTargetPct}% (RM{'\u00A0'}{savingsPrediction.targetInvestmentAmount.toLocaleString()})</span>
                 <span>{((savingsPrediction.predictedInvestmentAmount / (savingsPrediction.targetInvestmentAmount || 1)) * 100).toFixed(0)}%</span>
               </div>
               <div className="h-1.5 w-full bg-slate-200 dark:bg-zinc-800 rounded-full overflow-hidden">
@@ -974,7 +780,7 @@ export default function BudgetPage() {
                 Projected Living Spend
               </span>
               <span className="text-[10px] font-mono text-slate-500 dark:text-zinc-400">
-                Limit: RM {savingsPrediction.targetLivingBudget.toLocaleString()}
+                Limit: RM{'\u00A0'}{savingsPrediction.targetLivingBudget.toLocaleString()}
               </span>
             </div>
             <div className={`text-2xl font-black font-mono ${
@@ -982,17 +788,17 @@ export default function BudgetPage() {
                 ? 'text-rose-800 dark:text-rose-400'
                 : 'text-slate-900 dark:text-white'
             }`}>
-              RM {savingsPrediction.projectedTotalSpend.toLocaleString()}
+              RM{'\u00A0'}{savingsPrediction.projectedTotalSpend.toLocaleString()}
             </div>
             <div className="text-[10px] text-slate-500 dark:text-zinc-400">
-              Living Budget: Income RM {savingsPrediction.baselineIncome.toLocaleString()} - Target Savings RM {(savingsPrediction.targetSavingsAmount + savingsPrediction.targetInvestmentAmount).toLocaleString()}
+              Living Budget: Income RM{'\u00A0'}{savingsPrediction.baselineIncome.toLocaleString()} - Target Savings RM{'\u00A0'}{(savingsPrediction.targetSavingsAmount + savingsPrediction.targetInvestmentAmount).toLocaleString()}
             </div>
             <div className="text-[10px] font-mono text-slate-600 dark:text-zinc-300">
-              Safe Daily Pace: <strong className="text-emerald-700 dark:text-emerald-400">RM {savingsPrediction.safeDailyLivingAllowance.toFixed(2)}/day</strong> ({savingsPrediction.daysRemaining}d left)
+              Safe Daily Pace: <strong className="text-emerald-700 dark:text-emerald-400">RM{'\u00A0'}{savingsPrediction.safeDailyLivingAllowance.toFixed(2)}/day</strong> ({savingsPrediction.daysRemaining}d left)
             </div>
             {savingsPrediction.lumpSumSpent > 0 && (
               <div className="text-[10px] text-indigo-700 dark:text-indigo-300">
-                ✨ RM {savingsPrediction.lumpSumSpent.toFixed(2)} lump sum absorbed into month without distorting daily living pace.
+                ✨ RM{'\u00A0'}{savingsPrediction.lumpSumSpent.toFixed(2)} lump sum absorbed into month without distorting daily living pace.
               </div>
             )}
           </div>
@@ -1053,17 +859,17 @@ export default function BudgetPage() {
                 Pre-Quarantined Savings Target
               </span>
               <span className="font-mono font-bold text-slate-900 dark:text-white">
-                RM {paydayInfo.preQuarantinedSavings.toLocaleString()}
+                RM{'\u00A0'}{paydayInfo.preQuarantinedSavings.toLocaleString()}
               </span>
             </div>
             <p className="text-[11px] text-slate-600 dark:text-zinc-400 leading-relaxed">
-              Shielded from Day 1 ({paydayInfo.savingsTargetPct + paydayInfo.investmentTargetPct}% of RM {paydayInfo.baselineIncome.toLocaleString()} income). You will never suffer an artificial early surplus or end-of-month budget cliff.
+              Shielded from Day 1 ({paydayInfo.savingsTargetPct + paydayInfo.investmentTargetPct}% of RM{'\u00A0'}{paydayInfo.baselineIncome.toLocaleString()} income). You will never suffer an artificial early surplus or end-of-month budget cliff.
             </p>
             <div className="space-y-1 pt-1">
               <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-zinc-400">
                 <span>Transfers fulfilled this month:</span>
                 <span className="font-mono font-bold text-slate-900 dark:text-white">
-                  RM {paydayInfo.actualSavedThisMonth.toLocaleString()} ({paydayInfo.savingsProgressPct}%)
+                  RM{'\u00A0'}{paydayInfo.actualSavedThisMonth.toLocaleString()} ({paydayInfo.savingsProgressPct}%)
                 </span>
               </div>
               <div className="h-1.5 w-full bg-slate-200 dark:bg-zinc-800 rounded-full overflow-hidden">
@@ -1083,7 +889,7 @@ export default function BudgetPage() {
                 Protected Living Budget
               </span>
               <span className="font-mono font-bold text-slate-900 dark:text-white">
-                RM {paydayInfo.targetLivingBudget.toLocaleString()} / mo
+                RM{'\u00A0'}{paydayInfo.targetLivingBudget.toLocaleString()} / mo
               </span>
             </div>
             <p className="text-[11px] text-slate-600 dark:text-zinc-400 leading-relaxed">
@@ -1091,7 +897,7 @@ export default function BudgetPage() {
             </p>
             <div className="flex items-baseline gap-2 pt-0.5">
               <span className="text-2xl font-black font-mono text-emerald-800 dark:text-emerald-400">
-                RM {paydayInfo.dailyLivingAllowance.toFixed(2)}
+                RM{'\u00A0'}{paydayInfo.dailyLivingAllowance.toFixed(2)}
               </span>
               <span className="text-xs text-slate-500 dark:text-zinc-400 font-mono">
                 / day ({paydayInfo.daysRemainingInMonth} days left in cycle)
@@ -1263,10 +1069,10 @@ export default function BudgetPage() {
               Remaining Food Budget
             </span>
             <div className="text-xl font-black font-mono text-slate-900 dark:text-white">
-              RM {foodInfo.remainingFood.toFixed(2)}
+              RM{'\u00A0'}{foodInfo.remainingFood.toFixed(2)}
             </div>
             <span className="text-[10px] text-slate-500 dark:text-zinc-400 block">
-              RM {foodInfo.foodSpent.toFixed(2)} used ({foodInfo.percentUsed.toFixed(0)}%)
+              RM{'\u00A0'}{foodInfo.foodSpent.toFixed(2)} used ({foodInfo.percentUsed.toFixed(0)}%)
               {foodInfo.foodReserve > 0 ? ` + RM ${foodInfo.foodReserve.toFixed(0)} reserved` : ''}
             </span>
           </div>
@@ -1276,7 +1082,7 @@ export default function BudgetPage() {
               Safe Daily Food Pace
             </span>
             <div className="text-xl font-black font-mono text-emerald-800 dark:text-emerald-400">
-              RM {foodInfo.safeDailyFoodAllowance.toFixed(2)}
+              RM{'\u00A0'}{foodInfo.safeDailyFoodAllowance.toFixed(2)}
               <span className="text-xs font-normal text-slate-500 dark:text-zinc-400 ml-1">/ day</span>
             </div>
             <span className="text-[10px] text-slate-500 dark:text-zinc-400 block">
@@ -1293,7 +1099,7 @@ export default function BudgetPage() {
             <div className={`text-xl font-black font-mono ${
               foodInfo.isTodayOverDaily ? 'text-amber-800 dark:text-amber-400' : 'text-slate-900 dark:text-white'
             }`}>
-              RM {foodInfo.todayFoodSpent.toFixed(2)}
+              RM{'\u00A0'}{foodInfo.todayFoodSpent.toFixed(2)}
             </div>
             <span className="text-[10px] text-slate-500 dark:text-zinc-400 block">
               {foodInfo.isTodayOverDaily
@@ -1339,11 +1145,11 @@ export default function BudgetPage() {
                   ? 'bg-rose-500/15 text-rose-800 dark:text-rose-300 border-rose-500/30'
                   : 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-emerald-500/30'
               }`}>
-                Cap Sum: RM {configuredCapsSum.toLocaleString()} / Max Living: RM {maxLivingBudget.toLocaleString()}
+                Cap Sum: RM{'\u00A0'}{configuredCapsSum.toLocaleString()} / Max Living: RM{'\u00A0'}{maxLivingBudget.toLocaleString()}
               </span>
             </div>
             <span className="text-[11px] text-slate-500 dark:text-zinc-400 block mt-0.5">
-              Strict constraint: Cap sum must be lower than or equal to Income (RM {intelligentPlan.baselineIncome.toLocaleString()}) - Savings (RM {intelligentPlan.targetSavingsAmount.toLocaleString()})
+              Strict constraint: Cap sum must be lower than or equal to Income (RM{'\u00A0'}{intelligentPlan.baselineIncome.toLocaleString()}) - Savings (RM{'\u00A0'}{intelligentPlan.targetSavingsAmount.toLocaleString()})
             </span>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -1364,7 +1170,7 @@ export default function BudgetPage() {
                 title="Sync total monthly budget with sum of category caps"
               >
                 <CheckCircle2 className="h-3.5 w-3.5" />
-                <span>Sync Total Budget (RM {configuredCapsSum.toLocaleString()})</span>
+                <span>Sync Total Budget (RM{'\u00A0'}{configuredCapsSum.toLocaleString()})</span>
               </button>
             )}
             {isCapsSumExceeded && (
@@ -1373,7 +1179,7 @@ export default function BudgetPage() {
                 onClick={handleAutoFitCaps}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm cursor-pointer transition-all active:scale-95"
               >
-                <span>Auto-Fit Caps to RM {maxLivingBudget.toLocaleString()}</span>
+                <span>Auto-Fit Caps to RM{'\u00A0'}{maxLivingBudget.toLocaleString()}</span>
               </button>
             )}
             <motion.button
@@ -1395,7 +1201,7 @@ export default function BudgetPage() {
             <div className="flex items-center gap-2">
               <AlertCircle className="h-4 w-4 text-rose-600 dark:text-rose-400 shrink-0" />
               <span>
-                <strong>Cap Sum Alert:</strong> Total category caps (<strong>RM {configuredCapsSum.toLocaleString()}</strong>) exceed your Living Budget (<strong>RM {maxLivingBudget.toLocaleString()}</strong> = Income RM {intelligentPlan.baselineIncome.toLocaleString()} - Savings RM {intelligentPlan.targetSavingsAmount.toLocaleString()}). To preserve your {intelligentPlan.savingsTargetPct + intelligentPlan.investmentTargetPct}% savings target, reduce caps by RM {(configuredCapsSum - maxLivingBudget).toLocaleString()}.
+                <strong>Cap Sum Alert:</strong> Total category caps (<strong>RM{'\u00A0'}{configuredCapsSum.toLocaleString()}</strong>) exceed your Living Budget (<strong>RM{'\u00A0'}{maxLivingBudget.toLocaleString()}</strong> = Income RM{'\u00A0'}{intelligentPlan.baselineIncome.toLocaleString()} - Savings RM{'\u00A0'}{intelligentPlan.targetSavingsAmount.toLocaleString()}). To preserve your {intelligentPlan.savingsTargetPct + intelligentPlan.investmentTargetPct}% savings target, reduce caps by RM{'\u00A0'}{(configuredCapsSum - maxLivingBudget).toLocaleString()}.
               </span>
             </div>
             <button
@@ -1446,15 +1252,22 @@ export default function BudgetPage() {
                 key={row.category}
                 className={`rounded-2xl border p-4 space-y-2.5 transition-all ${
                   row.isOverCap
-                    ? 'border-rose-500/30 bg-rose-950/15'
+                    ? 'border-rose-500/30 bg-rose-500/10 dark:bg-rose-950/15'
                     : row.spentPercent > 70
-                    ? 'border-amber-500/30 bg-amber-950/15'
+                    ? 'border-amber-500/30 bg-amber-500/10 dark:bg-amber-950/15'
                     : 'border-slate-200 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-900/40'
                 }`}
               >
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-bold text-slate-950 dark:text-white text-sm">{row.category}</span>
+                  <div className="flex items-center gap-2 flex-wrap min-w-0">
+                    <Link
+                      href={`/transactions?category=${encodeURIComponent(row.category)}`}
+                      className="font-bold text-slate-950 dark:text-white text-sm hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors inline-flex items-center gap-1"
+                      title={`View ${row.category} transactions`}
+                    >
+                      <span>{row.category}</span>
+                      <ArrowUpRight className="h-3.5 w-3.5 opacity-60 shrink-0" />
+                    </Link>
                     {suggestion && (
                       <span className={`text-[9px] font-semibold px-2 py-0.5 rounded-full border ${
                         suggestion.nature === 'fixed'
@@ -1488,8 +1301,8 @@ export default function BudgetPage() {
                   <div className="flex items-center gap-2">
                     {!isEditingThis ? (
                       <div className="flex items-center gap-2 text-slate-600 dark:text-zinc-400">
-                        <span className="font-mono">
-                          <strong className="text-slate-950 dark:text-white font-bold">RM {row.spent.toFixed(2)}</strong> / Cap: RM {row.cap.toFixed(0)}
+                        <span className="font-mono whitespace-nowrap tabular-nums">
+                          <strong className="text-slate-950 dark:text-white font-bold">RM{'\u00A0'}{row.spent.toFixed(2)}</strong> / Cap: RM{'\u00A0'}{row.cap.toFixed(0)}
                         </span>
                         <button
                           type="button"
@@ -1575,7 +1388,7 @@ export default function BudgetPage() {
                 {row.unpaidBillReserve > 0 && (
                   <div className="text-[10px] text-amber-900 dark:text-amber-200 bg-amber-500/10 border border-amber-500/20 rounded-xl px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-1">
                     <span className="flex items-center gap-1 font-medium">
-                      📌 Bill Reserve: RM {row.unpaidBillReserve.toFixed(2)} reserved for upcoming bills
+                      📌 Bill Reserve: RM{'\u00A0'}{row.unpaidBillReserve.toFixed(2)} reserved for upcoming bills
                       {row.unpaidBills && row.unpaidBills.length > 0 && (
                         <span className="opacity-80">
                           ({row.unpaidBills.map((b) => `${b.name} RM ${b.amount.toFixed(0)}`).join(', ')})
@@ -1583,7 +1396,7 @@ export default function BudgetPage() {
                       )}
                     </span>
                     <span>
-                      Free Unreserved: <strong className="font-mono">RM {row.unreservedRemaining.toFixed(2)}</strong>
+                      Free Unreserved: <strong className="font-mono">RM{'\u00A0'}{row.unreservedRemaining.toFixed(2)}</strong>
                     </span>
                   </div>
                 )}
@@ -1596,7 +1409,7 @@ export default function BudgetPage() {
                       Today's Food Spent: <strong className="font-mono">RM {foodInfo.todayFoodSpent.toFixed(2)}</strong>
                     </span>
                     <span>
-                      Safe Daily Food Allowance: <strong className="font-mono">RM {foodInfo.safeDailyFoodAllowance.toFixed(2)} / day</strong>
+                      Safe Daily Food Allowance: <strong className="font-mono">RM{'\u00A0'}{foodInfo.safeDailyFoodAllowance.toFixed(2)} / day</strong>
                     </span>
                   </div>
                 )}
@@ -1610,13 +1423,13 @@ export default function BudgetPage() {
                       </span>
                     ) : (
                       <span>
-                        Remaining: <strong className="text-slate-800 dark:text-zinc-200 font-mono">RM {row.unreservedRemaining.toFixed(2)}</strong>
+                        Remaining: <strong className="text-slate-800 dark:text-zinc-200 font-mono">RM{'\u00A0'}{row.unreservedRemaining.toFixed(2)}</strong>
                       </span>
                     )}
                   </span>
                   {row.isDailyCategory ? (
                     <span className="font-mono text-slate-700 dark:text-zinc-300">
-                      Daily pace: <strong className={row.isOverCap ? 'text-rose-800 dark:text-rose-400' : 'text-emerald-800 dark:text-emerald-400'}>RM {row.dailyAllowance.toFixed(2)} / day</strong>
+                      Daily pace: <strong className={row.isOverCap ? 'text-rose-800 dark:text-rose-400' : 'text-emerald-800 dark:text-emerald-400'}>RM{'\u00A0'}{row.dailyAllowance.toFixed(2)} / day</strong>
                     </span>
                   ) : (
                     <span className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium">
@@ -1669,7 +1482,7 @@ export default function BudgetPage() {
                   Income Allocation Shield:
                 </span>
                 <span className="font-mono text-slate-900 dark:text-white">
-                  RM {intelligentPlan.baselineIncome.toLocaleString()} Income - RM {intelligentPlan.targetSavingsAmount.toLocaleString()} Savings ({intelligentPlan.savingsTargetPct + intelligentPlan.investmentTargetPct}%) = <strong className="text-emerald-700 dark:text-emerald-300">RM {intelligentPlan.targetLivingBudget.toLocaleString()} Living Pool</strong>
+                  RM{'\u00A0'}{intelligentPlan.baselineIncome.toLocaleString()} Income - RM{'\u00A0'}{intelligentPlan.targetSavingsAmount.toLocaleString()} Savings ({intelligentPlan.savingsTargetPct + intelligentPlan.investmentTargetPct}%) = <strong className="text-emerald-700 dark:text-emerald-300">RM{'\u00A0'}{intelligentPlan.targetLivingBudget.toLocaleString()} Living Pool</strong>
                 </span>
               </div>
               <p className="text-[11px] text-slate-600 dark:text-zinc-400 leading-relaxed">
@@ -1715,7 +1528,7 @@ export default function BudgetPage() {
                         </p>
                         {s.historicalAvg > 0 && (
                           <span className="text-[10px] text-slate-400 dark:text-zinc-500 block">
-                            Historical monthly avg: RM {s.historicalAvg.toFixed(2)}
+                            Historical monthly avg: RM{'\u00A0'}{s.historicalAvg.toFixed(2)}
                           </span>
                         )}
                       </div>
@@ -1760,28 +1573,28 @@ export default function BudgetPage() {
                 <span className="text-slate-500 dark:text-zinc-400 block">Total Configured Caps:</span>
                 <div className="flex items-center gap-2">
                   <span className={`font-mono font-bold text-sm ${isDraftSumExceeded ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white'}`}>
-                    RM {draftSum.toLocaleString()}
+                    RM{'\u00A0'}{draftSum.toLocaleString()}
                   </span>
                   <span className="text-[11px] text-slate-500 dark:text-zinc-400">
-                    / Living limit: RM {maxLivingBudget.toLocaleString()} (Income - Savings)
+                    / Living limit: RM{'\u00A0'}{maxLivingBudget.toLocaleString()} (Income - Savings)
                   </span>
                 </div>
                 {isDraftSumExceeded ? (
                   <div className="flex items-center gap-2 mt-1">
                     <span className="text-[11px] text-rose-600 dark:text-rose-400 font-semibold">
-                      ⚠️ Exceeds limit by RM {(draftSum - maxLivingBudget).toLocaleString()}
+                      ⚠️ Exceeds limit by RM{'\u00A0'}{(draftSum - maxLivingBudget).toLocaleString()}
                     </span>
                     <button
                       type="button"
                       onClick={handleAutoFitDraft}
                       className="px-2 py-0.5 rounded-lg bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/30 text-[10px] font-bold hover:bg-rose-500/25 transition-all cursor-pointer"
                     >
-                      Auto-Fit to RM {maxLivingBudget.toLocaleString()}
+                      Auto-Fit to RM{'\u00A0'}{maxLivingBudget.toLocaleString()}
                     </button>
                   </div>
                 ) : (
                   <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block mt-0.5">
-                    ✨ Strictly within your RM {maxLivingBudget.toLocaleString()} living pool. Full savings protected!
+                    ✨ Strictly within your RM{'\u00A0'}{maxLivingBudget.toLocaleString()} living pool. Full savings protected!
                   </span>
                 )}
               </div>

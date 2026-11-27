@@ -15,8 +15,10 @@ type AnimatedNumberProps = {
 function formatNumber(value: number, prefix: string, suffix: string, decimals: number, showPlus: boolean) {
   const safeValue = Number.isFinite(value) ? value : 0;
   const sign = showPlus && safeValue > 0 ? '+' : '';
+  // Never allow currency prefix + number to wrap onto separate lines
+  const nonBreakingPrefix = prefix.replace(/^(RM|MYR|USD|SGD|CNY|HKD|EUR|GBP|AUD|THB|Rp)\s+$/i, '$1\u00A0');
 
-  return `${sign}${prefix}${safeValue.toLocaleString('en-MY', {
+  return `${sign}${nonBreakingPrefix}${safeValue.toLocaleString('en-MY', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   })}${suffix}`;
@@ -28,7 +30,7 @@ function formatNumber(value: number, prefix: string, suffix: string, decimals: n
  */
 export function AnimatedNumber({
   value,
-  prefix = 'RM ',
+  prefix = 'RM\u00A0',
   suffix = '',
   decimals = 2,
   showPlus = false,
@@ -81,7 +83,7 @@ export function AnimatedNumber({
   }, [value, prefix, suffix, decimals, showPlus, formatValue]);
 
   return (
-    <span ref={spanRef} className="font-mono tabular-nums tracking-tight">
+    <span ref={spanRef} className="font-mono tabular-nums tracking-tight whitespace-nowrap">
       {formatValue ? formatValue(value) : formatNumber(value, prefix, suffix, decimals, showPlus)}
     </span>
   );

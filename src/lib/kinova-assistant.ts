@@ -158,12 +158,18 @@ export interface CategoryCashflowSnapshot {
 export interface PersonalCashflowBriefing {
   baselineIncome: number;
   actualIncomeThisMonth: number;
+  lastMonthIncome?: number;
+  lastMonthTotalSpent?: number;
+  monthOverMonthSpendDeltaPct?: number | null;
+  currentMonthSavedOrInvested?: number;
   targetSavingsAmount: number;
   targetInvestmentAmount: number;
   targetLivingBudget: number;
+  monthlyBudgetCap?: number | null;
   spentSoFar: number;
   tripQuarantinedSpent: number;
   unpaidCommittedBillsReserve: number;
+  unpaidCommittedItems?: Array<{ name: string; category: string; amount: number; kind: string }>;
   remainingSafeLivingPool: number;
   safeDailyLivingAllowance: number;
   daysRemainingInMonth: number;
@@ -171,6 +177,15 @@ export interface PersonalCashflowBriefing {
   pacingStatus: string;
   categorySnapshots: CategoryCashflowSnapshot[];
   overCapCategories: string[];
+  topExpensesThisMonth?: Array<{ date: string; description: string; category: string; amount: number }>;
+  goalsProgress?: Array<{
+    name: string;
+    targetAmount: number;
+    currentAmount: number;
+    remainingAmount: number;
+    progressPct: number;
+    estimatedMonthsAtTargetPace: number | null;
+  }>;
   smartRebalanceSummary?: string;
   rebalancePlan?: CategoryRebalanceSuggestion;
   paydayEnvelopePlan?: PaydayEnvelopeAllocationPlan;
@@ -347,7 +362,9 @@ export function buildRebalanceCapsProposedAction(
         unfundedDeficit: rebalancePlan.unfundedDeficit,
         donors: rebalancePlan.donors,
         updatedCaps: rebalancePlan.updatedCaps,
+        rebalancedCaps: rebalancePlan.updatedCaps,
         summaryText: rebalancePlan.summaryText,
+        donorSummary: rebalancePlan.summaryText,
       },
     },
   };
@@ -381,16 +398,23 @@ export function computeDeterministicLedgerFacts(
   const parsedRef = parseLocalDate(today);
   const safeRefDate = !Number.isNaN(parsedRef.getTime()) ? parsedRef : new Date();
   const currentYearMonth = today.slice(0, 7);
+  const prevMonthDate = new Date(safeRefDate.getFullYear(), safeRefDate.getMonth() - 1, 1);
+  const prevYearMonth = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`;
 
   let currentMonthTotalSpent = 0;
   let actualIncomeThisMonth = 0;
+  let lastMonthTotalSpent = 0;
+  let lastMonthIncome = 0;
+  let currentMonthSavedOrInvested = 0;
+  let lifetimeSavingsDeposits = 0;
   const categorySpending: Record<string, number> = {};
   const categoryValues: Record<string, number[]> = {};
+  const thisMonthExpensesList: Array<{ date: string; description: string; category: string; amount: number }> = [];
 
   let potentialDuplicate: { date: string; amount: number; description: string } | null = null;
 
   for (const t of transactions) {
-    if (!t || typeof t !== 'object') continue;
+    if (!t || typeof t !== 'object' || t.id === 'tx_sample') continue;
     const typeLower = String(t.type || '').toLowerCase();
     const rawAmount = Number(t.amount) || 0;
     const baseAmount = getAmountInBaseCurrency(rawAmount, t.currency, t.baseAmount);
@@ -398,20 +422,41 @@ export function computeDeterministicLedgerFacts(
     const category = typeLower === 'expense' ? normalizeToCanonicalCategory(String(t.category || 'Other'), 'Expense', String(t.description || '')) : String(t.category || 'Other');
     const description = String(t.description || '');
 
-    if (typeLower === 'income' && baseAmount > 0 && dateStr.startsWith(currentYearMonth)) {
-      actualIncomeThisMonth += baseAmount;
+    if (typeLower === 'income' && baseAmount > 0) {
+      if (dateStr.startsWith(currentYearMonth)) {
+        actualIncomeThisMonth += baseAmount;
+      } else if (dateStr.startsWith(prevYearMonth)) {
+        lastMonthIncome += baseAmount;
+      }
+    }
+
+    if (typeLower === 'investment' && baseAmount > 0) {
+      if (dateStr.startsWith(currentYearMonth)) {
+        currentMonthSavedOrInvested += baseAmount;
+      }
+      if (category === 'Emergency Savings' || category === 'Fixed Deposit' || category === 'Other Savings') {
+        lifetimeSavingsDeposits += baseAmount;
+      }
     }
 
     if (typeLower === 'expense' && baseAmount > 0) {
       if (dateStr.startsWith(currentYearMonth) && !isTripQuarantinedExpense(t)) {
         currentMonthTotalSpent += baseAmount;
-        if (!isTripQuarantinedExpense(t)) {
-          categorySpending[category] = Number(((categorySpending[category] || 0) + baseAmount).toFixed(2));
-        }
+        categorySpending[category] = Number(((categorySpending[category] || 0) + baseAmount).toFixed(2));
+        thisMonthExpensesList.push({
+          date: dateStr,
+          description: description || category,
+          category,
+          amount: Number(baseAmount.toFixed(2)),
+        });
+      } else if (dateStr.startsWith(prevYearMonth) && !isTripQuarantinedExpense(t)) {
+        lastMonthTotalSpent += baseAmount;
       }
 
-      if (!isTripQuarantinedExpense(t)) { if (!categoryValues[category]) categoryValues[category] = [];
-      categoryValues[category].push(baseAmount); }
+      if (!isTripQuarantinedExpense(t)) {
+        if (!categoryValues[category]) categoryValues[category] = [];
+        categoryValues[category].push(baseAmount);
+      }
 
       if (pendingReceipt && pendingReceipt.amount > 0) {
         if (Math.abs(rawAmount - pendingReceipt.amount) < 0.05 || Math.abs(baseAmount - pendingReceipt.amount) < 0.05) {
@@ -459,7 +504,7 @@ export function computeDeterministicLedgerFacts(
     referenceDate: safeRefDate,
   });
 
-  const { unpaidReserveByCategory } = getCategoryCommitmentBreakdown(transactions, currentYearMonth, { referenceDate: safeRefDate });
+  const { unpaidReserveByCategory, unpaidItemsByCategory } = getCategoryCommitmentBreakdown(transactions, currentYearMonth, { referenceDate: safeRefDate });
 
   const categorySnapshots: CategoryCashflowSnapshot[] = [];
   const overCapCategories: string[] = [];
@@ -506,15 +551,57 @@ export function computeDeterministicLedgerFacts(
     }
   }
 
+  const unpaidCommittedItems: Array<{ name: string; category: string; amount: number; kind: string }> = [];
+  for (const [cat, items] of unpaidItemsByCategory.entries()) {
+    for (const item of items) {
+      unpaidCommittedItems.push({ name: item.name, category: cat, amount: Number(item.amount.toFixed(2)), kind: item.kind });
+    }
+  }
+  const topExpensesThisMonth = thisMonthExpensesList
+    .slice()
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 5);
+  const monthlySavingsCapacity = Math.max(
+    0,
+    (savingsPred.targetSavingsAmount || 0) + (savingsPred.targetInvestmentAmount || 0)
+  );
+  const totalReservePool = Math.max(0, (profile.emergencyReserve || 0) + lifetimeSavingsDeposits);
+  const goalsProgress = (profile.goals || []).map((g) => {
+    const targetAmt = Number(g.targetAmount) || 0;
+    const currentAmt = Number(g.currentAmount) > 0 ? Number(g.currentAmount) : totalReservePool;
+    const remainingAmt = Math.max(0, Number((targetAmt - currentAmt).toFixed(2)));
+    const progressPct = targetAmt > 0 ? Math.min(100, Number(((currentAmt / targetAmt) * 100).toFixed(1))) : 0;
+    const estimatedMonths =
+      remainingAmt <= 0 ? 0 : monthlySavingsCapacity > 0 ? Math.ceil(remainingAmt / monthlySavingsCapacity) : null;
+    return {
+      name: g.name,
+      targetAmount: targetAmt,
+      currentAmount: Number(currentAmt.toFixed(2)),
+      remainingAmount: remainingAmt,
+      progressPct,
+      estimatedMonthsAtTargetPace: estimatedMonths,
+    };
+  });
+  const momDeltaPct =
+    lastMonthTotalSpent > 0
+      ? Number((((currentMonthTotalSpent - lastMonthTotalSpent) / lastMonthTotalSpent) * 100).toFixed(1))
+      : null;
+
   const cashflowBriefing: PersonalCashflowBriefing = {
     baselineIncome: savingsPred.baselineIncome,
     actualIncomeThisMonth: Number(actualIncomeThisMonth.toFixed(2)),
+    lastMonthIncome: Number(lastMonthIncome.toFixed(2)),
+    lastMonthTotalSpent: Number(lastMonthTotalSpent.toFixed(2)),
+    monthOverMonthSpendDeltaPct: momDeltaPct,
+    currentMonthSavedOrInvested: Number(currentMonthSavedOrInvested.toFixed(2)),
     targetSavingsAmount: savingsPred.targetSavingsAmount,
     targetInvestmentAmount: savingsPred.targetInvestmentAmount,
     targetLivingBudget: savingsPred.targetLivingBudget,
+    monthlyBudgetCap: profile.monthlyBudgetCap,
     spentSoFar: savingsPred.spentSoFar,
     tripQuarantinedSpent: savingsPred.tripQuarantinedSpent || 0,
     unpaidCommittedBillsReserve: savingsPred.unpaidCommittedReserve || 0,
+    unpaidCommittedItems: unpaidCommittedItems.slice(0, 10),
     remainingSafeLivingPool: Number(
       Math.max(0, savingsPred.targetLivingBudget - savingsPred.spentSoFar - (savingsPred.unpaidCommittedReserve || 0)).toFixed(2)
     ),
@@ -524,6 +611,8 @@ export function computeDeterministicLedgerFacts(
     pacingStatus: savingsPred.pacingStatus,
     categorySnapshots,
     overCapCategories,
+    topExpensesThisMonth,
+    goalsProgress: goalsProgress.length > 0 ? goalsProgress : undefined,
     smartRebalanceSummary,
     rebalancePlan,
     paydayEnvelopePlan: paydayInfo.envelopePlan,
@@ -644,7 +733,7 @@ export async function runKinovaTurn(
   const profile = options.profile || getUserMoneyProfile(options.transactions);
   const text = (options.text || '').trim();
   const parserCandidate = options.imageBase64 ? null : buildAssistantParserCandidate(text);
-  if (text && !options.imageBase64 && !options.forceAssistant) {
+  if (text && !options.imageBase64 && !options.forceAssistant && !options.pendingContext) {
     const localMatch = routeLocalIntent(text, profile, today);
     if (localMatch) {
       return {
@@ -673,13 +762,17 @@ export async function runKinovaTurn(
   const ledgerSample = deterministicFacts
     ? deterministicFacts.relevantTransactionsSample && deterministicFacts.relevantTransactionsSample.length > 0
       ? deterministicFacts.relevantTransactionsSample.slice(0, 20)
-      : allTx.slice(0, 20).map((t) => ({
-          date: String(t.date || ''),
-          description: String(t.description || ''),
-          category: String(t.category || ''),
-          amount: Number(getAmountInBaseCurrency(Number(t.amount) || 0, t.currency, t.baseAmount).toFixed(2)),
-          type: String(t.type || 'Expense'),
-        }))
+      : [...allTx]
+          .filter((t) => t && t.id !== 'tx_sample' && t.date)
+          .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
+          .slice(0, 20)
+          .map((t) => ({
+            date: String(t.date || ''),
+            description: String(t.description || ''),
+            category: String(t.category || ''),
+            amount: Number(getAmountInBaseCurrency(Number(t.amount) || 0, t.currency, t.baseAmount).toFixed(2)),
+            type: String(t.type || 'Expense'),
+          }))
     : undefined;
 
   const habits = includeLedgerContext

@@ -2145,7 +2145,7 @@ export function RecordPaymentModal() {
                     )}
                     <span>{category} Budget Cap:</span>
                     <span className="font-mono font-bold text-slate-900 dark:text-white">
-                      RM {categoryBudgetStatus.cap.toFixed(0)}
+                      RM{'\u00A0'}{categoryBudgetStatus.cap.toFixed(0)}
                     </span>
                   </div>
                   <span
@@ -2178,19 +2178,19 @@ export function RecordPaymentModal() {
                 {/* Spent & Impact details */}
                 <div className="flex flex-wrap items-center justify-between gap-1 text-[11px] text-slate-700 dark:text-zinc-300">
                   <span>
-                    Spent this month: <strong className="font-mono text-slate-950 dark:text-white">RM {categoryBudgetStatus.spentSoFar.toFixed(2)}</strong>
+                    Spent this month: <strong className="font-mono text-slate-950 dark:text-white">RM{'\u00A0'}{categoryBudgetStatus.spentSoFar.toFixed(2)}</strong>
                     {parseFloat(amount) > 0 && (
                       <span className="ml-1 text-slate-500 dark:text-zinc-400 font-mono">
-                        (+RM {parseFloat(amount).toFixed(2)})
+                        (+RM{'\u00A0'}{parseFloat(amount).toFixed(2)})
                       </span>
                     )}
                   </span>
                   <span>
                     {categoryBudgetStatus.remainingAfter >= 0 ? (
-                      <span>After entry: <strong className="font-mono text-emerald-700 dark:text-emerald-300">RM {categoryBudgetStatus.remainingAfter.toFixed(2)} left</strong></span>
+                      <span>After entry: <strong className="font-mono text-emerald-700 dark:text-emerald-300">RM{'\u00A0'}{categoryBudgetStatus.remainingAfter.toFixed(2)} left</strong></span>
                     ) : (
                       <span className="font-semibold text-rose-700 dark:text-rose-400">
-                        Exceeds cap by RM {Math.abs(categoryBudgetStatus.remainingAfter).toFixed(2)}
+                        Exceeds cap by RM{'\u00A0'}{Math.abs(categoryBudgetStatus.remainingAfter).toFixed(2)}
                       </span>
                     )}
                   </span>
@@ -2213,16 +2213,16 @@ export function RecordPaymentModal() {
                       {parseFloat(amount) > 0 ? (
                         <>
                           <span className="line-through text-slate-400 dark:text-zinc-500 font-mono">
-                            RM {categoryBudgetStatus.dailyAllowanceRemaining.toFixed(2)}
+                            RM{'\u00A0'}{categoryBudgetStatus.dailyAllowanceRemaining.toFixed(2)}
                           </span>
                           {' → '}
                           <strong className="font-mono text-slate-900 dark:text-white">
-                            RM {categoryBudgetStatus.dailyAllowanceAfter.toFixed(2)}/day
+                            RM{'\u00A0'}{categoryBudgetStatus.dailyAllowanceAfter.toFixed(2)}/day
                           </strong>
                         </>
                       ) : (
                         <strong className="font-mono text-slate-900 dark:text-white">
-                          RM {categoryBudgetStatus.dailyAllowanceRemaining.toFixed(2)}/day
+                          RM{'\u00A0'}{categoryBudgetStatus.dailyAllowanceRemaining.toFixed(2)}/day
                         </strong>
                       )}{' '}
                       ({categoryBudgetStatus.daysRemainingInMonth}d left)
@@ -2243,7 +2243,7 @@ export function RecordPaymentModal() {
                 {/* Bill Reserve Notice */}
                 {categoryBudgetStatus.committedReserve > 0 && (
                   <div className="mt-2 text-[10px] text-amber-900 dark:text-amber-200 bg-amber-500/10 border border-amber-500/20 rounded-xl px-2.5 py-1.5 flex items-center justify-between">
-                    <span>📌 RM {categoryBudgetStatus.committedReserve.toFixed(2)} reserved for upcoming bills in {category}</span>
+                    <span>📌 RM{'\u00A0'}{categoryBudgetStatus.committedReserve.toFixed(2)} reserved for upcoming bills in {category}</span>
                     <span>Free balance: <strong className="font-mono">RM {Math.max(0, categoryBudgetStatus.unreservedRemainingAfter).toFixed(2)}</strong></span>
                   </div>
                 )}
@@ -2254,7 +2254,7 @@ export function RecordPaymentModal() {
                     <span className="flex items-center gap-1.5 font-medium">
                       <Sparkles className="h-3.5 w-3.5 text-amber-500 shrink-0" />
                       <span>
-                        💡 Exceeds cap — Kinova can auto-shift RM {categoryBudgetStatus.rebalanceSuggestion.deficitCovered.toFixed(0)} from {categoryBudgetStatus.rebalanceSuggestion.donors[0]?.category}
+                        💡 Exceeds cap — Kinova can auto-shift RM{'\u00A0'}{categoryBudgetStatus.rebalanceSuggestion.deficitCovered.toFixed(0)} from {categoryBudgetStatus.rebalanceSuggestion.donors[0]?.category}
                       </span>
                     </span>
                     <button
@@ -2856,7 +2856,7 @@ export function RecordPaymentModal() {
                             {activeTaxCategory.icon} {activeTaxCategory.name}
                           </span>
                           <span className="text-[10px] text-slate-600 dark:text-zinc-400 font-mono">
-                            (Cap: RM {activeTaxQuotaInfo.limit.toFixed(0)}/yr)
+                            (Cap: RM{'\u00A0'}{activeTaxQuotaInfo.limit.toFixed(0)}/yr)
                           </span>
                         </div>
                         <p className="text-[11px] text-slate-700 dark:text-zinc-300 mt-0.5 leading-relaxed">
@@ -2869,12 +2869,12 @@ export function RecordPaymentModal() {
                     <div className="rounded-xl bg-white/90 dark:bg-zinc-950/70 border border-slate-200 dark:border-zinc-800/80 p-3 space-y-2">
                       <div className="flex items-center justify-between text-[11px]">
                         <span className="text-slate-600 dark:text-zinc-400">
-                          Claimed in {assessmentYear}: <strong className="text-slate-950 dark:text-white font-mono">RM {activeTaxQuotaInfo.usedBefore.toFixed(2)}</strong> / RM {activeTaxQuotaInfo.limit.toFixed(0)}
+                          Claimed in {assessmentYear}: <strong className="text-slate-950 dark:text-white font-mono">RM{'\u00A0'}{activeTaxQuotaInfo.usedBefore.toFixed(2)}</strong> / RM{'\u00A0'}{activeTaxQuotaInfo.limit.toFixed(0)}
                         </span>
                         <span className={`font-mono font-bold ${
                           activeTaxQuotaInfo.isAlreadyFull ? 'text-rose-800 dark:text-rose-400' : 'text-emerald-800 dark:text-emerald-400'
                         }`}>
-                          RM {activeTaxQuotaInfo.remainingBefore.toFixed(2)} quota left
+                          RM{'\u00A0'}{activeTaxQuotaInfo.remainingBefore.toFixed(2)} quota left
                         </span>
                       </div>
 
@@ -2896,7 +2896,7 @@ export function RecordPaymentModal() {
                           <span className="text-slate-700 dark:text-zinc-300">
                             This purchase can deduct:{' '}
                             <strong className={activeTaxQuotaInfo.claimableThisTx > 0 ? 'text-emerald-800 dark:text-emerald-400 font-mono' : 'text-rose-800 dark:text-rose-400 font-mono'}>
-                              RM {activeTaxQuotaInfo.claimableThisTx.toFixed(2)}
+                              RM{'\u00A0'}{activeTaxQuotaInfo.claimableThisTx.toFixed(2)}
                             </strong>
                             {activeTaxQuotaInfo.exceedsRemaining && (
                               <span className="text-amber-800 dark:text-amber-300 text-[10px] ml-1">
@@ -2905,7 +2905,7 @@ export function RecordPaymentModal() {
                             )}
                           </span>
                           <span className="text-slate-600 dark:text-zinc-400 font-mono">
-                            After this: <strong className="text-slate-800 dark:text-zinc-200">RM {activeTaxQuotaInfo.remainingAfter.toFixed(2)} left</strong>
+                            After this: <strong className="text-slate-800 dark:text-zinc-200">RM{'\u00A0'}{activeTaxQuotaInfo.remainingAfter.toFixed(2)} left</strong>
                           </span>
                         </div>
                       )}
@@ -2914,12 +2914,12 @@ export function RecordPaymentModal() {
                     {/* Smart Receipt Save Reminder */}
                     {activeTaxQuotaInfo.isAlreadyFull ? (
                       <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/25 text-[11px] text-rose-800 dark:text-rose-200 leading-relaxed">
-                        ⚠️ Your YA {assessmentYear} limit (RM {activeTaxQuotaInfo.limit.toFixed(0)}) for {activeTaxCategory.shortName} is already maxed out. You do not need to save this receipt for tax relief.
+                        ⚠️ Your YA {assessmentYear} limit (RM{'\u00A0'}{activeTaxQuotaInfo.limit.toFixed(0)}) for {activeTaxCategory.shortName} is already maxed out. You do not need to save this receipt for tax relief.
                       </div>
                     ) : !receiptPreview ? (
                       <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-wrap items-center justify-between gap-2">
                         <div className="text-[11px] text-amber-800 dark:text-amber-200 leading-relaxed flex-1 min-w-[180px]">
-                          <strong className="text-amber-800 dark:text-amber-300">📸 Save receipt now!</strong> You still have RM {activeTaxQuotaInfo.remainingBefore.toFixed(0)} tax limit left. Snap/upload below so you won&apos;t lose it when filing e-Filing.
+                          <strong className="text-amber-800 dark:text-amber-300">📸 Save receipt now!</strong> You still have RM{'\u00A0'}{activeTaxQuotaInfo.remainingBefore.toFixed(0)} tax limit left. Snap/upload below so you won&apos;t lose it when filing e-Filing.
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
                           <button
@@ -2965,7 +2965,7 @@ export function RecordPaymentModal() {
                         const lim = prog ? prog.limit : cat.defaultLimit;
                         return (
                           <option key={cat.id} value={cat.id}>
-                            {cat.icon} {cat.name} — RM {rem.toFixed(0)} left of RM {lim.toFixed(0)}
+                            {cat.icon} {cat.name} — RM{'\u00A0'}{rem.toFixed(0)} left of RM{'\u00A0'}{lim.toFixed(0)}
                           </option>
                         );
                       })}
@@ -2994,7 +2994,7 @@ export function RecordPaymentModal() {
                         const lim = prog ? prog.limit : cat.defaultLimit;
                         return (
                           <option key={cat.id} value={cat.id}>
-                            Override: {cat.icon} {cat.name} (RM {rem.toFixed(0)} / RM {lim.toFixed(0)} left)
+                            Override: {cat.icon} {cat.name} (RM{'\u00A0'}{rem.toFixed(0)} / RM{'\u00A0'}{lim.toFixed(0)} left)
                           </option>
                         );
                       })}
@@ -3021,7 +3021,7 @@ export function RecordPaymentModal() {
                         const lim = prog ? prog.limit : cat.defaultLimit;
                         return (
                           <option key={cat.id} value={cat.id}>
-                            {cat.icon} {cat.name} — RM {rem.toFixed(0)} left of RM {lim.toFixed(0)}
+                            {cat.icon} {cat.name} — RM{'\u00A0'}{rem.toFixed(0)} left of RM{'\u00A0'}{lim.toFixed(0)}
                           </option>
                         );
                       })}

@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useTransactions } from '@/hooks/useTransactions';
 import { addUnifiedRow, applyOptimisticAddToQueryCache } from '@/hooks/useSheets';
+import { useAppStore } from '@/stores/app-store';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -58,6 +59,7 @@ const AVAILABLE_CATEGORIES = [
 
 export function RecurringCommitments() {
   const queryClient = useQueryClient();
+  const { selectedMonth } = useAppStore();
   const { transactions = [] } = useTransactions();
   const [commitments, setCommitments] = useState<RecurringCommitment[]>([]);
   const [mounted, setMounted] = useState(false);
@@ -74,10 +76,13 @@ export function RecurringCommitments() {
   const [formAutoRecord, setFormAutoRecord] = useState(false);
 
   const today = new Date();
-  const currentYear = today.getFullYear();
-  const currentMonthNum = today.getMonth() + 1;
+  const todayYear = today.getFullYear();
+  const todayMonthNum = today.getMonth() + 1;
   const currentDay = today.getDate();
-  const currentMonthStr = `${currentYear}-${String(currentMonthNum).padStart(2, '0')}`;
+  const realCurrentMonthStr = `${todayYear}-${String(todayMonthNum).padStart(2, '0')}`;
+  const isSpecificMonth = /^\d{4}-\d{2}$/.test(selectedMonth || '');
+  const currentMonthStr = isSpecificMonth ? selectedMonth : realCurrentMonthStr;
+  const [currentYear, currentMonthNum] = currentMonthStr.split('-').map(Number);
 
   // Initial load & dynamic cloud sync listener
   useEffect(() => {
@@ -362,11 +367,11 @@ export function RecurringCommitments() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           <div className="text-right">
             <span className="text-[10px] text-slate-600 dark:text-zinc-400 uppercase tracking-wider block">Monthly Total</span>
-            <span className="text-sm font-bold text-slate-950 dark:text-white font-mono tabular-nums">
-              RM {totalMonthlyCommitments.toFixed(2)}
+            <span className="text-sm font-bold text-slate-950 dark:text-white font-mono tabular-nums whitespace-nowrap">
+              RM{'\u00A0'}{totalMonthlyCommitments.toFixed(2)}
             </span>
           </div>
 
@@ -398,7 +403,11 @@ export function RecurringCommitments() {
           const daysInCurrentMonth = getDaysInMonth(currentYear, currentMonthNum);
           const effectiveDueDay = Math.min(item.dayOfMonth, daysInCurrentMonth);
           const isRecorded = !!matchedTx;
-          const isDueOrPast = !isScheduledFuture && currentDay >= effectiveDueDay;
+          const isPastMonth = currentMonthStr < realCurrentMonthStr;
+          const isFutureMonth = currentMonthStr > realCurrentMonthStr;
+          const isDueOrPast =
+            !isScheduledFuture &&
+            (isPastMonth || (!isFutureMonth && currentDay >= effectiveDueDay));
 
           // Check if future scheduled change exists
           const futureRateChange = !isScheduledFuture ? item.history?.find(h => h.effectiveFrom > currentMonthStr) : undefined;
@@ -411,28 +420,28 @@ export function RecurringCommitments() {
               transition={{ type: 'spring' as const, stiffness: 400, damping: 25 }}
               className={`rounded-3xl border p-4 transition-all duration-300 specular-card shadow-sm hover:shadow-md ${
                 isRecorded
-                  ? 'border-emerald-500/25 bg-gradient-to-br from-emerald-950/20 via-slate-100 dark:via-zinc-900/60 to-white dark:to-zinc-950 hover:border-emerald-500/40'
+                  ? 'border-emerald-500/25 bg-gradient-to-br from-emerald-50/80 dark:from-emerald-950/20 via-slate-100 dark:via-zinc-900/60 to-white dark:to-zinc-950 hover:border-emerald-500/40'
                   : isScheduledFuture
-                    ? 'border-slate-200 dark:border-zinc-800/80 bg-gradient-to-br from-zinc-900/70 via-slate-100 dark:via-zinc-900/50 to-white dark:to-zinc-950 hover:border-slate-300 dark:hover:border-zinc-700/80'
+                    ? 'border-slate-200 dark:border-zinc-800/80 bg-gradient-to-br from-slate-50/90 dark:from-zinc-900/70 via-slate-100 dark:via-zinc-900/50 to-white dark:to-zinc-950 hover:border-slate-300 dark:hover:border-zinc-700/80'
                     : isDueOrPast
-                      ? 'border-amber-500/25 bg-gradient-to-br from-amber-950/20 via-slate-100 dark:via-zinc-900/60 to-white dark:to-zinc-950 hover:border-amber-500/40'
-                      : 'border-slate-200 dark:border-zinc-800/80 bg-gradient-to-br from-zinc-900/70 via-slate-100 dark:via-zinc-900/50 to-white dark:to-zinc-950 hover:border-slate-300 dark:hover:border-zinc-700/80'
+                      ? 'border-amber-500/25 bg-gradient-to-br from-amber-50/80 dark:from-amber-950/20 via-slate-100 dark:via-zinc-900/60 to-white dark:to-zinc-950 hover:border-amber-500/40'
+                      : 'border-slate-200 dark:border-zinc-800/80 bg-gradient-to-br from-slate-50/90 dark:from-zinc-900/70 via-slate-100 dark:via-zinc-900/50 to-white dark:to-zinc-950 hover:border-slate-300 dark:hover:border-zinc-700/80'
               }`}
             >
               <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className={`h-11 w-11 rounded-2xl flex items-center justify-center border shadow-sm ${iconConfig.color}`}>
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div className={`h-11 w-11 shrink-0 rounded-2xl flex items-center justify-center border shadow-sm ${iconConfig.color}`}>
                     <IconComponent className="h-5 w-5" />
                   </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-slate-950 dark:text-white flex items-center gap-1.5">
-                      <span>{item.name}</span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-lg font-mono text-slate-700 dark:text-zinc-300 bg-slate-100 dark:bg-zinc-800 border border-slate-300 dark:border-zinc-700/50">
+                  <div className="min-w-0 flex-1">
+                    <h4 className="text-sm font-bold text-slate-950 dark:text-white flex items-center gap-1.5 min-w-0">
+                      <span className="truncate">{item.name}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-lg font-mono text-slate-700 dark:text-zinc-300 bg-slate-100 dark:bg-zinc-800 border border-slate-300 dark:border-zinc-700/50 shrink-0 whitespace-nowrap">
                         {item.dayOfMonth}th
                       </span>
                     </h4>
-                    <span className="text-xs text-slate-600 dark:text-zinc-400 block font-mono font-semibold mt-0.5">
-                      RM {currentRate.toFixed(2)} / month
+                    <span className="text-xs text-slate-600 dark:text-zinc-400 block font-mono font-semibold whitespace-nowrap tabular-nums mt-0.5">
+                      RM{'\u00A0'}{currentRate.toFixed(2)} / month
                     </span>
                   </div>
                 </div>
@@ -477,15 +486,19 @@ export function RecurringCommitments() {
                     </span>
                   ) : (
                     <span className="text-slate-600 dark:text-zinc-400 flex items-center gap-1.5 font-medium">
-                      <Calendar className="h-4 w-4 text-slate-500 dark:text-zinc-400" />
-                      <span>In {effectiveDueDay - currentDay} days ({currentMonthStr}-{String(effectiveDueDay).padStart(2, '0')})</span>
+                      <Calendar className="h-4 w-4 text-slate-500 dark:text-zinc-400 shrink-0" />
+                      <span>
+                        {isFutureMonth
+                          ? `Scheduled (${currentMonthStr}-${String(effectiveDueDay).padStart(2, '0')})`
+                          : `In ${effectiveDueDay - currentDay} days (${currentMonthStr}-${String(effectiveDueDay).padStart(2, '0')})`}
+                      </span>
                     </span>
                   )}
 
                   {/* Future rate note if scheduled */}
                   {futureRateChange && (
-                    <span className="text-[10px] text-indigo-800 dark:text-indigo-300 font-mono block mt-1">
-                      📈 Increases to RM {futureRateChange.amount.toFixed(2)} in {futureRateChange.effectiveFrom}
+                    <span className="text-[10px] text-indigo-800 dark:text-indigo-300 font-mono whitespace-nowrap tabular-nums block mt-1">
+                      📈 Increases to RM{'\u00A0'}{futureRateChange.amount.toFixed(2)} in {futureRateChange.effectiveFrom}
                     </span>
                   )}
                 </div>

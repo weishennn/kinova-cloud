@@ -65,7 +65,7 @@ export function ConfirmDialog() {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             transition={{ type: 'spring', damping: 26, stiffness: 380 }}
-            className="relative w-full max-w-sm sm:max-w-md rounded-3xl border border-slate-200 dark:border-white/[0.12] bg-[#0c1019]/95 p-6 shadow-[0_24px_60px_rgba(0,0,0,0.85)] backdrop-blur-2xl specular-card overflow-hidden z-10"
+            className="relative w-full max-w-sm sm:max-w-md rounded-3xl border border-slate-200 dark:border-white/[0.12] bg-white dark:bg-[#0c1019]/95 p-6 shadow-2xl dark:shadow-[0_24px_60px_rgba(0,0,0,0.85)] backdrop-blur-2xl specular-card overflow-hidden z-10"
           >
             {/* Close 'X' Button */}
             <button
@@ -118,7 +118,7 @@ export function ConfirmDialog() {
                 type="button"
                 onClick={handleConfirm}
                 autoFocus
-                className={`h-11 px-4 rounded-2xl text-slate-950 dark:text-white font-semibold text-xs sm:text-sm shadow-xl transition-all cursor-pointer touch-manipulation active:scale-[0.96] ${
+                className={`h-11 px-4 rounded-2xl text-white font-semibold text-xs sm:text-sm shadow-xl transition-all cursor-pointer touch-manipulation active:scale-[0.96] ${
                   isDanger
                     ? 'bg-gradient-to-r from-rose-500 via-rose-600 to-red-600 hover:from-rose-600 hover:to-red-700 shadow-rose-500/25'
                     : isWarning

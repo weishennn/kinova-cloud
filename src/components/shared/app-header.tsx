@@ -65,12 +65,15 @@ export function AppHeader() {
             type="button"
             onClick={() => setKinovaAIOpen(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-500/10 hover:bg-indigo-500/20 active:scale-95 text-indigo-600 dark:text-indigo-300 border border-indigo-500/25 text-xs font-semibold transition-all cursor-pointer shadow-xs"
-            title="Ask Kinova AI (小票智能查价)"
+            title="Ask Kinova AI (Ctrl+K / Cmd+K)"
             aria-label="Open Kinova AI"
           >
-            <Sparkles size={13} className="text-indigo-500" />
-            <span className="hidden sm:inline">Ask Kinova</span>
+            <Sparkles size={13} className="text-indigo-500 shrink-0" />
+            <span className="hidden sm:inline whitespace-nowrap">Ask Kinova</span>
             <span className="sm:hidden font-medium">Ask</span>
+            <kbd className="hidden lg:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 rounded">
+              ⌘K
+            </kbd>
           </button>
           <ThemeToggle className="cockpit-icon-button" />
           <button

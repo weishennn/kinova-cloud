@@ -10,6 +10,8 @@ import {
   type UserGoal,
 } from '@/lib/user-money-profile';
 import { useTransactions } from '@/hooks/useTransactions';
+import { SETTINGS_UPDATED_EVENT } from '@/lib/cloud-settings-sync';
+import { CROSS_TAB_STATE_EVENT } from '@/lib/cache-manager';
 
 export function WhatKinovaKnows() {
   const { transactions: allTransactions = [] } = useTransactions();
@@ -18,7 +20,16 @@ export function WhatKinovaKnows() {
   const [newGoalAmount, setNewGoalAmount] = useState('');
 
   useEffect(() => {
-    setProfile(getUserMoneyProfile(allTransactions));
+    const refresh = () => setProfile(getUserMoneyProfile(allTransactions));
+    refresh();
+    window.addEventListener(SETTINGS_UPDATED_EVENT, refresh);
+    window.addEventListener(CROSS_TAB_STATE_EVENT, refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener(SETTINGS_UPDATED_EVENT, refresh);
+      window.removeEventListener(CROSS_TAB_STATE_EVENT, refresh);
+      window.removeEventListener('storage', refresh);
+    };
   }, [allTransactions]);
 
   const handleLanguageChange = (lang: UserMoneyProfile['language']) => {

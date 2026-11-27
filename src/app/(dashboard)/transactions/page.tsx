@@ -28,6 +28,8 @@ import { confirmAction } from "@/stores/confirm-dialog-store"
 import { getAmountInBaseCurrency } from "@/lib/currency"
 import { getLocalDateString, getRelativeDateString, getTransactionRecordedInfo, parseLocalDate } from "@/lib/date-helper"
 import { getTransactionTaxRelief } from "@/lib/lhdn-tax-helper"
+import { buildPeriodCatalog, formatPeriodDisplay, stepPeriod } from "@/lib/period-helper"
+import { normalizeToCanonicalCategory } from "@/lib/canonical-categories"
 import { AnimatedNumber } from "@/components/shared/animated-number"
 import { CockpitPageHeading } from "@/components/money-cockpit/cockpit-page-heading"
 
@@ -46,108 +48,52 @@ interface DayGroup {
 export default function TransactionsPage() {
   const { setQuickAddOpen, setEditTransaction, selectedMonth, setSelectedMonth } = useAppStore()
   const [filterType, setFilterType] = useState<'all' | 'expense' | 'income' | 'investment' | 'tax'>('all')
+  const [filterCategory, setFilterCategory] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null)
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    const typeParam = params.get('type')?.toLowerCase();
-    if (typeParam === 'investment' || typeParam === 'expense' || typeParam === 'income' || typeParam === 'tax') {
-      setFilterType(typeParam as any);
-    }
+    const syncParamsFromUrl = () => {
+      if (typeof window === 'undefined') return;
+      const params = new URLSearchParams(window.location.search);
+      const typeParam = params.get('type')?.toLowerCase();
+      if (typeParam === 'investment' || typeParam === 'expense' || typeParam === 'income' || typeParam === 'tax') {
+        setFilterType(typeParam as any);
+      }
+      const categoryParam = params.get('category');
+      if (categoryParam && categoryParam.trim()) {
+        setFilterCategory(categoryParam.trim());
+        if (!typeParam) setFilterType('expense');
+      } else {
+        setFilterCategory(null);
+      }
+    };
+    syncParamsFromUrl();
+    window.addEventListener('popstate', syncParamsFromUrl);
+    return () => window.removeEventListener('popstate', syncParamsFromUrl);
   }, []);
-
-  // Current active month in YYYY-MM format, e.g. "2026-10"
-  const currentMonthStr = useMemo(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  }, []);
-
-  const { currentMonthShort, currentMonthName } = useMemo(() => {
-    const [y, m] = currentMonthStr.split('-').map(Number);
-    if (!isNaN(y) && !isNaN(m)) {
-      const d = new Date(y, m - 1, 1);
-      return {
-        currentMonthShort: d.toLocaleString('en-US', { month: 'short' }),
-        currentMonthName: d.toLocaleString('en-US', { month: 'long', year: 'numeric' }),
-      };
-    }
-    return { currentMonthShort: 'Current', currentMonthName: 'Current Month' };
-  }, [currentMonthStr]);
 
   const { data: months = [] } = useMonthList()
   const { transactions = [], isLoading } = useTransactions(selectedMonth ? { period: selectedMonth } : undefined)
   const deleteMutation = useDeleteTransaction()
 
-  // Extract all available years and months from transactions + current year/month
-  const { availableYears, monthsByYear } = useMemo(() => {
-    const [curY] = currentMonthStr.split('-').map(Number);
-    const curYStr = String(curY);
-    const activeYears = new Set<number>([curY, curY - 1, curY + 1]);
+  const { currentMonth: currentMonthStr, currentMonthShort, currentYearStr, orderedYears: availableYears, months: catalogMonths } = useMemo(
+    () => buildPeriodCatalog(months, selectedMonth, transactions),
+    [months, selectedMonth, transactions]
+  );
 
-    // Add years from sheets query
-    months.forEach(m => {
-      if (/^\d{4}-\d{2}$/.test(m)) activeYears.add(Number(m.substring(0, 4)));
-    });
-
-    // Add years from all recorded transactions
-    transactions.forEach(t => {
-      if (t.date && t.date.length >= 7 && /^\d{4}-\d{2}/.test(t.date)) {
-        activeYears.add(Number(t.date.substring(0, 4)));
-      }
-    });
-
-    // Add year from currently selected period (e.g. when navigating with < / > arrows)
-    if (selectedMonth?.startsWith('year-')) {
-      const selY = Number(selectedMonth.slice(5));
-      if (Number.isFinite(selY) && selY >= 2000 && selY <= 2100) activeYears.add(selY);
-    } else if (selectedMonth && /^\d{4}-\d{2}$/.test(selectedMonth)) {
-      const selY = Number(selectedMonth.slice(0, 4));
-      if (Number.isFinite(selY) && selY >= 2000 && selY <= 2100) activeYears.add(selY);
-    }
-
-    const monthSet = new Set<string>([currentMonthStr]);
-    activeYears.forEach(yr => {
-      for (let m = 1; m <= 12; m++) {
-        monthSet.add(`${yr}-${String(m).padStart(2, '0')}`);
-      }
-    });
-
-    const sortedMonths = Array.from(monthSet).sort((a, b) => b.localeCompare(a));
-
+  const monthsByYear = useMemo(() => {
     const byYear: Record<string, string[]> = {};
-    const yearSet = new Set<string>();
-
-    sortedMonths.forEach(m => {
+    catalogMonths.forEach((m) => {
       const y = m.substring(0, 4);
-      yearSet.add(y);
       if (!byYear[y]) byYear[y] = [];
       byYear[y].push(m);
     });
+    return byYear;
+  }, [catalogMonths]);
 
-    const sortedYears = Array.from(yearSet).sort((a, b) => {
-      if (a === curYStr) return -1;
-      if (b === curYStr) return 1;
-      return b.localeCompare(a);
-    });
-
-    return {
-      availableYears: sortedYears,
-      monthsByYear: byYear,
-    };
-  }, [transactions, months, currentMonthStr, selectedMonth]);
-
-  const formatPeriodLabel = (pStr: string) => {
-    if (!pStr || pStr === 'all') return 'All Months';
-    if (pStr.startsWith('year-')) {
-      return `Full Year ${pStr.replace('year-', '')}`;
-    }
-    const [y, m] = pStr.split('-').map(Number);
-    if (isNaN(y) || isNaN(m)) return pStr;
-    const d = new Date(y, m - 1, 1);
-    return d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-  };
+  const currentMonthName = formatPeriodDisplay(currentMonthStr);
+  const formatPeriodLabel = (pStr: string) => formatPeriodDisplay(pStr);
 
   // Filter transactions
   const filteredTransactions = useMemo(() => {
@@ -160,6 +106,22 @@ export default function TransactionsPage() {
         if (!getTransactionTaxRelief(t)) return false;
       } else if (filterType !== 'all' && t.type !== filterType) {
         return false;
+      }
+
+      // Filter by explicit category pill (?category=...)
+      if (filterCategory) {
+        const canonical = normalizeToCanonicalCategory(
+          t.category || 'Other',
+          t.type === 'income' ? 'Income' : 'Expense',
+          t.description
+        );
+        const targetLower = filterCategory.toLowerCase();
+        if (
+          canonical.toLowerCase() !== targetLower &&
+          String(t.category || '').toLowerCase() !== targetLower
+        ) {
+          return false;
+        }
       }
 
       // Filter by month/period
@@ -184,7 +146,7 @@ export default function TransactionsPage() {
 
       return true;
     });
-  }, [transactions, filterType, selectedMonth, searchQuery]);
+  }, [transactions, filterType, filterCategory, selectedMonth, searchQuery]);
 
   // Group filtered transactions by day with daily totals
   const dayGroups = useMemo<DayGroup[]>(() => {
@@ -293,28 +255,7 @@ export default function TransactionsPage() {
   }, [filteredTransactions]);
 
   const changePeriod = (direction: -1 | 1) => {
-    if (!selectedMonth || selectedMonth === 'all') {
-      if (direction === -1) {
-        const [y, m] = currentMonthStr.split('-').map(Number);
-        const prev = new Date(y, m - 2, 1);
-        setSelectedMonth(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`);
-      } else {
-        setSelectedMonth(currentMonthStr);
-      }
-      return;
-    }
-    if (selectedMonth.startsWith('year-')) {
-      const year = Number(selectedMonth.slice(5)) + direction;
-      setSelectedMonth(`year-${year}`);
-      return;
-    }
-    const [year, month] = selectedMonth.split('-').map(Number);
-    if (!year || !month) {
-      setSelectedMonth(currentMonthStr);
-      return;
-    }
-    const next = new Date(year, month - 1 + direction, 1);
-    setSelectedMonth(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`);
+    setSelectedMonth(stepPeriod(selectedMonth, direction, currentMonthStr));
   };
 
   const handleDelete = async (t: Transaction, index?: number) => {
@@ -481,17 +422,17 @@ export default function TransactionsPage() {
         {/* Right: Amount & Actions */}
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <div className="text-right">
-            <div className={`text-sm sm:text-base font-bold font-mono tabular-nums tracking-tight ${
+            <div className={`text-sm sm:text-base font-bold font-mono tabular-nums whitespace-nowrap tracking-tight ${
               isIncome || isSell ? 'text-emerald-800 dark:text-emerald-400' : isInvestment ? 'text-indigo-800 dark:text-indigo-400' : isInst ? 'text-violet-800 dark:text-purple-300' : 'text-slate-900 dark:text-zinc-100'
             }`}>
-              {isIncome || isSell ? '+' : '-'}{t.currency === 'USD' ? '$' : t.currency === 'CNY' ? '¥' : t.currency === 'SGD' ? 'S$' : (t.currency || 'MYR') + ' '}{t.amount.toFixed(2)}
+              {isIncome || isSell ? '+' : '-'}{t.currency === 'USD' ? '$' : t.currency === 'CNY' ? '¥' : t.currency === 'SGD' ? 'S$' : ((t.currency === 'MYR' || !t.currency) ? 'RM\u00A0' : `${t.currency}\u00A0`)}{t.amount.toFixed(2)}
             </div>
             {t.currency && t.currency !== 'MYR' && (
-              <div className="text-[10px] text-slate-600 dark:text-zinc-400 font-mono mt-0.5">
+              <div className="text-[10px] text-slate-600 dark:text-zinc-400 font-mono whitespace-nowrap tabular-nums mt-0.5">
                 {t.notes && t.notes.includes('Cost: RM')
-                  ? t.notes.match(/Cost:\s*RM\s*[\d.]+/)?.[0]
+                  ? t.notes.match(/Cost:\s*RM\s*[\d.]+/)?.[0]?.replace('RM ', 'RM\u00A0')
                   : t.baseAmount && t.baseAmount > 0
-                  ? `≈ RM ${t.baseAmount.toFixed(2)}`
+                  ? `≈ RM\u00A0${t.baseAmount.toFixed(2)}`
                   : t.currency}
               </div>
             )}
@@ -538,10 +479,10 @@ export default function TransactionsPage() {
 
       {/* Filter, Month and Search Toolbar */}
       <div className="space-y-3">
-        {/* Row 1: Type Filter Chips */}
-        <div className="flex items-center gap-3 overflow-x-auto no-scrollbar">
+        {/* Row 1: Type Filter Chips + Optional Deep-Linked Category Chip */}
+        <div className="flex flex-wrap items-center gap-2.5">
           {/* Type Filter Chips with animated sliding pill */}
-          <div className="cockpit-segmented-control relative flex w-full sm:w-auto justify-between sm:justify-start rounded-2xl bg-white/90 dark:bg-zinc-950/80 p-1 border border-slate-200 dark:border-white/[0.08] shadow-sm">
+          <div className="cockpit-segmented-control relative flex w-full sm:w-auto justify-between sm:justify-start rounded-2xl bg-white/90 dark:bg-zinc-950/80 p-1 border border-slate-200 dark:border-white/[0.08] shadow-sm overflow-x-auto no-scrollbar">
             {(['all', 'expense', 'income', 'investment', 'tax'] as const).map((t) => (
               <button
                 key={t}
@@ -565,40 +506,95 @@ export default function TransactionsPage() {
               </button>
             ))}
           </div>
+
+          {filterCategory && (
+            <button
+              type="button"
+              onClick={() => {
+                setFilterCategory(null);
+                if (typeof window !== 'undefined') {
+                  const url = new URL(window.location.href);
+                  url.searchParams.delete('category');
+                  window.history.replaceState({}, '', url.toString());
+                }
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/30 text-indigo-800 dark:text-indigo-200 text-xs font-semibold transition-all cursor-pointer whitespace-nowrap"
+              title="Clear category filter"
+            >
+              <span>Category: {filterCategory}</span>
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
 
-        {/* Row 2: Month Selector with < > Arrows + Search Field */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3">
-          {/* Month & Multi-Year Selector with < and > navigation */}
-          <div className="flex items-center gap-1.5">
+        {/* Row 2: Unified Period Tabs + Month Stepper (< >) + Search Field */}
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center gap-2.5 sm:gap-3">
+          <div className="cockpit-period-tabs shrink-0" role="group" aria-label="Period type">
             <button
               type="button"
-              onClick={() => changePeriod(-1)}
-              className="h-11 w-11 shrink-0 inline-flex items-center justify-center rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/90 text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:border-indigo-400/50 active:scale-[0.96] transition-all cursor-pointer touch-manipulation"
-              aria-label="Previous period"
-              title="Previous period"
+              className={selectedMonth !== 'all' && !selectedMonth?.startsWith('year-') ? 'is-active' : ''}
+              onClick={() => {
+                if (selectedMonth?.startsWith('year-')) {
+                  const yr = selectedMonth.slice(5);
+                  setSelectedMonth(yr === currentYearStr ? currentMonthStr : `${yr}-01`);
+                } else {
+                  setSelectedMonth(currentMonthStr);
+                }
+              }}
             >
-              <ChevronLeft className="h-4 w-4" />
+              Month
             </button>
+            <button
+              type="button"
+              className={selectedMonth?.startsWith('year-') ? 'is-active' : ''}
+              onClick={() => {
+                const yr = /^\d{4}-\d{2}$/.test(selectedMonth || '') ? selectedMonth.slice(0, 4) : currentYearStr;
+                setSelectedMonth(`year-${yr}`);
+              }}
+            >
+              Year
+            </button>
+            <button
+              type="button"
+              className={selectedMonth === 'all' ? 'is-active' : ''}
+              onClick={() => setSelectedMonth('all')}
+            >
+              All time
+            </button>
+          </div>
 
-            <button
-              type="button"
-              onClick={() => changePeriod(1)}
-              className="h-11 w-11 shrink-0 inline-flex items-center justify-center rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/90 text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:border-indigo-400/50 active:scale-[0.96] transition-all cursor-pointer touch-manipulation"
-              aria-label="Next period"
-              title="Next period"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
+          {/* Month & Multi-Year Selector with < and > navigation */}
+          <div className="cockpit-period-select-wrap">
+            <div className="cockpit-period-arrows">
+              <button
+                type="button"
+                onClick={() => changePeriod(-1)}
+                className="cockpit-period-arrow"
+                aria-label="Previous period"
+                title="Previous period"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => changePeriod(1)}
+                className="cockpit-period-arrow"
+                aria-label="Next period"
+                title="Next period"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
 
             <select
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
-              className="flex-1 sm:flex-initial h-11 min-w-[165px] rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/90 px-3.5 py-2 text-base sm:text-xs font-mono text-slate-950 dark:text-white outline-none focus:border-indigo-400 cursor-pointer transition-colors shadow-inner"
+              className="flex-1 sm:flex-initial h-11 min-w-[165px] rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/90 px-3.5 py-2 text-base sm:text-xs font-mono text-slate-950 dark:text-white outline-none focus:border-indigo-400 cursor-pointer transition-colors"
               aria-label="Filter transactions by month or year"
             >
               {availableYears.map(year => {
-                const curYStr = currentMonthStr.substring(0, 4);
+                const curYStr = currentYearStr;
                 const yLabel =
                   year === curYStr
                     ? `── ${year} (Current Year) ──`
@@ -610,7 +606,7 @@ export default function TransactionsPage() {
                 return (
                   <optgroup key={year} label={yLabel} className="bg-white dark:bg-zinc-950 text-indigo-800 dark:text-indigo-400 font-bold">
                     <option value={`year-${year}`} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono font-semibold">
-                      Full Year {year} (All {year})
+                      {year} full year
                     </option>
                     {monthsByYear[year]?.map(m => (
                       <option key={m} value={m} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono">
@@ -621,7 +617,7 @@ export default function TransactionsPage() {
                 );
               })}
               <option value="all" className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono">
-                All Time (All Transactions)
+                All time
               </option>
             </select>
 
@@ -695,7 +691,7 @@ export default function TransactionsPage() {
           {displaySummary.savingsDeposits > 0 && (
             <div className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/40 text-xs text-indigo-900 dark:text-indigo-300">
               <span className="font-medium">🏦 Separate Cash & Emergency Savings:</span>
-              <span className="font-mono font-bold">RM {displaySummary.savingsDeposits.toFixed(2)}</span>
+              <span className="font-mono font-bold">RM{'\u00A0'}{displaySummary.savingsDeposits.toFixed(2)}</span>
             </div>
           )}
         </div>
@@ -788,14 +784,14 @@ export default function TransactionsPage() {
                       <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 dark:text-zinc-400">
                         Spent
                       </span>
-                      <span className="text-xs sm:text-sm font-bold font-mono text-rose-800 dark:text-rose-400 tabular-nums">
-                        RM {group.totalExpense.toFixed(2)}
+                      <span className="text-xs sm:text-sm font-bold font-mono text-rose-800 dark:text-rose-400 tabular-nums whitespace-nowrap">
+                        RM{'\u00A0'}{group.totalExpense.toFixed(2)}
                       </span>
                     </div>
                     {group.totalIncome > 0 && (
-                      <div className="flex items-center gap-1 justify-end text-[10px] font-mono text-emerald-800 dark:text-emerald-400 mt-0.5">
+                      <div className="flex items-center gap-1 justify-end text-[10px] font-mono text-emerald-800 dark:text-emerald-400 whitespace-nowrap tabular-nums mt-0.5">
                         <span className="text-slate-500 dark:text-zinc-400 font-sans text-[9px]">Income</span>
-                        <span>+RM {group.totalIncome.toFixed(2)}</span>
+                        <span>+RM{'\u00A0'}{group.totalIncome.toFixed(2)}</span>
                       </div>
                     )}
                   </div>

@@ -158,10 +158,29 @@ export function FloatingDock() {
         <Link href="/investments" onClick={() => { setMenuOpen(false); setInvestmentTradeMenuOpen(false); }} aria-current={pathname === '/investments' ? 'page' : undefined} className={`cockpit-dock-link ${pathname === '/investments' ? 'is-active' : ''}`}>
           <TrendingUp size={19} aria-hidden="true" /><span>Investments</span>
         </Link>
-        <button ref={moreActionRef} type="button" className={`cockpit-dock-link ${menuOpen || isMoreRoute ? 'is-active' : ''}`} onClick={() => { setInvestmentTradeMenuOpen(false); setMenuOpen((open) => !open); }} aria-label="More destinations" aria-current={isMoreRoute ? 'page' : undefined} aria-expanded={menuOpen} aria-controls="cockpit-more-menu">
+        <button ref={moreActionRef} type="button" className={`cockpit-dock-link cockpit-more-toggle ${menuOpen || isMoreRoute ? 'is-active' : ''}`} onClick={() => { setInvestmentTradeMenuOpen(false); setMenuOpen((open) => !open); }} aria-label="More destinations" aria-current={isMoreRoute ? 'page' : undefined} aria-expanded={menuOpen} aria-controls="cockpit-more-menu">
           <Ellipsis size={20} aria-hidden="true" /><span>More</span>
         </button>
       </nav>
+      <div className="cockpit-desktop-secondary" aria-label="Workspace sections">
+        <span className="cockpit-desktop-secondary-label">Tools & Planning</span>
+        {secondaryLinks.map(({ label, href, icon: Icon }) => {
+          const baseHref = href.split('#')[0];
+          const isActive = href.includes('#') ? false : pathname === baseHref || pathname.startsWith(`${baseHref}/`);
+          return (
+            <Link
+              href={href}
+              key={`desktop-${href}`}
+              onClick={() => { setMenuOpen(false); setInvestmentTradeMenuOpen(false); }}
+              aria-current={isActive ? 'page' : undefined}
+              className={`cockpit-dock-link ${isActive ? 'is-active' : ''}`}
+            >
+              <Icon size={18} aria-hidden="true" />
+              <span className="truncate">{label}</span>
+            </Link>
+          );
+        })}
+      </div>
     </div>
     <CockpitModal
       id="cockpit-trade-menu"

@@ -56,14 +56,14 @@ export function MoneyOrbit({
 
       {/* Unpaid Committed Bills Reserve & Safe Discretionary Progress Bar */}
       {typeof userBudgetCap === 'number' && userBudgetCap > 0 && (
-        <div className="mt-3 px-3.5 py-2.5 rounded-2xl bg-slate-100/80 dark:bg-zinc-900/60 border border-slate-200 dark:border-white/[0.06] space-y-1.5">
-          <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-zinc-400">
-            <span>Budget: <strong className="font-mono text-slate-900 dark:text-white">RM {userBudgetCap.toLocaleString()}</strong></span>
-            <span className="font-mono font-medium">
+        <div className="col-span-full pt-4 border-t border-slate-200/80 dark:border-white/[0.06] space-y-1.5">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-zinc-400">
+            <span className="whitespace-nowrap">Budget: <strong className="font-mono tabular-nums text-slate-900 dark:text-white">RM{'\u00A0'}{userBudgetCap.toLocaleString()}</strong></span>
+            <span className="font-mono font-medium whitespace-nowrap tabular-nums">
               {budgetSpent > userBudgetCap ? (
                 <span className="text-rose-600 dark:text-rose-400 font-bold">Over Budget</span>
               ) : (
-                <span className="text-emerald-600 dark:text-emerald-400">RM {Math.max(0, userBudgetCap - budgetSpent - unpaidCommittedReserve).toFixed(0)} safe to spend</span>
+                <span className="text-emerald-600 dark:text-emerald-400">RM{'\u00A0'}{Math.max(0, userBudgetCap - budgetSpent - unpaidCommittedReserve).toFixed(0)} safe to spend</span>
               )}
             </span>
           </div>
@@ -86,12 +86,12 @@ export function MoneyOrbit({
               title={`Safe Discretionary: RM ${Math.max(0, userBudgetCap - budgetSpent - unpaidCommittedReserve).toFixed(2)}`}
             />
           </div>
-          <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-zinc-400">
-            <span>Spent: RM {budgetSpent.toFixed(0)}</span>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500 dark:text-zinc-400">
+            <span className="whitespace-nowrap tabular-nums">Spent: RM{'\u00A0'}{budgetSpent.toFixed(0)}</span>
             {unpaidCommittedReserve > 0 && (
-              <span className="text-amber-700 dark:text-amber-400 font-medium">Bills: RM {unpaidCommittedReserve.toFixed(0)}</span>
+              <span className="text-amber-700 dark:text-amber-400 font-medium whitespace-nowrap tabular-nums">Bills: RM{'\u00A0'}{unpaidCommittedReserve.toFixed(0)}</span>
             )}
-            <span className="text-emerald-700 dark:text-emerald-400 font-medium">Safe: RM {Math.max(0, userBudgetCap - budgetSpent - unpaidCommittedReserve).toFixed(0)}</span>
+            <span className="text-emerald-700 dark:text-emerald-400 font-medium whitespace-nowrap tabular-nums">Safe: RM{'\u00A0'}{Math.max(0, userBudgetCap - budgetSpent - unpaidCommittedReserve).toFixed(0)}</span>
           </div>
         </div>
       )}

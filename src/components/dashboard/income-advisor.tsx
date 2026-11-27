@@ -369,7 +369,7 @@ export function IncomeAdvisor({
               收入波动感知 (波动率约 {Math.round(incomeVolatility * 100)}%)
             </div>
             <div className="text-[11px] opacity-90 mt-0.5">
-              检测到你的历史月收入存在起伏。对于弹性收入者，建议将应急金储备目标设定为 6-9 个月（基于往期月均支出 RM {rollingMonthlyExpense.toFixed(0)} 测算），以保障低谷月份的财务韧性。
+              检测到你的历史月收入存在起伏。对于弹性收入者，建议将应急金储备目标设定为 6-9 个月（基于往期月均支出 RM{'\u00A0'}{rollingMonthlyExpense.toFixed(0)} 测算），以保障低谷月份的财务韧性。
             </div>
           </div>
         </div>
@@ -413,7 +413,7 @@ export function IncomeAdvisor({
             <div className="space-y-1.5 pt-1">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-slate-600 dark:text-zinc-400">
-                  Saved this month: <strong className="text-slate-950 dark:text-white">RM {actualSavedCash.toFixed(2)}</strong>
+                  Saved this month: <strong className="text-slate-950 dark:text-white">RM{'\u00A0'}{actualSavedCash.toFixed(2)}</strong>
                 </span>
                 <span className="text-indigo-800 dark:text-indigo-400 font-semibold">{emergencyProgress.toFixed(0)}%</span>
               </div>
@@ -552,7 +552,7 @@ export function IncomeAdvisor({
             <div className="space-y-1.5 pt-1">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-slate-600 dark:text-zinc-400">
-                  Invested this month: <strong className="text-slate-950 dark:text-white">RM {actualInvested.toFixed(2)}</strong>
+                  Invested this month: <strong className="text-slate-950 dark:text-white">RM{'\u00A0'}{actualInvested.toFixed(2)}</strong>
                 </span>
                 <span className="text-indigo-800 dark:text-indigo-400 font-semibold">{investmentProgress.toFixed(0)}%</span>
               </div>

@@ -1277,11 +1277,11 @@ export default function InvestmentsPage() {
           <div className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-indigo-500" />
             <span className="text-xs font-bold text-slate-900 dark:text-white">
-              Monthly Wealth Building Plan ({allocation.savingsTargetPct + allocation.investmentTargetPct}% of RM {allocation.baselineIncome.toLocaleString()} Income)
+              Monthly Wealth Building Plan ({allocation.savingsTargetPct + allocation.investmentTargetPct}% of RM{'\u00A0'}{allocation.baselineIncome.toLocaleString()} Income)
             </span>
           </div>
           <span className="text-xs font-mono font-bold text-indigo-700 dark:text-indigo-300">
-            RM {(allocation.actualInvestedThisMonth + allocation.actualSavedThisMonth).toFixed(0)} / RM {(allocation.targetInvestmentAmount + allocation.targetSavingsAmount).toLocaleString()} achieved
+            RM{'\u00A0'}{(allocation.actualInvestedThisMonth + allocation.actualSavedThisMonth).toFixed(0)} / RM{'\u00A0'}{(allocation.targetInvestmentAmount + allocation.targetSavingsAmount).toLocaleString()} achieved
           </span>
         </div>
 
@@ -1293,7 +1293,7 @@ export default function InvestmentsPage() {
                 <span>📈 Market Investments ({allocation.investmentTargetPct}% goal)</span>
               </span>
               <span className="font-mono font-bold text-slate-900 dark:text-white">
-                RM {allocation.actualInvestedThisMonth.toFixed(0)} / RM {allocation.targetInvestmentAmount.toLocaleString()}
+                RM{'\u00A0'}{allocation.actualInvestedThisMonth.toFixed(0)} / RM{'\u00A0'}{allocation.targetInvestmentAmount.toLocaleString()}
               </span>
             </div>
             <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-zinc-700">
@@ -1313,7 +1313,7 @@ export default function InvestmentsPage() {
                 <span>🛡️ Cash & Fixed Deposits ({allocation.savingsTargetPct}% goal)</span>
               </span>
               <span className="font-mono font-bold text-slate-900 dark:text-white">
-                RM {allocation.actualSavedThisMonth.toFixed(0)} / RM {allocation.targetSavingsAmount.toLocaleString()}
+                RM{'\u00A0'}{allocation.actualSavedThisMonth.toFixed(0)} / RM{'\u00A0'}{allocation.targetSavingsAmount.toLocaleString()}
               </span>
             </div>
             <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-zinc-700">
@@ -1601,7 +1601,7 @@ export default function InvestmentsPage() {
                             <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
                             <span className="text-slate-700 dark:text-zinc-300 font-medium">{item.name}</span>
                           </div>
-                          <span className="text-slate-600 dark:text-zinc-400 font-mono">RM {item.value.toFixed(2)} ({percent.toFixed(1)}%)</span>
+                          <span className="text-slate-600 dark:text-zinc-400 font-mono">RM{'\u00A0'}{item.value.toFixed(2)} ({percent.toFixed(1)}%)</span>
                         </div>
                         <div className="h-1.5 w-full bg-slate-100 dark:bg-zinc-800 rounded-full overflow-hidden">
                           <div className="h-full rounded-full" style={{ width: `${percent}%`, backgroundColor: item.color }} />
@@ -1711,7 +1711,7 @@ export default function InvestmentsPage() {
                             {!isClosed ? (
                               <>
                                 <div className="font-bold text-base text-slate-950 dark:text-white font-mono">
-                                  RM {h.marketValueBase.toFixed(2)}
+                                  RM{'\u00A0'}{h.marketValueBase.toFixed(2)}
                                 </div>
                                 {h.currency !== 'MYR' && (
                                   <div className="text-[10px] text-slate-600 dark:text-zinc-400 font-mono">
@@ -1748,13 +1748,13 @@ export default function InvestmentsPage() {
                           <span className="text-slate-500 dark:text-zinc-400 block text-[10px] uppercase">Avg Buy</span>
                           <span className="font-medium text-slate-700 dark:text-zinc-300 font-mono">{formatAssetCurrency(h.avgBuyPrice, h.currency)}</span>
                           {h.currency !== 'MYR' && (
-                            <span className="text-[10px] text-slate-500 dark:text-zinc-400 block font-mono">RM {h.avgBuyPriceBase.toFixed(2)}</span>
+                            <span className="text-[10px] text-slate-500 dark:text-zinc-400 block font-mono">RM{'\u00A0'}{h.avgBuyPriceBase.toFixed(2)}</span>
                           )}
                         </div>
                         <div>
                           <span className="text-slate-500 dark:text-zinc-400 block text-[10px] uppercase">Cost Used</span>
                           <span className="font-medium text-slate-700 dark:text-zinc-300 font-mono">
-                            RM {(isClosed ? h.totalHistoricalCostBase : h.totalCostBase).toFixed(2)}
+                            RM{'\u00A0'}{(isClosed ? h.totalHistoricalCostBase : h.totalCostBase).toFixed(2)}
                           </span>
                           {h.currency !== 'MYR' && (
                             <span className="text-[10px] text-slate-500 dark:text-zinc-400 block font-mono">
@@ -1827,11 +1827,11 @@ export default function InvestmentsPage() {
                           <td className="p-4 text-right text-slate-600 dark:text-zinc-400 font-mono">
                             <div>{formatAssetCurrency(h.avgBuyPrice, h.currency)}</div>
                             {h.currency !== 'MYR' && (
-                              <div className="text-[11px] text-slate-500 dark:text-zinc-400 font-mono">RM {h.avgBuyPriceBase.toFixed(2)}</div>
+                              <div className="text-[11px] text-slate-500 dark:text-zinc-400 font-mono">RM{'\u00A0'}{h.avgBuyPriceBase.toFixed(2)}</div>
                             )}
                           </td>
                           <td className="p-4 text-right text-slate-700 dark:text-zinc-300 font-mono">
-                            <div>RM {(isClosed ? h.totalHistoricalCostBase : h.totalCostBase).toFixed(2)}</div>
+                            <div>RM{'\u00A0'}{(isClosed ? h.totalHistoricalCostBase : h.totalCostBase).toFixed(2)}</div>
                             {h.currency !== 'MYR' && (
                               <div className="text-[11px] text-slate-500 dark:text-zinc-400 font-normal">
                                 {formatAssetCurrency(isClosed ? h.totalHistoricalCostAsset : h.totalCost, h.currency)}
@@ -1844,7 +1844,7 @@ export default function InvestmentsPage() {
                           <td className="p-4 text-right font-bold text-slate-950 dark:text-white font-mono">
                             {!isClosed ? (
                               <>
-                                <div>RM {h.marketValueBase.toFixed(2)}</div>
+                                <div>RM{'\u00A0'}{h.marketValueBase.toFixed(2)}</div>
                                 {h.currency !== 'MYR' && (
                                   <div className="text-[11px] text-slate-600 dark:text-zinc-400 font-normal">
                                     {formatAssetCurrency(h.marketValue, h.currency)} @ {h.currentFxRate.toFixed(4)}
@@ -1897,7 +1897,7 @@ export default function InvestmentsPage() {
                             </div>
                             {h.totalDividendsBase > 0 && (
                               <div className="text-[10px] text-amber-700 dark:text-amber-400 font-normal">
-                                +RM {h.totalDividendsBase.toFixed(2)} div
+                                +RM{'\u00A0'}{h.totalDividendsBase.toFixed(2)} div
                               </div>
                             )}
                           </td>
@@ -1963,7 +1963,7 @@ export default function InvestmentsPage() {
                         <div>
                           <div className="font-bold text-sm text-slate-950 dark:text-white font-mono">{formatAssetCurrency(t.netTotal, t.currency)}</div>
                           {t.currency !== 'MYR' && (
-                            <div className="text-[11px] text-indigo-800 dark:text-indigo-300 font-mono">RM {t.costInMyr.toFixed(2)}</div>
+                            <div className="text-[11px] text-indigo-800 dark:text-indigo-300 font-mono">RM{'\u00A0'}{t.costInMyr.toFixed(2)}</div>
                           )}
                           {t.notes && <div className="text-[10px] text-slate-500 dark:text-zinc-400 truncate max-w-[100px]">{t.notes}</div>}
                         </div>
@@ -2024,7 +2024,7 @@ export default function InvestmentsPage() {
                           <td className="p-4 text-right font-mono text-slate-700 dark:text-zinc-300">
                             {t.currency === 'MYR' ? `RM ${t.netTotal.toFixed(2)}` : (
                               <div>
-                                <div className="text-indigo-800 dark:text-indigo-300 font-semibold">RM {t.costInMyr.toFixed(2)}</div>
+                                <div className="text-indigo-800 dark:text-indigo-300 font-semibold">RM{'\u00A0'}{t.costInMyr.toFixed(2)}</div>
                                 <div className="text-[10px] text-slate-500 dark:text-zinc-400 font-normal">Rate: {t.rateToMyr ? t.rateToMyr.toFixed(4) : '—'}</div>
                               </div>
                             )}
@@ -2582,7 +2582,7 @@ export default function InvestmentsPage() {
                 </div>
                 {selectedTrade.currency !== 'MYR' && (
                   <p className="text-xs text-indigo-800 dark:text-indigo-300 font-mono mt-1 font-semibold">
-                    Cost: RM {selectedTrade.costInMyr.toFixed(2)} (@ {selectedTrade.rateToMyr.toFixed(4)})
+                    Cost: RM{'\u00A0'}{selectedTrade.costInMyr.toFixed(2)} (@ {selectedTrade.rateToMyr.toFixed(4)})
                   </p>
                 )}
                 <p className="text-xs text-slate-600 dark:text-zinc-400 mt-1 font-medium">{selectedTrade.date}</p>
@@ -2606,7 +2606,7 @@ export default function InvestmentsPage() {
                     </div>
                     <div className="text-right">
                       <span>Net Proceeds:</span>
-                      <span className="font-mono font-medium block text-slate-800 dark:text-zinc-200">RM {selectedTrade.costInMyr.toFixed(2)}</span>
+                      <span className="font-mono font-medium block text-slate-800 dark:text-zinc-200">RM{'\u00A0'}{selectedTrade.costInMyr.toFixed(2)}</span>
                     </div>
                   </div>
                   <p className="text-[10px] text-slate-500 dark:text-zinc-400 italic pt-1 border-t border-slate-200 dark:border-zinc-700/50">
@@ -2650,11 +2650,11 @@ export default function InvestmentsPage() {
                   <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-200 dark:border-zinc-800/60">
                     <div>
                       <span className="text-slate-500 dark:text-zinc-400 block mb-0.5 font-medium">Exchange Rate</span>
-                      <span className="font-semibold text-slate-800 dark:text-zinc-200 font-mono">1 {selectedTrade.currency} = RM {selectedTrade.rateToMyr.toFixed(4)}</span>
+                      <span className="font-semibold text-slate-800 dark:text-zinc-200 font-mono">1 {selectedTrade.currency} = RM{'\u00A0'}{selectedTrade.rateToMyr.toFixed(4)}</span>
                     </div>
                     <div>
                       <span className="text-slate-500 dark:text-zinc-400 block mb-0.5 font-medium">Total Cost / Value (MYR)</span>
-                      <span className="font-semibold text-indigo-800 dark:text-indigo-400 font-mono">RM {selectedTrade.costInMyr.toFixed(2)}</span>
+                      <span className="font-semibold text-indigo-800 dark:text-indigo-400 font-mono">RM{'\u00A0'}{selectedTrade.costInMyr.toFixed(2)}</span>
                     </div>
                   </div>
                 )}
@@ -2723,7 +2723,7 @@ export default function InvestmentsPage() {
                 {selectedHolding.units > 0 ? (
                   <>
                     <div className="text-3xl sm:text-4xl font-black font-mono tracking-tight text-slate-950 dark:text-white">
-                      RM {selectedHolding.marketValueBase.toFixed(2)}
+                      RM{'\u00A0'}{selectedHolding.marketValueBase.toFixed(2)}
                     </div>
                     {selectedHolding.currency !== 'MYR' && (
                       <p className="text-xs text-slate-600 dark:text-zinc-400 font-mono mt-1">
@@ -2829,7 +2829,7 @@ export default function InvestmentsPage() {
                     </div>
                     <div>
                       <span className="text-slate-500 dark:text-zinc-400 block mb-0.5 font-medium">Live FX Rate</span>
-                      <span className="font-semibold text-slate-700 dark:text-zinc-300 font-mono">1 {selectedHolding.currency} = RM {selectedHolding.currentFxRate.toFixed(4)}</span>
+                      <span className="font-semibold text-slate-700 dark:text-zinc-300 font-mono">1 {selectedHolding.currency} = RM{'\u00A0'}{selectedHolding.currentFxRate.toFixed(4)}</span>
                     </div>
                   </div>
                 )}

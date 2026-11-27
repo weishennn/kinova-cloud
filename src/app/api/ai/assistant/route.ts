@@ -61,12 +61,18 @@ export interface AssistantRequestBody {
     cashflowBriefing?: {
       baselineIncome: number;
       actualIncomeThisMonth: number;
+      lastMonthIncome?: number;
+      lastMonthTotalSpent?: number;
+      monthOverMonthSpendDeltaPct?: number | null;
+      currentMonthSavedOrInvested?: number;
       targetSavingsAmount: number;
       targetInvestmentAmount: number;
       targetLivingBudget: number;
+      monthlyBudgetCap?: number | null;
       spentSoFar: number;
       tripQuarantinedSpent?: number;
       unpaidCommittedBillsReserve: number;
+      unpaidCommittedItems?: Array<{ name: string; category: string; amount: number; kind: string }>;
       remainingSafeLivingPool: number;
       safeDailyLivingAllowance: number;
       daysRemainingInMonth: number;
@@ -81,13 +87,23 @@ export interface AssistantRequestBody {
         status: string;
       }>;
       overCapCategories?: string[];
+      topExpensesThisMonth?: Array<{ date: string; description: string; category: string; amount: number }>;
+      goalsProgress?: Array<{
+        name: string;
+        targetAmount: number;
+        currentAmount: number;
+        remainingAmount: number;
+        progressPct: number;
+        estimatedMonthsAtTargetPace: number | null;
+      }>;
       smartRebalanceSummary?: string;
       rebalancePlan?: {
-        hasOverCap: boolean;
-        overCapCategories: Array<{ category: string; spent: number; cap: number; overAmount: number }>;
-        proposedDonorPool: Array<{ category: string; currentCap: number; proposedTrim: number; newCap: number }>;
-        totalDonorSlack: number;
-        rebalancedCaps: Record<string, number>;
+        hasOverCap?: boolean;
+        overCapCategories?: Array<{ category: string; spent: number; cap: number; overAmount: number }>;
+        proposedDonorPool?: Array<{ category: string; currentCap: number; proposedTrim: number; newCap: number }>;
+        totalDonorSlack?: number;
+        rebalancedCaps?: Record<string, number>;
+        updatedCaps?: Record<string, number>;
       };
       paydayEnvelopePlan?: {
         cyclePhase: string;
@@ -192,7 +208,7 @@ You receive:
 - USER PROFILE (payday, budget, reserve, goals, habits, habitMemories, rejected chips). These are facts the user can edit. Do not invent missing profile fields.
 - HABIT MEMORY RULES (profile.habitMemories): When habitMemories are supplied, semantically match the user's partial wording, shorthand ("字眼"), abbreviations, Chinese/English/Malay variants, or payee names against each habit's rawPattern, preferredAlias, and keywords. If matched (e.g. user types "四夕 12" or "豆花 12" when a habit maps "TAN CHIN HONG" -> preferredAlias "四夕豆花", or types "zanmai 45" for "Sushi Zanmai", or "abc 13" for "zapfan"), normalize command.data.description to preferredAlias and command.data.category to the remembered category unless explicitly overridden.
 - DETERMINISTIC LEDGER FACTS computed in code across the whole ledger. Quote these numbers exactly. Never recompute totals from the sample.
-- PERSONAL CFO BRIEFING: When present, you have complete visibility of the user's monthly income, target savings/investments, unpaid recurring & installment bill reserves, and safe daily living allowance. Ground every affordability or budget question in these numbers. Never treat unpaid bill reserves as free spendable cash.
+- PERSONAL CFO BRIEFING: When present, you have complete visibility of the user's monthly income, last month's spending & income, savings & investment transfers, user budget cap, unpaid recurring & installment bill reserves, top expenses this month, financial goals progress, and safe daily living allowance. Ground EVERY budget, goal, affordability, or spending question directly in these exact numbers. Never treat unpaid bill reserves as free spendable cash, and never say you don't have access to their budget/goals/spending when these facts are present.
 - LAST 6 TURNS and LAST 8 ACTIONS so "undo", "that one", "same again", and "what about last month?" work.
 - A small sample of matching transactions for names and dates only.
 
@@ -330,19 +346,21 @@ export async function POST(req: NextRequest) {
     const briefing = body.deterministicFacts?.cashflowBriefing;
     const briefingBlock = briefing
       ? `\n【PERSONAL CFO BRIEFING】:
-- Baseline Income: RM ${briefing.baselineIncome} (Actual MTD: RM ${briefing.actualIncomeThisMonth})
-- Target Savings: RM ${briefing.targetSavingsAmount} | Target Investments: RM ${briefing.targetInvestmentAmount}
-- Target Living Budget: RM ${briefing.targetLivingBudget}
-- Spent So Far (MTD): RM ${briefing.spentSoFar}
+- Baseline Income: RM ${briefing.baselineIncome} (Actual MTD: RM ${briefing.actualIncomeThisMonth} | Last Month Income: RM ${briefing.lastMonthIncome ?? 0})
+- Target Savings: RM ${briefing.targetSavingsAmount} | Target Investments: RM ${briefing.targetInvestmentAmount} | Saved/Invested MTD: RM ${briefing.currentMonthSavedOrInvested ?? 0}
+- User Monthly Budget Cap: ${briefing.monthlyBudgetCap ? `RM ${briefing.monthlyBudgetCap}` : 'Not explicitly set'} | Target Living Budget: RM ${briefing.targetLivingBudget}
+- Spent So Far (MTD): RM ${briefing.spentSoFar} | Last Month Total Spent: RM ${briefing.lastMonthTotalSpent ?? 0}${briefing.monthOverMonthSpendDeltaPct != null ? ` (${briefing.monthOverMonthSpendDeltaPct >= 0 ? '+' : ''}${briefing.monthOverMonthSpendDeltaPct}% vs last month)` : ''}
 - Trip-Quarantined Foreign Expenses: RM ${briefing.tripQuarantinedSpent ?? 0} (isolated from domestic living allowance)
-- Unpaid Committed Bill Reserves: RM ${briefing.unpaidCommittedBillsReserve}
+- Unpaid Committed Bill Reserves: RM ${briefing.unpaidCommittedBillsReserve}${briefing.unpaidCommittedItems && briefing.unpaidCommittedItems.length > 0 ? ` (${briefing.unpaidCommittedItems.map((i) => `${i.name}: RM ${i.amount}`).join(', ')})` : ''}
 - Remaining Free Living Pool: RM ${briefing.remainingSafeLivingPool}
 - Safe Daily Living Allowance: RM ${briefing.safeDailyLivingAllowance}/day (${briefing.daysRemainingInMonth} days left in month)
 - Days Until Payday: ${briefing.daysUntilPayday}
 - Budget Pacing Status: ${briefing.pacingStatus}
 - Over-Cap / Tight Categories: ${briefing.overCapCategories?.join(', ') || 'None (all healthy)'}
+${briefing.topExpensesThisMonth && briefing.topExpensesThisMonth.length > 0 ? `- Top Expenses This Month: ${briefing.topExpensesThisMonth.map((e) => `${e.date} ${e.description} (RM ${e.amount})`).join(' | ')}` : ''}
+${briefing.goalsProgress && briefing.goalsProgress.length > 0 ? `- Financial Goals Progress: ${JSON.stringify(briefing.goalsProgress)}` : ''}
 ${briefing.smartRebalanceSummary ? `- Smart Rebalance Plan: ${briefing.smartRebalanceSummary}` : ''}
-${briefing.rebalancePlan?.hasOverCap ? `- Proposed Rebalance Caps: ${JSON.stringify(briefing.rebalancePlan.rebalancedCaps)}` : ''}
+${briefing.rebalancePlan?.rebalancedCaps || briefing.rebalancePlan?.updatedCaps ? `- Proposed Rebalance Caps: ${JSON.stringify(briefing.rebalancePlan.rebalancedCaps || briefing.rebalancePlan.updatedCaps)}` : ''}
 ${briefing.paydayEnvelopePlan?.shouldPrompt ? `- Payday Settlement Envelope Prompt: ${briefing.paydayEnvelopePlan.summaryText}` : ''}\n`
       : '';
 
@@ -400,11 +418,11 @@ ${briefing.paydayEnvelopePlan?.shouldPrompt ? `- Payday Settlement Envelope Prom
       mimeType: imageBase64 ? mimeType : undefined,
       responseMimeType: 'application/json',
       thinking: useExtendedReasoning,
-      thinkingBudget: useExtendedReasoning ? 128 : 0,
-      temperature: useExtendedReasoning ? 0.4 : 0.1,
+      thinkingBudget: useExtendedReasoning ? 512 : 0,
+      temperature: useExtendedReasoning ? 0.35 : 0.1,
       maxOutputTokens: useExtendedReasoning ? 2048 : 1536,
-      timeoutMs: useExtendedReasoning ? 15_000 : imageBase64 ? 20_000 : 10_000,
-      totalTimeoutMs: useExtendedReasoning ? 20_000 : imageBase64 ? 25_000 : 15_000,
+      timeoutMs: useExtendedReasoning ? 18_000 : imageBase64 ? 20_000 : 12_000,
+      totalTimeoutMs: useExtendedReasoning ? 28_000 : imageBase64 ? 26_000 : 18_000,
     });
 
     let parsedResult: Record<string, unknown>;

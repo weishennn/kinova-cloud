@@ -16,7 +16,7 @@ import { isTripQuarantinedExpense } from '@/lib/category-budget-helper';
 export type { GroupedInstallmentPlan };
 
 export function InstallmentDashboard() {
-  const { setEditInstallmentPlan } = useAppStore();
+  const { setEditInstallmentPlan, selectedMonth } = useAppStore();
   // Load full transaction history so multi-year installments count all historical payments accurately.
   const { transactions = [], isLoading } = useTransactions({ period: 'all' });
   const [syncTick, setSyncTick] = useState(0);
@@ -28,7 +28,10 @@ export function InstallmentDashboard() {
   }, []);
 
   const ratesToMyr = useMemo(() => getCachedRatesToMyr(), [syncTick, transactions]);
-  const currentMonthStr = getLocalDateString().slice(0, 7);
+  const realCurrentMonthStr = getLocalDateString().slice(0, 7);
+  const currentMonthStr = /^\d{4}-\d{2}$/.test(selectedMonth || '')
+    ? selectedMonth
+    : realCurrentMonthStr;
 
   const plans = useMemo(() => {
     const map = new Map<string, GroupedInstallmentPlan>();
@@ -267,8 +270,8 @@ export function InstallmentDashboard() {
           <span className="text-[11px] font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider block">
             Remaining Debt Balance
           </span>
-          <div className="text-xl sm:text-2xl font-black font-mono tabular-nums text-slate-950 dark:text-white">
-            RM {totalRemainingDebt.toFixed(2)}
+          <div className="text-xl sm:text-2xl font-black font-mono tabular-nums whitespace-nowrap text-slate-950 dark:text-white">
+            RM{'\u00A0'}{totalRemainingDebt.toFixed(2)}
           </div>
           <p className="text-[11px] text-emerald-800 dark:text-emerald-400 flex items-center gap-1 font-medium">
             <TrendingDown className="h-3 w-3" /> {overallProgress}% already paid off
@@ -364,22 +367,22 @@ export function InstallmentDashboard() {
                 </div>
 
                 {/* Numbers Row */}
-                <div className="flex items-center justify-between pt-1 border-t border-slate-200 dark:border-zinc-800/60 text-xs">
-                  <div>
+                <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200 dark:border-zinc-800/60 text-xs">
+                  <div className="min-w-0">
                     <span className="text-slate-500 dark:text-zinc-400 block text-[10px]">Monthly</span>
-                    <span className="font-mono font-bold text-violet-800 dark:text-purple-400">
-                      {p.currency} {p.monthlyAmount.toFixed(2)}/mo
+                    <span className="font-mono font-bold whitespace-nowrap tabular-nums text-violet-800 dark:text-purple-400">
+                      {p.currency}{'\u00A0'}{p.monthlyAmount.toFixed(2)}/mo
                     </span>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right min-w-0">
                     <span className="text-slate-500 dark:text-zinc-400 block text-[10px]">Remaining</span>
-                    <span className="font-mono font-bold text-slate-950 dark:text-white">
-                      {p.currency} {p.remainingBalance.toFixed(2)}
+                    <span className="font-mono font-bold whitespace-nowrap tabular-nums text-slate-950 dark:text-white">
+                      {p.currency}{'\u00A0'}{p.remainingBalance.toFixed(2)}
                     </span>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right shrink-0">
                     <span className="text-slate-500 dark:text-zinc-400 block text-[10px]">Ends</span>
-                    <span className="font-mono font-semibold text-slate-700 dark:text-zinc-300">
+                    <span className="font-mono font-semibold whitespace-nowrap tabular-nums text-slate-700 dark:text-zinc-300">
                       {p.endDate}
                     </span>
                   </div>

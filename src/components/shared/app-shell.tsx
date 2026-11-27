@@ -3,7 +3,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { motion, useMotionValue, animate } from 'framer-motion';
+import { motion, useMotionValue, useMotionValueEvent, useTransform, animate } from 'framer-motion';
 import { Sparkles } from 'lucide-react';
 import { RecordPaymentModal } from './record-modal';
 import { EditInstallmentModal } from './edit-installment-modal';
@@ -35,9 +35,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // Spring physics vertical translation for the main dashboard frame
   const y = useMotionValue(0);
-  const [pullDistance, setPullDistance] = useState(0);
+  const pillOpacity = useTransform(y, [0, 16, 48], [0, 0, 1]);
+  const [isPulling, setIsPulling] = useState(false);
   const [isPastThreshold, setIsPastThreshold] = useState(false);
   const [isOffscreen, setIsOffscreen] = useState(false);
+
+  useMotionValueEvent(y, 'change', (latest) => {
+    const active = latest > 0.5;
+    setIsPulling((prev) => (prev === active ? prev : active));
+  });
 
   const PULL_THRESHOLD = 80;
   const startYRef = useRef<number | null>(null);
@@ -48,6 +54,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const openTouchStartYRef = useRef<number | null>(null);
   const openTouchStartXRef = useRef<number | null>(null);
 
+  // Global Cmd+K / Ctrl+K shortcut for Kinova AI & Escape to close
+  useEffect(() => {
+    if (isReceiptPriceSearchPage) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setKinovaAIOpen(!isKinovaAIOpen);
+      } else if (e.key === 'Escape' && isKinovaAIOpen) {
+        setKinovaAIOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isKinovaAIOpen, isReceiptPriceSearchPage, setKinovaAIOpen]);
+
   // Sync motion value with isKinovaAIOpen state with spring physics
   useEffect(() => {
     if (isReceiptPriceSearchPage) return;
@@ -55,24 +76,37 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (isKinovaAIOpen) {
       void queryClient.invalidateQueries({ queryKey: ['sheet'] });
       const targetHeight = typeof window !== 'undefined' ? window.innerHeight + 80 : 960;
-      animate(y, targetHeight, {
+      const controls = animate(y, targetHeight, {
         type: 'spring',
-        damping: 30,
-        stiffness: 340,
-        mass: 0.8,
-      }).then(() => {
+        damping: 32,
+        stiffness: 380,
+        mass: 0.7,
+      });
+      const fallbackTimer = window.setTimeout(() => {
+        y.set(targetHeight);
+        setIsOffscreen(true);
+      }, 420);
+      controls.then(() => {
+        window.clearTimeout(fallbackTimer);
         setIsOffscreen(true);
       });
+      return () => {
+        window.clearTimeout(fallbackTimer);
+        controls.stop();
+      };
     } else {
       setIsOffscreen(false);
-      animate(y, 0, {
+      const controls = animate(y, 0, {
         type: 'spring',
         damping: 30,
         stiffness: 360,
         mass: 0.8,
       });
-      setPullDistance(0);
+      setIsPulling(false);
       setIsPastThreshold(false);
+      return () => {
+        controls.stop();
+      };
     }
   }, [isKinovaAIOpen, isReceiptPriceSearchPage, y, queryClient]);
 
@@ -106,7 +140,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       if (window.scrollY > 2 || document.documentElement.scrollTop > 2) {
         if (isTrackingPullRef.current) {
           y.set(0);
-          setPullDistance(0);
           setIsPastThreshold(false);
         }
         startYRef.current = null;
@@ -123,7 +156,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       if (deltaY <= 0 || Math.abs(deltaX) > Math.abs(deltaY) * 1.4) {
         if (isTrackingPullRef.current) {
           y.set(0);
-          setPullDistance(0);
           setIsPastThreshold(false);
           isTrackingPullRef.current = false;
         }
@@ -134,10 +166,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       isTrackingPullRef.current = true;
       if (e.cancelable) e.preventDefault();
 
-      // Rubber-band resistance formula
+      // Rubber-band resistance formula (pure MotionValue update — zero per-frame React state renders)
       const damped = Math.min(170, Math.pow(deltaY, 0.82) * 1.55);
       y.set(damped);
-      setPullDistance(damped);
 
       if (damped >= PULL_THRESHOLD) {
         if (!hasVibratedRef.current) {
@@ -145,9 +176,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           if (typeof window !== 'undefined' && 'vibrate' in navigator) {
             try { navigator.vibrate(14); } catch (_) {}
           }
+          setIsPastThreshold(true);
         }
-        setIsPastThreshold(true);
-      } else {
+      } else if (hasVibratedRef.current) {
         hasVibratedRef.current = false;
         setIsPastThreshold(false);
       }
@@ -171,7 +202,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           damping: 30,
           stiffness: 400,
         });
-        setPullDistance(0);
         setIsPastThreshold(false);
         if (currentY >= 45) {
           void syncAndRefresh();
@@ -384,14 +414,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* Background Layer: Kinova AI & Pull-down Pill (Inspired by Ryt Bank) */}
       {!isReceiptPriceSearchPage && (
         <div
-          className={`fixed inset-0 z-0 overflow-hidden ${!isKinovaAIOpen && pullDistance <= 0 ? 'invisible pointer-events-none' : ''}`}
+          className={`fixed inset-0 z-0 overflow-hidden ${!isKinovaAIOpen && !isPulling ? 'invisible pointer-events-none' : ''}`}
           aria-hidden={!isKinovaAIOpen}
           inert={!isKinovaAIOpen}
         >
           {/* Top dynamic pull-down pill indicator */}
-          <div
-            className="absolute top-4 sm:top-5 inset-x-0 mx-auto flex items-center justify-center pointer-events-none z-30 transition-opacity duration-150"
-            style={{ opacity: pullDistance > 16 && !isKinovaAIOpen ? 1 : 0 }}
+          <motion.div
+            className="absolute top-4 sm:top-5 inset-x-0 mx-auto flex items-center justify-center pointer-events-none z-30"
+            style={{ opacity: isKinovaAIOpen ? 0 : pillOpacity }}
           >
             <div className={`px-4 py-2 rounded-full border backdrop-blur-2xl text-xs font-semibold flex items-center gap-2 transition-all duration-200 shadow-2xl ${
               isPastThreshold
@@ -401,7 +431,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <Sparkles className={`w-3.5 h-3.5 text-indigo-300 ${isPastThreshold ? 'animate-spin' : ''}`} />
               <span>{isPastThreshold ? 'Release for ✨ Kinova AI' : 'Pull down for Kinova AI'}</span>
             </div>
-          </div>
+          </motion.div>
 
           <ReceiptPriceSearch
             returnTo={pathname || '/'}

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Calendar, Languages, Receipt, Sparkles, Check, X, ArrowRight } from 'lucide-react';
 import {
@@ -17,6 +18,7 @@ interface FirstRunGuidanceProps {
 }
 
 export function FirstRunGuidance({ expenseCount, onLogSampleExpense }: FirstRunGuidanceProps) {
+  const pathname = usePathname();
   const [isDismissed, setIsDismissed] = useState(true);
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [profile, setProfile] = useState<UserMoneyProfile | null>(null);
@@ -30,7 +32,7 @@ export function FirstRunGuidance({ expenseCount, onLogSampleExpense }: FirstRunG
     setProfile(getUserMoneyProfile());
   }, [expenseCount]);
 
-  if (isDismissed || expenseCount >= 3 || !profile) {
+  if (pathname !== '/' || isDismissed || expenseCount >= 3 || !profile) {
     return null;
   }
 

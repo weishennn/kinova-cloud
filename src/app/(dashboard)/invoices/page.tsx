@@ -856,7 +856,7 @@ export default function InvoicesPage() {
                                     {cat.icon} {tx.description || tx.category}
                                   </p>
                                   <p className="text-[10px] text-slate-600 dark:text-zinc-400 font-mono">
-                                    {tx.date} • RM {tx.amount.toFixed(2)}
+                                    {tx.date} • RM{'\u00A0'}{tx.amount.toFixed(2)}
                                   </p>
                                 </div>
                                 <button
@@ -948,7 +948,7 @@ export default function InvoicesPage() {
                       {!isEditingAnnualIncome ? (
                         <div className="mt-1 flex items-center justify-between gap-1">
                           <span className="text-lg font-black text-slate-950 dark:text-white font-mono tabular-nums">
-                            RM {taxReliefSummary.annualTaxableIncome.toFixed(2)}
+                            RM{'\u00A0'}{taxReliefSummary.annualTaxableIncome.toFixed(2)}
                           </span>
                           <div className="flex items-center gap-1">
                             {taxReliefSummary.isIncomeOverridden && (
@@ -1018,25 +1018,25 @@ export default function InvoicesPage() {
                         </span>
                       </div>
                       <div className="mt-1 text-lg font-black text-emerald-800 dark:text-emerald-400 font-mono tabular-nums">
-                        - RM {(taxReliefSummary.individualBaseRelief + taxReliefSummary.totalClaimableRelief + taxReliefSummary.additionalReliefs).toFixed(2)}
+                        - RM{'\u00A0'}{(taxReliefSummary.individualBaseRelief + taxReliefSummary.totalClaimableRelief + taxReliefSummary.additionalReliefs).toFixed(2)}
                       </div>
                     </div>
 
                     <div className="space-y-1 text-[10px] text-slate-600 dark:text-zinc-400">
                       <div className="flex justify-between">
                         <span>Auto Self Relief:</span>
-                        <strong className="text-slate-800 dark:text-zinc-200 font-mono">RM {taxReliefSummary.individualBaseRelief.toFixed(0)}</strong>
+                        <strong className="text-slate-800 dark:text-zinc-200 font-mono">RM{'\u00A0'}{taxReliefSummary.individualBaseRelief.toFixed(0)}</strong>
                       </div>
                       <div className="flex justify-between">
                         <span>Tracked Category Reliefs:</span>
-                        <strong className="text-emerald-800 dark:text-emerald-300 font-mono">RM {taxReliefSummary.totalClaimableRelief.toFixed(0)}</strong>
+                        <strong className="text-emerald-800 dark:text-emerald-300 font-mono">RM{'\u00A0'}{taxReliefSummary.totalClaimableRelief.toFixed(0)}</strong>
                       </div>
                       {/* Payslip EPF inline editor (capped at RM 4,000 sub-limit inside epf_life) */}
                       {!isEditingPayslipEpf ? (
                         <div className="flex items-center justify-between pt-0.5 border-t border-slate-200 dark:border-zinc-800/80">
                           <span>Payslip EPF (max 4k):</span>
                           <span className="inline-flex items-center gap-1 font-mono text-slate-700 dark:text-zinc-300">
-                            RM {taxReliefSummary.effectivePayslipEpf.toFixed(0)}
+                            RM{'\u00A0'}{taxReliefSummary.effectivePayslipEpf.toFixed(0)}
                             {taxProfile.epfFromSalaryOverride != null && (
                               <button
                                 type="button"
@@ -1088,7 +1088,7 @@ export default function InvoicesPage() {
                         <div className="flex items-center justify-between">
                           <span>Payslip SOCSO (max 350):</span>
                           <span className="inline-flex items-center gap-1 font-mono text-slate-700 dark:text-zinc-300">
-                            RM {taxReliefSummary.effectivePayslipSocso.toFixed(0)}
+                            RM{'\u00A0'}{taxReliefSummary.effectivePayslipSocso.toFixed(0)}
                             {taxProfile.socsoFromSalaryOverride != null && (
                               <button
                                 type="button"
@@ -1140,7 +1140,7 @@ export default function InvoicesPage() {
                         <div className="flex items-center justify-between">
                           <span>Other Reliefs (Spouse/Child):</span>
                           <span className="inline-flex items-center gap-1 font-mono text-slate-700 dark:text-zinc-300">
-                            RM {taxReliefSummary.additionalReliefs.toFixed(0)}
+                            RM{'\u00A0'}{taxReliefSummary.additionalReliefs.toFixed(0)}
                             {taxProfile.additionalReliefsOverride != null && taxProfile.additionalReliefsOverride > 0 && (
                               <button
                                 type="button"
@@ -1201,14 +1201,14 @@ export default function InvoicesPage() {
                         </span>
                       </div>
                       <div className="mt-1 text-lg font-black text-slate-950 dark:text-white font-mono tabular-nums">
-                        RM {taxReliefSummary.actualTaxPayable.toFixed(2)}
+                        RM{'\u00A0'}{taxReliefSummary.actualTaxPayable.toFixed(2)}
                       </div>
                     </div>
 
                     <div className="space-y-1 text-[10px] text-slate-600 dark:text-zinc-400 leading-relaxed">
                       <div className="flex justify-between">
                         <span>Chargeable Income:</span>
-                        <strong className="text-slate-800 dark:text-zinc-200 font-mono">RM {taxReliefSummary.chargeableIncome.toFixed(0)}</strong>
+                        <strong className="text-slate-800 dark:text-zinc-200 font-mono">RM{'\u00A0'}{taxReliefSummary.chargeableIncome.toFixed(0)}</strong>
                       </div>
                       {taxReliefSummary.statutoryRebate > 0 && (
                         <div className="text-emerald-800 dark:text-emerald-400 font-medium">
@@ -1220,7 +1220,7 @@ export default function InvoicesPage() {
                         <div className="flex items-center justify-between pt-0.5 border-t border-slate-200 dark:border-zinc-800/80">
                           <span>Zakat / Other Rebates:</span>
                           <span className="inline-flex items-center gap-1 font-mono text-slate-700 dark:text-zinc-300">
-                            RM {taxReliefSummary.additionalRebates.toFixed(0)}
+                            RM{'\u00A0'}{taxReliefSummary.additionalRebates.toFixed(0)}
                             {taxProfile.additionalRebatesOverride != null && (
                               <button
                                 type="button"
@@ -1268,7 +1268,7 @@ export default function InvoicesPage() {
                       )}
                       {taxReliefSummary.annualTaxableIncome > 0 && (
                         <div className="text-emerald-800 dark:text-emerald-300 font-semibold pt-0.5">
-                          ✨ Reliefs &amp; rebates cut tax from RM {taxReliefSummary.taxWithoutReliefs.toFixed(0)} → RM {taxReliefSummary.actualTaxPayable.toFixed(0)} (Saved RM {taxReliefSummary.estimatedTaxSaved.toFixed(2)})
+                          ✨ Reliefs &amp; rebates cut tax from RM{'\u00A0'}{taxReliefSummary.taxWithoutReliefs.toFixed(0)} → RM{'\u00A0'}{taxReliefSummary.actualTaxPayable.toFixed(0)} (Saved RM{'\u00A0'}{taxReliefSummary.estimatedTaxSaved.toFixed(2)})
                         </div>
                       )}
                     </div>
@@ -1289,7 +1289,7 @@ export default function InvoicesPage() {
                       {!isEditingPcbPaid ? (
                         <div className="mt-1 flex items-center justify-between gap-1">
                           <span className="text-lg font-black text-indigo-800 dark:text-indigo-300 font-mono tabular-nums">
-                            RM {taxReliefSummary.totalPcbPaid.toFixed(2)}
+                            RM{'\u00A0'}{taxReliefSummary.totalPcbPaid.toFixed(2)}
                           </span>
                           <div className="flex items-center gap-1">
                             {taxReliefSummary.isPcbOverridden && (
@@ -1360,11 +1360,11 @@ export default function InvoicesPage() {
                     <div className="text-xs font-extrabold text-slate-950 dark:text-white">
                       {taxReliefSummary.settlementStatus === 'refund' ? (
                         <span className="text-emerald-800 dark:text-emerald-300">
-                          🎉 Estimated Tax Refund You Can Claim Back from LHDN: +RM {taxReliefSummary.refundAmount.toFixed(2)}
+                          🎉 Estimated Tax Refund You Can Claim Back from LHDN: +RM{'\u00A0'}{taxReliefSummary.refundAmount.toFixed(2)}
                         </span>
                       ) : taxReliefSummary.settlementStatus === 'pay_extra' ? (
                         <span className="text-rose-800 dark:text-rose-300">
-                          ⚠️ Estimated Extra Tax to Pay LHDN: RM {taxReliefSummary.extraTaxToPay.toFixed(2)}
+                          ⚠️ Estimated Extra Tax to Pay LHDN: RM{'\u00A0'}{taxReliefSummary.extraTaxToPay.toFixed(2)}
                         </span>
                       ) : taxReliefSummary.annualTaxableIncome === 0 ? (
                         <span className="text-indigo-800 dark:text-indigo-200">
@@ -1485,7 +1485,7 @@ export default function InvoicesPage() {
                             {!isEditingThis ? (
                               <div className="flex items-center gap-2 text-slate-600 dark:text-zinc-400">
                                 <span className="font-mono">
-                                  <strong className="text-slate-950 dark:text-white font-bold">RM {totalSpent.toFixed(2)}</strong> / Cap: RM {cap.toFixed(0)}
+                                  <strong className="text-slate-950 dark:text-white font-bold">RM{'\u00A0'}{totalSpent.toFixed(2)}</strong> / Cap: RM{'\u00A0'}{cap.toFixed(0)}
                                 </span>
                                 <button
                                   type="button"
@@ -1549,12 +1549,12 @@ export default function InvoicesPage() {
                           <div>
                             {isMaxedOut ? (
                               <span className="text-indigo-800 dark:text-indigo-300 font-semibold">
-                                Max RM {cap.toFixed(0)} relief reached! (Spent RM {totalSpent.toFixed(2)})
+                                Max RM{'\u00A0'}{cap.toFixed(0)} relief reached! (Spent RM{'\u00A0'}{totalSpent.toFixed(2)})
                               </span>
                             ) : (
                               <span>
                                 Remaining Relief Quota:{' '}
-                                <strong className="text-emerald-800 dark:text-emerald-400 font-mono">RM {remainingLimit.toFixed(2)}</strong>
+                                <strong className="text-emerald-800 dark:text-emerald-400 font-mono">RM{'\u00A0'}{remainingLimit.toFixed(2)}</strong>
                               </span>
                             )}
                           </div>
@@ -1644,7 +1644,7 @@ export default function InvoicesPage() {
                                               )}
                                             </div>
                                             <p className="text-[10px] text-slate-600 dark:text-zinc-400 font-mono mt-0.5">
-                                              {tx.date} • {tx.category} • RM {amtMyr.toFixed(2)}
+                                              {tx.date} • {tx.category} • RM{'\u00A0'}{amtMyr.toFixed(2)}
                                             </p>
                                           </div>
 

@@ -63,21 +63,29 @@ const QUESTION_OR_ADVICE_WORDS = [
   '?', '？', 'should i', 'can i', 'how much', '怎么看', '能不能', '贵不贵', '值得',
   'worth it', 'afford', 'over budget', 'overspent', 'rebalance', 'fix my budget',
   'balance my budget', '超支', '平账', '平衡', '调配', '税', 'sst', 'tax', 'relief',
-  '扣税', '减税', 'compare', '比较', '哪家便宜', 'cheaper', 'mana murah',
-  'bila', 'boleh ke', 'kenapa', 'why', 'what is', 'analysis', '分析', '够不够', '还剩多少',
+  '扣税', '减税', 'compare', '比较', '哪家', '哪里', 'cheaper', 'cheapest', 'mana murah',
+  'bila', 'boleh ke', 'kenapa', 'why', 'what is', 'what are', 'analysis', '分析', '够不够',
+  '还剩', '剩下', '还差', '目标', '大额', '最贵', '多少', 'remaining', 'budget left',
+  'am i saving', 'how is my',
 ];
 
 const EXTENDED_REASONING_HINTS = [
-  'should i', 'can i afford', 'how much', 'how many', 'worth it', 'afford', 'over budget', 'budget',
+  'should i', 'can i afford', 'can i buy', 'how much', 'how many', 'how is my', 'am i ',
+  'worth it', 'afford', 'over budget', 'budget', 'remaining', 'budget left', 'safe to spend',
   'overspent', 'rebalance', 'fix my budget', 'balance my budget', 'adjust my budget',
   'expense history', 'transaction history', 'what did i spend', 'what have i spent', 'my spending',
   'my expenses', 'my ledger', 'show me', 'list my', 'summary', 'summarize', 'summarise',
-  'trend', 'forecast', 'compare', 'cheaper', 'cheapest', 'which store', 'expensive', 'too much',
+  'trend', 'forecast', 'compare', 'cheaper', 'cheapest', 'which store', 'where was', 'expensive', 'too much',
+  'largest', 'biggest', 'most expensive', 'recent expense', 'recent spend', 'top spending',
+  'goal', 'goals', 'target', 'save', 'saving', 'savings', 'cashflow', 'cash flow', 'income',
+  'salary', 'payday', 'bill', 'bills', 'commitment', 'installment', 'trip', 'portfolio',
   'tax', 'sst', 'relief', 'analysis', 'analyze', 'analyse', 'recommend', 'advice',
   'portfolio performance', 'stock analysis', 'investment advice',
   'what about', 'how about', '怎么看', '能不能', '贵不贵', '值得', '超支', '平账', '平衡', '调配', '扣税', '减税',
-  '比较', '哪家', '多少', '预算', '税务', '建议', '分析', '统计', '总结', '旅行预算',
-  '分期预算', '股票分析', '投资建议', 'pelaburan mana bagus', 'berapa', 'bajet', 'cukai', 'banding',
+  '比较', '哪家', '哪间', '哪里', '多少', '预算', '税务', '建议', '分析', '统计', '总结', '旅行预算',
+  '分期', '股票', '投资', 'pelaburan mana bagus', 'berapa', 'bajet', 'cukai', 'banding',
+  '还剩', '剩下', '目标', '还差', '存了', '存款', '储蓄', '大额', '开销', '支出', '消费',
+  '收入', '薪水', '发薪', '账单', '现金流', '资金流', '最贵', '最高', '最便宜', '吃了什么', '买过什么',
 ];
 
 const IMAGE_REASONING_HINTS = [

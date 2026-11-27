@@ -238,11 +238,11 @@ export function AiIntelligenceHub({
         </div>
 
         {/* Tab Buttons */}
-        <div className="flex items-center gap-1 p-1 rounded-2xl bg-slate-100 dark:bg-zinc-800/80 text-xs font-medium">
+        <div className="flex items-center gap-1 p-1 rounded-2xl bg-slate-100 dark:bg-zinc-800/80 text-xs font-medium overflow-x-auto no-scrollbar max-w-full">
           <button
             type="button"
             onClick={() => setActiveTab('health')}
-            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
+            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'health'
                 ? 'bg-white dark:bg-zinc-900 text-slate-950 dark:text-white shadow-sm font-bold'
                 : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
@@ -253,7 +253,7 @@ export function AiIntelligenceHub({
           <button
             type="button"
             onClick={() => setActiveTab('forecast')}
-            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
+            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'forecast'
                 ? 'bg-white dark:bg-zinc-900 text-slate-950 dark:text-white shadow-sm font-bold'
                 : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
@@ -264,7 +264,7 @@ export function AiIntelligenceHub({
           <button
             type="button"
             onClick={() => setActiveTab('recurring')}
-            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer relative ${
+            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer relative whitespace-nowrap shrink-0 ${
               activeTab === 'recurring'
                 ? 'bg-white dark:bg-zinc-900 text-slate-950 dark:text-white shadow-sm font-bold'
                 : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
@@ -280,7 +280,7 @@ export function AiIntelligenceHub({
           <button
             type="button"
             onClick={() => setActiveTab('briefing')}
-            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
+            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'briefing'
                 ? 'bg-white dark:bg-zinc-900 text-slate-950 dark:text-white shadow-sm font-bold'
                 : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
@@ -417,29 +417,29 @@ export function AiIntelligenceHub({
             <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-zinc-900/50 border border-slate-100 dark:border-white/[0.06]">
               <span className="text-[11px] text-slate-500 dark:text-zinc-400 block font-medium">日常可支配日均支出</span>
               <span className="text-lg font-bold font-mono text-slate-900 dark:text-white mt-1 block">
-                RM {forecastResult.dailyBurnRate.toFixed(2)} / 天
+                RM{'\u00A0'}{forecastResult.dailyBurnRate.toFixed(2)} / 天
               </span>
               <span className="text-[10px] text-slate-400 dark:text-zinc-500 truncate block">
                 {forecastResult.dailyBurnRate > 0 ? '基于历史平稳消费推算' : '尚无日常支出流水'}
               </span>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-zinc-900/50 border border-slate-100 dark:border-white/[0.06]">
+            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-zinc-900/50 border border-slate-100 dark:border-white/[0.06] min-w-0">
               <span className="text-[11px] text-slate-500 dark:text-zinc-400 block font-medium">60 天后预计结余</span>
-              <span className={`text-lg font-bold font-mono mt-1 block ${
+              <span className={`text-lg font-bold font-mono tabular-nums whitespace-nowrap mt-1 block ${
                 forecastResult.forecast60DaysBalance >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'
               }`}>
-                RM {forecastResult.forecast60DaysBalance.toLocaleString('en-MY', { minimumFractionDigits: 2 })}
+                RM{'\u00A0'}{forecastResult.forecast60DaysBalance.toLocaleString('en-MY', { minimumFractionDigits: 2 })}
               </span>
               <span className="text-[10px] text-slate-400 dark:text-zinc-500 truncate block">已扣减预计固定扣款与分期</span>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-zinc-900/50 border border-slate-100 dark:border-white/[0.06]">
+            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-zinc-900/50 border border-slate-100 dark:border-white/[0.06] min-w-0">
               <span className="text-[11px] text-slate-500 dark:text-zinc-400 block font-medium">90 天后预计结余</span>
-              <span className={`text-lg font-bold font-mono mt-1 block ${
+              <span className={`text-lg font-bold font-mono tabular-nums whitespace-nowrap mt-1 block ${
                 forecastResult.forecast90DaysBalance >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'
               }`}>
-                RM {forecastResult.forecast90DaysBalance.toLocaleString('en-MY', { minimumFractionDigits: 2 })}
+                RM{'\u00A0'}{forecastResult.forecast90DaysBalance.toLocaleString('en-MY', { minimumFractionDigits: 2 })}
               </span>
               <span className="text-[10px] text-slate-400 dark:text-zinc-500 truncate block">全周期真实收支走势</span>
             </div>
@@ -477,28 +477,28 @@ export function AiIntelligenceHub({
                 {untrackedCandidates.map((item) => (
                   <div
                     key={item.id}
-                    className="flex items-center justify-between p-3 hover:bg-slate-50 dark:hover:bg-zinc-800/40 transition-colors text-xs"
+                    className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2.5 p-3 hover:bg-slate-50 dark:hover:bg-zinc-800/40 transition-colors text-xs"
                   >
-                    <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
                       <div className="h-8 w-8 rounded-xl bg-purple-500/15 text-purple-700 dark:text-purple-400 flex items-center justify-center font-bold text-xs shrink-0">
                         {item.detectedDayOfMonth}日
                       </div>
-                      <div>
-                        <div className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                          <span>{item.name}</span>
-                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-bold text-slate-900 dark:text-white flex items-center gap-2 min-w-0">
+                          <span className="truncate">{item.name}</span>
+                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 shrink-0">
                             {item.category}
                           </span>
                         </div>
-                        <span className="text-[11px] text-slate-500 dark:text-zinc-400">
+                        <span className="text-[11px] text-slate-500 dark:text-zinc-400 block truncate">
                           约每月 {item.detectedDayOfMonth} 号扣费 · 历史出现 {item.occurrencesCount} 次 · 最近 {item.lastDate}
                         </span>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3 shrink-0">
-                      <span className="font-mono font-bold text-slate-950 dark:text-white text-sm">
-                        RM {item.averageAmount.toFixed(2)}
+                    <div className="flex items-center gap-3 shrink-0 ml-auto">
+                      <span className="font-mono font-bold text-slate-950 dark:text-white text-sm whitespace-nowrap tabular-nums">
+                        RM{'\u00A0'}{item.averageAmount.toFixed(2)}
                       </span>
                       <button
                         type="button"

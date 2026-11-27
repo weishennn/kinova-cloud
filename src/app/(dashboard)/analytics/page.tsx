@@ -1,26 +1,25 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
+import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { motion } from 'framer-motion';
 import { useTransactions } from '@/hooks/useTransactions';
 import { useAppStore } from '@/stores/app-store';
 import { AnimatedNumber } from '@/components/shared/animated-number';
 import { CockpitPageHeading } from '@/components/money-cockpit/cockpit-page-heading';
+import { PeriodBar } from '@/components/shared/period-bar';
 import {
   BarChart3,
   TrendingUp,
-  Calendar,
   Inbox,
   DollarSign,
   PieChart,
   ArrowUpRight,
   ArrowDownRight,
   PiggyBank,
-  ChevronLeft,
   ChevronRight,
   Check,
-  RotateCcw,
   Sparkles
 } from 'lucide-react';
 
@@ -36,6 +35,7 @@ import { CATEGORY_COLORS } from '@/lib/design-tokens';
 import { getAmountInBaseCurrency } from '@/lib/currency';
 import { parseLocalDate } from '@/lib/date-helper';
 import { useMonthList } from '@/hooks/useSheets';
+import { buildPeriodCatalog, formatPeriodDisplay } from '@/lib/period-helper';
 
 export default function AnalyticsPage() {
   const [period, setPeriod] = useState<'Daily' | 'Monthly'>('Daily');
@@ -44,125 +44,12 @@ export default function AnalyticsPage() {
   const { data: sheetMonths = [] } = useMonthList();
   const { transactions = [], isLoading } = useTransactions(selectedMonth ? { period: selectedMonth } : undefined);
 
-  // Current active month in YYYY-MM format, e.g. "2026-10"
-  const currentMonthStr = useMemo(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  }, []);
+  const { currentMonth: currentMonthStr, orderedYears: availableYears } = useMemo(
+    () => buildPeriodCatalog(sheetMonths, selectedMonth, transactions),
+    [sheetMonths, selectedMonth, transactions]
+  );
 
-  const currentMonthShort = useMemo(() => {
-    const [y, m] = currentMonthStr.split('-').map(Number);
-    if (!isNaN(y) && !isNaN(m)) {
-      return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'short' });
-    }
-    return 'Current';
-  }, [currentMonthStr]);
-
-  // Extract all available years and months from transactions + current year/month
-  const { availableYears, monthsByYear, allAvailableMonths } = useMemo(() => {
-    const [curY] = currentMonthStr.split('-').map(Number);
-    const curYStr = String(curY);
-    const activeYears = new Set<number>([curY, curY - 1, curY + 1]);
-
-    sheetMonths.forEach(m => {
-      if (/^\d{4}-\d{2}$/.test(m)) activeYears.add(Number(m.substring(0, 4)));
-    });
-
-    transactions.forEach(t => {
-      if (t.date && t.date.length >= 7 && /^\d{4}-\d{2}/.test(t.date)) {
-        activeYears.add(Number(t.date.substring(0, 4)));
-      }
-    });
-
-    if (selectedMonth?.startsWith('year-')) {
-      const selY = Number(selectedMonth.slice(5));
-      if (Number.isFinite(selY) && selY >= 2000 && selY <= 2100) activeYears.add(selY);
-    } else if (selectedMonth && /^\d{4}-\d{2}$/.test(selectedMonth)) {
-      const selY = Number(selectedMonth.slice(0, 4));
-      if (Number.isFinite(selY) && selY >= 2000 && selY <= 2100) activeYears.add(selY);
-    }
-
-    const monthSet = new Set<string>([currentMonthStr]);
-    activeYears.forEach(yr => {
-      for (let m = 1; m <= 12; m++) {
-        monthSet.add(`${yr}-${String(m).padStart(2, '0')}`);
-      }
-    });
-
-    const sortedMonths = Array.from(monthSet).sort((a, b) => b.localeCompare(a));
-
-    const byYear: Record<string, string[]> = {};
-    const yearSet = new Set<string>();
-
-    sortedMonths.forEach(m => {
-      const y = m.substring(0, 4);
-      yearSet.add(y);
-      if (!byYear[y]) byYear[y] = [];
-      byYear[y].push(m);
-    });
-
-    const sortedYears = Array.from(yearSet).sort((a, b) => {
-      if (a === curYStr) return -1;
-      if (b === curYStr) return 1;
-      return b.localeCompare(a);
-    });
-
-    return {
-      availableYears: sortedYears,
-      monthsByYear: byYear,
-      allAvailableMonths: sortedMonths
-    };
-  }, [transactions, sheetMonths, currentMonthStr, selectedMonth]);
-
-  const handlePrevMonth = () => {
-    if (selectedMonth.startsWith('year-')) {
-      const y = selectedMonth.replace('year-', '');
-      setSelectedMonth(`${y}-12`);
-      return;
-    }
-    if (selectedMonth === 'all') {
-      const [y, m] = currentMonthStr.split('-').map(Number);
-      const prevDate = new Date(y, m - 2, 1);
-      const prevStr = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
-      setSelectedMonth(prevStr);
-      return;
-    }
-    const [y, m] = selectedMonth.split('-').map(Number);
-    if (!isNaN(y) && !isNaN(m)) {
-      const prevDate = new Date(y, m - 2, 1);
-      const prevStr = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
-      setSelectedMonth(prevStr);
-    }
-  };
-
-  const handleNextMonth = () => {
-    if (selectedMonth.startsWith('year-')) {
-      const y = selectedMonth.replace('year-', '');
-      setSelectedMonth(`${y}-01`);
-      return;
-    }
-    if (selectedMonth === 'all') {
-      setSelectedMonth(currentMonthStr);
-      return;
-    }
-    const [y, m] = selectedMonth.split('-').map(Number);
-    if (!isNaN(y) && !isNaN(m)) {
-      const nextDate = new Date(y, m, 1);
-      const nextStr = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
-      setSelectedMonth(nextStr);
-    }
-  };
-
-  const formatMonthLabel = (mStr: string) => {
-    if (mStr === 'all') return 'All Time (Accumulated)';
-    if (mStr.startsWith('year-')) {
-      return `Full Year ${mStr.replace('year-', '')}`;
-    }
-    const [y, m] = mStr.split('-').map(Number);
-    if (isNaN(y) || isNaN(m)) return mStr;
-    const d = new Date(y, m - 1, 1);
-    return d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-  };
+  const formatMonthLabel = (mStr: string) => formatPeriodDisplay(mStr);
 
   // Scoped transactions & expenses for selected month or full year
   const scopedTransactions = useMemo(() => {
@@ -352,100 +239,16 @@ export default function AnalyticsPage() {
         )}
       />
 
-      {/* Month Selector Bar with Year Optgroups */}
-      <div className="bg-white/90 dark:bg-zinc-900/60 p-3.5 sm:p-4 rounded-3xl border border-slate-200 dark:border-white/[0.08] backdrop-blur-xl shadow-lg space-y-3">
-        {/* Header: Label + Selected Month */}
-        <div className="flex items-center justify-between gap-2 min-h-[44px]">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="p-2 rounded-xl bg-indigo-500/15 text-indigo-700 dark:text-indigo-400 border border-indigo-500/20 shrink-0">
-              <Calendar className="h-4 w-4" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-semibold text-slate-600 dark:text-zinc-400 uppercase tracking-wider block">Analytics Period</span>
-                {selectedMonth === currentMonthStr && (
-                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/25">
-                    Current
-                  </span>
-                )}
-              </div>
-              <span className="text-sm sm:text-base font-bold text-slate-950 dark:text-white tracking-tight truncate block">{formatMonthLabel(selectedMonth)}</span>
-            </div>
-          </div>
-          {selectedMonth !== currentMonthStr ? (
-            <button
-              type="button"
-              onClick={() => setSelectedMonth(currentMonthStr)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 active:scale-95 text-indigo-700 dark:text-indigo-300 border border-indigo-500/25 text-xs font-semibold transition-all cursor-pointer shadow-xs shrink-0"
-              title={`Jump back to current month (${formatMonthLabel(currentMonthStr)})`}
-              aria-label={`Jump back to current month (${formatMonthLabel(currentMonthStr)})`}
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              <span>{currentMonthShort} (Current)</span>
-            </button>
-          ) : (
-            <span className="text-[11px] text-slate-500 dark:text-zinc-400 hidden sm:inline">Filter analytics & trends</span>
-          )}
-        </div>
-
-        {/* Navigation Box: Stepper (Prev/Next) + Dropdown */}
-        <div className="flex items-center gap-1.5 rounded-2xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-950/60 p-1 w-full max-w-full overflow-hidden">
-          <div className="flex items-center gap-1 shrink-0">
-            <button
-              type="button"
-              onClick={handlePrevMonth}
-              className="min-w-[40px] min-h-[40px] p-2 rounded-xl bg-white/90 dark:bg-zinc-900/80 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white transition-colors cursor-pointer border border-slate-200 dark:border-white/[0.06] active:scale-95 flex items-center justify-center shrink-0"
-              title="Previous Month"
-              aria-label="Previous Month"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-
-            <button
-              type="button"
-              onClick={handleNextMonth}
-              className="min-w-[40px] min-h-[40px] p-2 rounded-xl bg-white/90 dark:bg-zinc-900/80 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 hover:text-slate-950 dark:hover:text-white transition-colors cursor-pointer border border-slate-200 dark:border-white/[0.06] active:scale-95 flex items-center justify-center shrink-0"
-              title="Next Month"
-              aria-label="Next Month"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-
-          <select
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-            className="min-h-[40px] flex-1 min-w-0 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white/90 dark:bg-zinc-900/90 px-3 py-1.5 text-xs font-semibold text-slate-950 dark:text-white outline-none focus:border-indigo-500 cursor-pointer transition-colors font-mono text-center truncate"
-            aria-label="Select month or year"
-          >
-            {availableYears.map(year => {
-              const curYStr = currentMonthStr.substring(0, 4);
-              const yLabel =
-                year === curYStr
-                  ? `── ${year} (Current Year) ──`
-                  : Number(year) === Number(curYStr) - 1
-                  ? `── ${year} (Last Year) ──`
-                  : Number(year) === Number(curYStr) + 1
-                  ? `── ${year} (Next Year) ──`
-                  : `── Year ${year} ──`;
-              return (
-                <optgroup key={year} label={yLabel} className="bg-white dark:bg-zinc-950 text-indigo-800 dark:text-indigo-400 font-bold">
-                  <option value={`year-${year}`} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono font-semibold">
-                    Full Year {year} (All {year})
-                  </option>
-                  {monthsByYear[year]?.map(m => (
-                    <option key={m} value={m} className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono">
-                      {m === currentMonthStr ? `${formatMonthLabel(m)} (Current)` : formatMonthLabel(m)}
-                    </option>
-                  ))}
-                </optgroup>
-              );
-            })}
-            <option value="all" className="bg-white dark:bg-zinc-900 text-slate-950 dark:text-white font-mono">
-              All Time (Accumulated)
-            </option>
-          </select>
-        </div>
+      {/* Unified Period Selector */}
+      <div className="bg-white/90 dark:bg-zinc-900/60 p-3.5 sm:p-4 rounded-3xl border border-slate-200 dark:border-white/[0.08] backdrop-blur-xl shadow-lg">
+        <PeriodBar
+          selectedMonth={selectedMonth}
+          onSelectMonth={setSelectedMonth}
+          sheetMonths={sheetMonths}
+          transactions={transactions}
+          selectId="analytics-period-select"
+          selectAriaLabel="Select month or year for analytics"
+        />
       </div>
 
       {/* Summary KPI Cards with Spring Hover and Specular Highlights */}
@@ -567,14 +370,20 @@ export default function AnalyticsPage() {
               const percent = stats.totalExpense > 0 ? (item.value / stats.totalExpense) * 100 : 0;
               const color = CATEGORY_COLORS[item.name] || '#6366f1';
               return (
-                <div key={item.name} className="space-y-1.5">
-                  <div className="flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-2">
-                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />
-                      <span className="font-semibold text-slate-950 dark:text-white">{item.name}</span>
+                <Link
+                  key={item.name}
+                  href={`/transactions?category=${encodeURIComponent(item.name)}`}
+                  className="block space-y-1.5 rounded-xl p-2 -mx-2 hover:bg-slate-100/80 dark:hover:bg-white/[0.04] transition-colors group"
+                >
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                      <span className="font-semibold text-slate-950 dark:text-white truncate group-hover:text-indigo-700 dark:group-hover:text-indigo-300 transition-colors">
+                        {item.name}
+                      </span>
                     </div>
-                    <div className="text-slate-600 dark:text-zinc-400">
-                      <strong className="text-slate-950 dark:text-white font-mono tabular-nums tracking-tight">RM {item.value.toFixed(2)}</strong>
+                    <div className="text-slate-600 dark:text-zinc-400 shrink-0 whitespace-nowrap tabular-nums">
+                      <strong className="text-slate-950 dark:text-white font-mono tabular-nums tracking-tight">RM{'\u00A0'}{item.value.toFixed(2)}</strong>
                       <span className="text-slate-600 dark:text-zinc-400 font-mono ml-1.5">({percent.toFixed(1)}%)</span>
                     </div>
                   </div>
@@ -584,7 +393,7 @@ export default function AnalyticsPage() {
                       style={{ width: `${percent}%`, backgroundColor: color }}
                     />
                   </div>
-                </div>
+                </Link>
               );
             })}
           </div>
@@ -635,7 +444,7 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Annual Overview Highlight Banner */}
-        <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-emerald-950/25 via-slate-100 dark:via-zinc-900/80 to-indigo-950/25 border border-emerald-500/25 flex flex-wrap items-center justify-between gap-4 shadow-inner">
+        <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-emerald-500/10 dark:from-emerald-950/25 via-slate-100 dark:via-zinc-900/80 to-indigo-500/10 dark:to-indigo-950/25 border border-emerald-500/25 flex flex-wrap items-center justify-between gap-4 shadow-inner">
           <div>
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-emerald-800 dark:text-emerald-400" />
@@ -643,28 +452,28 @@ export default function AnalyticsPage() {
                 {annualSummary.targetYear} Annual Savings Summary
               </span>
             </div>
-            <span className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-slate-950 dark:text-white mt-1 block">
-              {annualSummary.saved >= 0 ? '+' : '-'}RM {Math.abs(annualSummary.saved).toFixed(2)}
+            <span className="text-2xl sm:text-3xl font-black font-mono tabular-nums whitespace-nowrap tracking-tight text-slate-950 dark:text-white mt-1 block">
+              {annualSummary.saved >= 0 ? '+' : '-'}RM{'\u00A0'}{Math.abs(annualSummary.saved).toFixed(2)}
             </span>
             <span className="text-[11px] text-slate-600 dark:text-zinc-400 font-mono">
               Total Net Saved in {annualSummary.targetYear} across {annualSummary.monthCount} recorded months
             </span>
           </div>
 
-          <div className="flex items-center gap-4 sm:gap-6 text-xs font-mono ml-auto">
+          <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-xs font-mono ml-auto">
             <div>
               <span className="text-slate-600 dark:text-zinc-400 block text-[10px] uppercase font-semibold">Earned</span>
-              <span className="text-emerald-800 dark:text-emerald-400 font-bold text-sm">RM {annualSummary.income.toFixed(2)}</span>
+              <span className="text-emerald-800 dark:text-emerald-400 font-bold text-sm whitespace-nowrap tabular-nums">RM{'\u00A0'}{annualSummary.income.toFixed(2)}</span>
             </div>
-            <div className="w-px h-7 bg-slate-100 dark:bg-zinc-800" />
+            <div className="w-px h-7 bg-slate-200 dark:bg-zinc-800" />
             <div>
               <span className="text-slate-600 dark:text-zinc-400 block text-[10px] uppercase font-semibold">Spent</span>
-              <span className="text-rose-800 dark:text-rose-400 font-bold text-sm">RM {annualSummary.expense.toFixed(2)}</span>
+              <span className="text-rose-800 dark:text-rose-400 font-bold text-sm whitespace-nowrap tabular-nums">RM{'\u00A0'}{annualSummary.expense.toFixed(2)}</span>
             </div>
-            <div className="w-px h-7 bg-slate-100 dark:bg-zinc-800" />
+            <div className="w-px h-7 bg-slate-200 dark:bg-zinc-800" />
             <div>
               <span className="text-slate-600 dark:text-zinc-400 block text-[10px] uppercase font-semibold">Saved Rate</span>
-              <span className="text-slate-950 dark:text-white font-bold text-sm">{annualSummary.savingsRate.toFixed(1)}%</span>
+              <span className="text-slate-950 dark:text-white font-bold text-sm whitespace-nowrap tabular-nums">{annualSummary.savingsRate.toFixed(1)}%</span>
             </div>
           </div>
         </div>
@@ -689,7 +498,7 @@ export default function AnalyticsPage() {
                 aria-label={`View savings for ${m.monthName}, saved RM ${m.saved.toFixed(2)}`}
                 className={`p-4 sm:p-5 rounded-2xl border transition-all cursor-pointer shadow-md group ${
                   isSelected
-                    ? 'border-indigo-500/50 bg-gradient-to-br from-indigo-950/40 via-slate-100 dark:via-zinc-900/80 to-white dark:to-zinc-900 ring-2 ring-indigo-500/30'
+                    ? 'border-indigo-500/50 bg-gradient-to-br from-indigo-500/15 dark:from-indigo-950/40 via-slate-100 dark:via-zinc-900/80 to-white dark:to-zinc-900 ring-2 ring-indigo-500/30'
                     : 'border-slate-200 dark:border-white/[0.06] bg-white/90 dark:bg-zinc-900/50 hover:bg-white/90 dark:hover:bg-zinc-900/80 hover:border-slate-200 dark:hover:border-white/[0.12]'
                 }`}
               >
@@ -721,25 +530,25 @@ export default function AnalyticsPage() {
                 </div>
 
                 {/* Net Saved Highlight */}
-                <div className="mt-3 flex items-baseline justify-between">
+                <div className="mt-3 flex items-baseline justify-between gap-2">
                   <span className="text-xs text-slate-600 dark:text-zinc-400 uppercase tracking-wider font-semibold">Net Saved</span>
-                  <span className={`text-xl sm:text-2xl font-black font-mono tracking-tight tabular-nums ${
+                  <span className={`text-xl sm:text-2xl font-black font-mono tabular-nums whitespace-nowrap tracking-tight ${
                     isNetPositive ? 'text-emerald-800 dark:text-emerald-400' : 'text-rose-800 dark:text-rose-400'
                   }`}>
-                    {isNetPositive ? '+' : '-'}RM {Math.abs(m.saved).toFixed(2)}
+                    {isNetPositive ? '+' : '-'}RM{'\u00A0'}{Math.abs(m.saved).toFixed(2)}
                   </span>
                 </div>
 
                 {/* Breakdown Bar (Income vs Expense) */}
                 <div className="mt-3 space-y-1.5">
-                  <div className="flex items-center justify-between text-xs font-mono">
-                    <span className="text-emerald-800 dark:text-emerald-400 flex items-center gap-1 font-medium">
-                      <ArrowDownRight className="h-3.5 w-3.5" />
-                      RM {m.income.toFixed(2)}
+                  <div className="flex items-center justify-between gap-2 text-xs font-mono tabular-nums">
+                    <span className="text-emerald-800 dark:text-emerald-400 flex items-center gap-1 font-medium whitespace-nowrap">
+                      <ArrowDownRight className="h-3.5 w-3.5 shrink-0" />
+                      RM{'\u00A0'}{m.income.toFixed(2)}
                     </span>
-                    <span className="text-rose-800 dark:text-rose-400 flex items-center gap-1 font-medium">
-                      <ArrowUpRight className="h-3.5 w-3.5" />
-                      RM {m.expense.toFixed(2)}
+                    <span className="text-rose-800 dark:text-rose-400 flex items-center gap-1 font-medium whitespace-nowrap">
+                      <ArrowUpRight className="h-3.5 w-3.5 shrink-0" />
+                      RM{'\u00A0'}{m.expense.toFixed(2)}
                     </span>
                   </div>
 

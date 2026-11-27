@@ -561,6 +561,7 @@ export function applyOptimisticUpdateToQueryCache(
     });
     return changed ? { ...prev, rows: nextRows } : old;
   });
+  void queryClient.invalidateQueries({ queryKey: ['receipt-price-history'] });
 }
 
 export function applyOptimisticDeleteToQueryCache(
@@ -584,6 +585,7 @@ export function applyOptimisticDeleteToQueryCache(
     });
     return nextRows.length !== prev.rows.length ? { ...prev, rows: nextRows } : old;
   });
+  void queryClient.invalidateQueries({ queryKey: ['receipt-price-history'] });
 }
 
 export function useAddRow() {

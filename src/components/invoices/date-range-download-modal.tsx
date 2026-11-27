@@ -433,7 +433,7 @@ export function DateRangeDownloadModal({
               <div className="text-right">
                 <span className="text-xs text-slate-600 dark:text-zinc-400">Total Claimable: </span>
                 <strong className="text-xs sm:text-sm font-mono font-bold text-emerald-800 dark:text-emerald-400">
-                  RM {totalSelectedAmount.toFixed(2)}
+                  RM{'\u00A0'}{totalSelectedAmount.toFixed(2)}
                 </strong>
               </div>
             </div>
@@ -650,7 +650,7 @@ export function DateRangeDownloadModal({
 
                 <div className="p-3.5 rounded-2xl bg-white/90 dark:bg-zinc-900/80 border border-slate-200 dark:border-zinc-800 text-xs space-y-2 text-slate-700 dark:text-zinc-300">
                   <p>
-                    You have selected <strong className="text-slate-950 dark:text-white">{selectedInvoices.length} receipts</strong> totaling <strong className="text-emerald-800 dark:text-emerald-400">RM {totalSelectedAmount.toFixed(2)}</strong>.
+                    You have selected <strong className="text-slate-950 dark:text-white">{selectedInvoices.length} receipts</strong> totaling <strong className="text-emerald-800 dark:text-emerald-400">RM{'\u00A0'}{totalSelectedAmount.toFixed(2)}</strong>.
                   </p>
                   <div className="flex items-start gap-2 pt-1 border-t border-slate-200 dark:border-zinc-800/80 text-[11px] text-slate-600 dark:text-zinc-400">
                     <ShieldCheck className="h-4 w-4 text-emerald-800 dark:text-emerald-400 shrink-0 mt-0.5" />

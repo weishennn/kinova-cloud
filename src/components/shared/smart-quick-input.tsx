@@ -238,6 +238,7 @@ export function SmartQuickInput() {
     setScanError('');
     setSaveReceiptPhoto(true);
     setIsEditingDetails(false);
+    pendingAssistantContextRef.current = null;
   };
 
   const updateTransactionData = (patch: Partial<AiTransactionData>) => {
@@ -814,20 +815,35 @@ export function SmartQuickInput() {
     if (action.type === 'save_transaction' && action.payload) {
       const payload = action.payload as any;
       const todayStr = getLocalDateString();
-      const monthStr = todayStr.substring(0, 7);
+      const txDate =
+        typeof payload.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(payload.date)
+          ? payload.date
+          : todayStr;
+      const monthStr = txDate.substring(0, 7);
       const tempId = `tx_${Date.now()}`;
       const amount = Number(payload.amount) || 0;
+      const rawType = String(payload.type || 'Expense').trim().toLowerCase();
+      const sheetType =
+        rawType === 'income'
+          ? 'Income'
+          : rawType === 'savings' || rawType === 'saving'
+            ? 'Savings'
+            : rawType === 'investment' || rawType === 'invest'
+              ? 'Investment'
+              : 'Expense';
+      const normalizedType = sheetType.toLowerCase();
       const category = String(payload.category || 'Other');
-      const description = String(payload.description || 'Expense');
+      const description = String(payload.description || sheetType);
       const currency = String(payload.currency || 'MYR');
+      const notes = String(payload.notes || '[Kinova Assistant]');
 
       const rowData = {
         Id: tempId,
         id: tempId,
-        Date: todayStr,
-        date: todayStr,
-        Type: 'expense',
-        type: 'expense',
+        Date: txDate,
+        date: txDate,
+        Type: normalizedType,
+        type: normalizedType,
         Category: category,
         category,
         SubCategory: '',
@@ -842,8 +858,8 @@ export function SmartQuickInput() {
         tripTag: '',
         ReceiptUrl: '',
         receiptUrl: '',
-        Notes: '[Kinova Assistant]',
-        notes: '[Kinova Assistant]',
+        Notes: notes,
+        notes,
         _month: monthStr,
         _rowIndex: 2,
       };
@@ -852,8 +868,8 @@ export function SmartQuickInput() {
       const ledgerWrite = addUnifiedRow(monthStr, {
         Id: tempId,
         id: tempId,
-        Date: todayStr,
-        Type: 'Expense',
+        Date: txDate,
+        Type: sheetType,
         Category: category,
         SubCategory: '',
         Description: description,
@@ -861,17 +877,17 @@ export function SmartQuickInput() {
         Currency: currency,
         TripTag: '',
         ReceiptUrl: '',
-        Notes: '[Kinova Assistant]',
+        Notes: notes,
       });
 
       recordRecentAction({
         actionType: 'record',
         targetType: 'transaction',
-        summary: `Recorded ${currency} ${amount.toFixed(2)} for ${description}`,
-        payload: { id: tempId, amount, category, description, date: todayStr, monthStr },
+        summary: `Recorded ${currency}\u00A0${amount.toFixed(2)} for ${description}`,
+        payload: { id: tempId, amount, category, description, date: txDate, monthStr },
       });
 
-      toast.success(`✨ Recorded ${currency} ${amount.toFixed(2)} for ${description}`, {
+      toast.success(`✨ Recorded ${currency}\u00A0${amount.toFixed(2)} for ${description}`, {
         duration: 15000,
         action: {
           label: 'Undo / 撤销',
@@ -879,6 +895,7 @@ export function SmartQuickInput() {
         },
       });
 
+      pendingAssistantContextRef.current = null;
       setInput('');
       setAssistantResult(null);
 
@@ -892,6 +909,45 @@ export function SmartQuickInput() {
           console.warn('Sync error:', e);
         }
       })();
+    } else if (action.type === 'set_preference' && action.payload) {
+      const payload = action.payload as any;
+      const key = String(payload.key || '').trim();
+      const val = payload.value;
+      if (key && val !== undefined) {
+        applyLocalPreference({ key, value: val, label: String(action.label || key) });
+        toast.success(`✨ ${action.label || 'Preference saved!'}`);
+      } else if (key === 'goal' && typeof payload.name === 'string') {
+        const currentGoals = [...profile.goals];
+        const idx = currentGoals.findIndex((g) => g.name.toLowerCase() === String(payload.name).toLowerCase());
+        const targetAmt = Number(payload.targetAmount || (idx >= 0 ? currentGoals[idx].targetAmount : 0)) || 0;
+        const currentAmt = Number(payload.currentAmount ?? payload.savedAmount ?? (idx >= 0 ? currentGoals[idx].currentAmount : 0)) || 0;
+        if (idx >= 0) currentGoals[idx] = { ...currentGoals[idx], name: String(payload.name), targetAmount: targetAmt, currentAmount: currentAmt };
+        else currentGoals.push({ id: `goal_${Date.now()}`, name: String(payload.name), targetAmount: targetAmt, currentAmount: currentAmt });
+        updateUserMoneyProfile({ goals: currentGoals });
+        broadcastCrossTabEvent('SETTINGS_UPDATED');
+        toast.success(`✨ Goal saved: ${String(payload.name)}`);
+      }
+      pendingAssistantContextRef.current = null;
+      setInput('');
+      setAssistantResult(null);
+    } else if (action.type === 'save_installment' && action.payload) {
+      setAiPrefill({ kind: 'installment', data: action.payload as any });
+      setQuickAddOpen(true);
+      pendingAssistantContextRef.current = null;
+      setInput('');
+      setAssistantResult(null);
+    } else if (action.type === 'save_trade' && action.payload) {
+      setAiPrefill({ kind: 'trade', data: action.payload as any });
+      router.push('/investments');
+      pendingAssistantContextRef.current = null;
+      setInput('');
+      setAssistantResult(null);
+    } else if (action.type === 'save_trip' && action.payload) {
+      setAiPrefill({ kind: 'trip', data: action.payload as any });
+      router.push('/trips');
+      pendingAssistantContextRef.current = null;
+      setInput('');
+      setAssistantResult(null);
     } else if (action.type === 'navigate' && action.payload?.path) {
       router.push(String(action.payload.path));
       setInput('');
@@ -902,15 +958,23 @@ export function SmartQuickInput() {
       setAssistantResult(null);
     } else if (action.type === 'rebalance_caps' && action.payload) {
       const payload = action.payload as any;
-      if (payload.rebalancedCaps && typeof payload.rebalancedCaps === 'object') {
-        saveCategoryCaps(payload.rebalancedCaps);
+      const nextCaps = (payload.updatedCaps || payload.rebalancedCaps) as Record<string, number> | undefined;
+      if (nextCaps && typeof nextCaps === 'object') {
+        saveCategoryCaps(nextCaps);
         try {
-          broadcastCrossTabEvent('CATEGORY_CAPS_UPDATED', { caps: payload.rebalancedCaps });
+          broadcastCrossTabEvent('CATEGORY_CAPS_UPDATED', { caps: nextCaps });
         } catch {}
         queryClient.invalidateQueries({ queryKey: ['category_caps'] });
         queryClient.invalidateQueries({ queryKey: ['overview'] });
         queryClient.invalidateQueries({ queryKey: ['budget'] });
-        toast.success(action.label ? `✨ ${action.label} applied!` : '✨ Budget category caps rebalanced!');
+        toast.success(
+          payload.summaryText || payload.donorSummary
+            ? `✨ ${payload.summaryText || payload.donorSummary}`
+            : action.label
+              ? `✨ ${action.label} applied!`
+              : '✨ Budget category caps rebalanced!'
+        );
+        pendingAssistantContextRef.current = null;
         setInput('');
         setAssistantResult(null);
       }
@@ -1172,13 +1236,26 @@ export function SmartQuickInput() {
   const applyLocalPreference = (pref: { key: string; value: unknown; label: string }) => {
     if (pref.key === 'categoryBudgetCap') {
       const { category, amount } = pref.value as { category: string; amount: number };
-      saveCategoryCaps({ ...getSavedCategoryCaps(), [category]: amount });
+      const updated = { ...getSavedCategoryCaps(), [category]: amount };
+      saveCategoryCaps(updated);
+      try {
+        broadcastCrossTabEvent('CATEGORY_CAPS_UPDATED', { caps: updated });
+      } catch {}
     } else if (pref.key === 'paydayDay') {
       updateUserMoneyProfile({ paydayDay: pref.value as number });
+      try {
+        broadcastCrossTabEvent('SETTINGS_UPDATED');
+      } catch {}
     } else if (pref.key === 'monthlyBudgetCap') {
       updateUserMoneyProfile({ monthlyBudgetCap: pref.value as number });
+      try {
+        broadcastCrossTabEvent('SETTINGS_UPDATED');
+      } catch {}
     } else if (pref.key === 'language') {
       updateUserMoneyProfile({ language: pref.value as 'zh' | 'en' | 'ms' | 'auto' });
+      try {
+        broadcastCrossTabEvent('SETTINGS_UPDATED');
+      } catch {}
     } else if (pref.key === 'alias') {
       const { rawPattern, alias } = (pref.value || {}) as { rawPattern?: string; alias?: string };
       if (rawPattern && alias) {
@@ -1204,7 +1281,7 @@ export function SmartQuickInput() {
     if (e) e.preventDefault();
     if (isSubmitting || isAssistantThinking) return;
 
-    if (localRoute && localRoute.mode === 'set_preference') {
+    if (localRoute && localRoute.mode === 'set_preference' && !pendingAssistantContextRef.current) {
       const pref = localRoute.preference;
       applyLocalPreference(pref);
       toast.success(`Saved preference: ${pref.label}`);
@@ -1212,7 +1289,10 @@ export function SmartQuickInput() {
       return;
     }
 
-    let commandToProcess = activeCommand;
+    // When answering an open multi-turn clarification, always route through Kinova Assistant
+    // so bare numbers (e.g. "15") or short merchant names complete pendingContext instead of
+    // triggering a misleading local quick-parse transaction.
+    let commandToProcess = pendingAssistantContextRef.current ? null : activeCommand;
 
     // If no local transaction command is resolved, send to Kinova Assistant
     if (!commandToProcess) {

@@ -1093,7 +1093,7 @@ export default function TripsPage() {
                       </strong>
                       {isForeign && info.totalMyr > 0 && (
                         <span className="text-[11px] text-slate-600 dark:text-zinc-400 font-mono ml-1">
-                          (≈ RM {info.totalMyr.toFixed(2)})
+                          (≈ RM{'\u00A0'}{info.totalMyr.toFixed(2)})
                         </span>
                       )}
                     </span>
@@ -1253,7 +1253,7 @@ export default function TripsPage() {
                           {formatCurrency(cat.totalAmount, selectedTrip.currency)}
                           {selectedTrip.currency !== 'MYR' && (
                             <span className="ml-1 text-[10px] font-normal text-slate-500 dark:text-zinc-400">
-                              (RM {cat.totalMyr.toFixed(2)})
+                              (RM{'\u00A0'}{cat.totalMyr.toFixed(2)})
                             </span>
                           )}
                         </span>
@@ -1333,7 +1333,7 @@ export default function TripsPage() {
                         )}
                         {selectedTrip.currency !== 'MYR' && isTxSameCurrency && (
                           <p className="text-[11px] text-indigo-800 dark:text-indigo-300 font-mono tabular-nums">
-                            ≈ RM {(tx.amount * selectedTrip.rateToMyr).toFixed(2)}
+                            ≈ RM{'\u00A0'}{(tx.amount * selectedTrip.rateToMyr).toFixed(2)}
                           </p>
                         )}
                       </div>
@@ -1695,7 +1695,7 @@ export default function TripsPage() {
 
               <p className="text-[11px] text-slate-600 dark:text-zinc-400 leading-relaxed">
                 Current rate: <strong>1 MYR = {myrToForeignInput} {currency}</strong> (1 {currency}{' '}
-                = RM {rateToMyr}).
+                = RM{'\u00A0'}{rateToMyr}).
               </p>
             </div>
           )}

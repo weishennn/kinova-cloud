@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AlertTriangle, ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, CalendarDays, CalendarRange, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, CloudAlert, House, Receipt, RotateCcw, Search, ShoppingBag, Sparkles, Train, TrendingUp, Utensils, Wallet } from 'lucide-react';
 import dynamic from 'next/dynamic';
@@ -11,6 +12,7 @@ import { Transaction, useTransactions } from '@/hooks/useTransactions';
 import { useMonthList } from '@/hooks/useSheets';
 import { getAmountInBaseCurrency, ACCOUNTING_BASE_CURRENCY } from '@/lib/currency';
 import { getLocalDateString, getTransactionRecordedInfo, parseLocalDate } from '@/lib/date-helper';
+import { formatPeriodDisplay, stepPeriod } from '@/lib/period-helper';
 import { generateProactiveAlerts, type ProactiveAlert } from '@/lib/proactive-alerts';
 import { SETTINGS_UPDATED_EVENT } from '@/lib/cloud-settings-sync';
 import {
@@ -38,7 +40,7 @@ const moneyFormat = new Intl.NumberFormat('en-MY', {
 });
 
 function formatMoney(amount: number) {
-  return moneyFormat.format(amount);
+  return moneyFormat.format(amount).replace(/ /g, '\u00A0');
 }
 
 const AreaChart = dynamic(() => import('recharts').then((mod) => mod.AreaChart), { ssr: false });
@@ -57,11 +59,7 @@ function currentMonthValue() {
 }
 
 function monthName(monthValue: string) {
-  if (monthValue === 'all') return 'All time';
-  if (monthValue.startsWith('year-')) return `${monthValue.slice(5)} full year`;
-  const [year, month] = monthValue.split('-').map(Number);
-  if (!year || !month) return monthValue;
-  return new Date(year, month - 1, 1).toLocaleString('en-MY', { month: 'long', year: 'numeric' });
+  return formatPeriodDisplay(monthValue, 'en-MY');
 }
 
 function dateGroupLabel(value: string) {
@@ -96,6 +94,7 @@ function signedAmount(transaction: Transaction, formatMoney: (amount: number) =>
 }
 
 export function CashflowCockpit() {
+  const router = useRouter();
   const { selectedMonth, setSelectedMonth, setQuickAddOpen, setAiPrefill } = useAppStore();
   const { data: sheetMonths = [] } = useMonthList();
   const { transactions = [], isLoading, error } = useTransactions(selectedMonth ? { period: selectedMonth } : undefined);
@@ -160,7 +159,7 @@ export function CashflowCockpit() {
     }
 
     if (alert.type === 'habit_discovery') {
-      window.location.href = '/settings';
+      router.push('/settings#kinova-knows');
       return;
     }
 
@@ -348,28 +347,7 @@ export function CashflowCockpit() {
   }, [filteredRecent]);
 
   const changePeriod = (direction: -1 | 1) => {
-    if (selectedMonth === 'all') {
-      if (direction === -1) {
-        const [year, month] = currentMonth.split('-').map(Number);
-        const prev = new Date(year, month - 2, 1);
-        setSelectedMonth(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`);
-      } else {
-        setSelectedMonth(currentMonth);
-      }
-      return;
-    }
-    if (selectedMonth.startsWith('year-')) {
-      const year = Number(selectedMonth.slice(5)) + direction;
-      setSelectedMonth(`year-${year}`);
-      return;
-    }
-    const [year, month] = selectedMonth.split('-').map(Number);
-    if (!year || !month || Number.isNaN(year) || Number.isNaN(month)) {
-      setSelectedMonth(currentMonth);
-      return;
-    }
-    const next = new Date(year, month - 1 + direction, 1);
-    setSelectedMonth(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`);
+    setSelectedMonth(stepPeriod(selectedMonth, direction, currentMonth));
   };
 
   const periodKind = selectedMonth === 'all' ? 'all' : selectedMonth.startsWith('year-') ? 'year' : 'month';

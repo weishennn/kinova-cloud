@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useMemo, useState, useRef, useEffect, type FormEvent } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -8,6 +9,7 @@ import {
   Award,
   Bot,
   CalendarDays,
+  Check,
   ChevronDown,
   ChevronUp,
   ExternalLink,
@@ -27,7 +29,7 @@ import {
   X,
 } from 'lucide-react';
 import { normalizeTransaction, useTransactions, type Transaction } from '@/hooks/useTransactions';
-import { getUnifiedSheetData } from '@/hooks/useSheets';
+import { addUnifiedRow, applyOptimisticAddToQueryCache, getUnifiedSheetData } from '@/hooks/useSheets';
 import { getActiveUserCacheScope } from '@/lib/sheets-api';
 import {
   scoreReceiptItemQuery,
@@ -45,9 +47,25 @@ import {
   computeDeterministicLedgerFacts,
   type DeterministicLedgerFacts,
 } from '@/lib/copilot-ledger-facts';
-import { getUserMoneyProfile } from '@/lib/user-money-profile';
+import { getUserMoneyProfile, recordRecentAction, updateUserMoneyProfile } from '@/lib/user-money-profile';
 import { getLocalDateString } from '@/lib/date-helper';
-import { runKinovaTurn } from '@/lib/kinova-assistant';
+import {
+  runKinovaTurn,
+  updateAssistantConversation,
+  type AssistantApiResponse,
+  type AssistantPendingContext,
+  type AssistantTurnMessage,
+} from '@/lib/kinova-assistant';
+import {
+  isQuestionOrAdviceRequest,
+  isRebalanceBudgetRequest,
+  requiresExtendedReasoning,
+  routeLocalIntent,
+} from '@/lib/intent-router';
+import { parseNaturalExpense } from '@/lib/natural-expense-parser';
+import { saveCategoryCaps } from '@/lib/category-budget-helper';
+import { broadcastCrossTabEvent } from '@/lib/cache-manager';
+import { toast } from 'sonner';
 
 interface ReceiptPriceSearchProps {
   returnTo?: string;
@@ -83,11 +101,14 @@ interface CopilotResult {
   status: 'idle' | 'loading' | 'ready' | 'error';
   headline?: string;
   answer?: string;
+  reasoning?: string;
+  mode?: AssistantApiResponse['mode'];
   type?: 'price_ladder' | 'analytics' | 'market_benchmark' | 'conversational';
   timeframe?: string;
   matchedCount?: number;
   exactTotalSpent?: number;
   isFoundInPersonalLedger?: boolean;
+  showLedgerAbsenceNotice?: boolean;
   matchingTransactionIds?: string[];
   priceLadder?: Array<{
     store: string;
@@ -101,6 +122,9 @@ interface CopilotResult {
     details: string;
   } | null;
   actionTip?: string | null;
+  proposedAction?: AssistantApiResponse['proposedAction'];
+  proposedActionApplied?: boolean;
+  clarification?: AssistantApiResponse['clarification'];
   message?: string;
   deterministicFacts?: DeterministicLedgerFacts;
 }
@@ -116,14 +140,16 @@ const STOCK_INTENT_REGEX = /(股票|买什么|值得买|值得卖|推荐.*股|�
 function formatPrice(currency: string | undefined, amount: number): string {
   const normalizedCurrency = (currency && /^[A-Z]{3}$/.test(currency)) ? currency : 'MYR';
   try {
-    return new Intl.NumberFormat(undefined, {
+    return new Intl.NumberFormat('en-MY', {
       style: 'currency',
       currency: normalizedCurrency,
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
-    }).format(amount);
+    })
+      .format(amount)
+      .replace(/ /g, '\u00A0');
   } catch {
-    return `${normalizedCurrency} ${amount.toFixed(2)}`;
+    return `${normalizedCurrency}\u00A0${amount.toFixed(2)}`;
   }
 }
 
@@ -164,6 +190,7 @@ function renderMarkdownInline(text: string) {
 }
 
 export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptPriceSearchProps) {
+  const router = useRouter();
   const [draftQuery, setDraftQuery] = useState('');
   const [query, setQuery] = useState('');
   const [activeIntent, setActiveIntent] = useState<'none' | 'price' | 'analytics' | 'stock' | 'copilot'>('none');
@@ -179,9 +206,13 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
   // Stock insight state
   const [stockInsight, setStockInsight] = useState<StockInsightState>({ status: 'idle' });
 
-  // Kinova Copilot state
+  // Kinova Copilot state (multi-turn + actionable buttons)
   const [copilotState, setCopilotState] = useState<CopilotResult>({ status: 'idle' });
   const [showCopilotMatchingTxs, setShowCopilotMatchingTxs] = useState(false);
+  const [applyingAction, setApplyingAction] = useState(false);
+  const [conversationHistory, setConversationHistory] = useState<Array<{ role: 'user' | 'assistant'; text: string }>>([]);
+  const sessionTurnsRef = useRef<AssistantTurnMessage[]>([]);
+  const pendingContextRef = useRef<AssistantPendingContext | null>(null);
 
   // Voice speech-to-text state
   const [isListening, setIsListening] = useState(false);
@@ -198,6 +229,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
 
   const inputRef = useRef<HTMLInputElement>(null);
   const bottomTouchStartRef = useRef<number | null>(null);
+  const wasOpenRef = useRef(false);
 
   const queryClient = useQueryClient();
   const { transactions = [], refetch: refetchTransactions } = useTransactions();
@@ -214,14 +246,18 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
     retry: 1,
   });
 
-  // Automatically refresh latest ledger entries as soon as the user pulls down Kinova AI
+  // Automatically refresh latest ledger entries ONCE when Kinova AI transitions from closed -> open
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !wasOpenRef.current) {
+      wasOpenRef.current = true;
       void historyQuery.refetch();
       void refetchTransactions();
       void queryClient.invalidateQueries({ queryKey: ['sheet'] });
+    } else if (!isOpen) {
+      wasOpenRef.current = false;
     }
-  }, [isOpen, historyQuery, refetchTransactions, queryClient]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   const historyList = useMemo<Transaction[]>(() => {
     if (Array.isArray(historyQuery.data)) {
@@ -410,36 +446,109 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
     return allTransactions.filter((t) => idSet.has(t.id));
   }, [allTransactions, copilotState.matchingTransactionIds, copilotState.deterministicFacts]);
 
-  // Use the same thinking assistant as the home command bar for open-ended questions.
+  // Use the same thinking assistant + multi-turn memory as the home command bar.
   const fetchCopilot = async (userQuery: string) => {
     setCopilotState({ status: 'loading' });
     setShowCopilotMatchingTxs(false);
     try {
+      const todayStr = getLocalDateString();
+      const profile = getUserMoneyProfile(allTransactions);
       const deterministicFacts = computeDeterministicLedgerFacts(userQuery, allTransactions);
       const turn = await runKinovaTurn({
         text: userQuery,
-        today: getLocalDateString(),
-        profile: getUserMoneyProfile(allTransactions),
+        today: todayStr,
+        profile,
         transactions: allTransactions,
+        sessionTurns: sessionTurnsRef.current,
+        pendingContext: pendingContextRef.current,
         forceAssistant: true,
         factQuery: userQuery,
         signal: AbortSignal.timeout(35_000),
       });
-      if (turn.source !== 'assistant') {
-        throw new Error('Kinova Assistant 暂时无法回答，请重试');
+
+      if (turn.source === 'local') {
+        const localRes = turn.localResult;
+        if (localRes.mode === 'navigate' && localRes.path) {
+          onClose?.();
+          router.push(localRes.path);
+          return;
+        }
+        const answerText = 'message' in localRes ? localRes.message : localRes.label || 'Done.';
+        pendingContextRef.current = null;
+        sessionTurnsRef.current = [
+          ...sessionTurnsRef.current,
+          { role: 'user' as const, text: userQuery },
+          { role: 'assistant' as const, text: answerText },
+        ].slice(-6);
+        setConversationHistory((prev) => [
+          ...prev.slice(-4),
+          { role: 'user', text: userQuery },
+          { role: 'assistant', text: answerText },
+        ]);
+        setCopilotState({
+          status: 'ready',
+          headline: 'Kinova Instant Answer',
+          answer: answerText,
+          type: 'conversational',
+          mode: localRes.mode === 'set_preference' ? 'set_preference' : 'advise',
+          timeframe: deterministicFacts.timeframeLabel,
+          matchedCount: deterministicFacts.transactionCount,
+          exactTotalSpent: deterministicFacts.exactTotalSpent,
+          isFoundInPersonalLedger: deterministicFacts.isFoundInPersonalLedger,
+          showLedgerAbsenceNotice: false,
+          matchingTransactionIds: deterministicFacts.matchingTransactionIds,
+          priceLadder: deterministicFacts.priceLadder,
+          deterministicFacts,
+        });
+        return;
       }
+
       const result = turn.assistantResult;
+      const answerParts = [result.answer, result.reasoning]
+        .map((part) => part.trim())
+        .filter(Boolean);
+      const combinedAnswer = answerParts.join('\n');
+
+      const conversation = updateAssistantConversation(sessionTurnsRef.current, userQuery, result);
+      sessionTurnsRef.current = conversation.turns;
+      pendingContextRef.current = conversation.pendingContext;
+      setConversationHistory((prev) => [
+        ...prev.slice(-4),
+        { role: 'user', text: userQuery },
+        { role: 'assistant', text: result.answer || result.clarification?.question || '' },
+      ]);
+
+      // Only show "个人账本暂无此消费记录" when user is specifically looking up an item/store price
+      // and no records matched, NOT on general financial advice / budget / goal / greeting queries.
+      const isSpecificItemOrStoreLookup =
+        (deterministicFacts.queryType === 'item_lookup' ||
+          deterministicFacts.queryType === 'merchant_lookup') &&
+        !['advise', 'rebalance', 'clarify', 'unknown', 'record', 'set_preference'].includes(result.mode);
+
       setCopilotState({
         status: 'ready',
-        headline: 'Kinova Assistant',
-        answer: [result.answer, result.reasoning].map((part) => part.trim()).filter(Boolean).join('\n'),
+        headline:
+          result.mode === 'rebalance'
+            ? '预算与资金行动建议'
+            : result.mode === 'clarify'
+              ? '需要确认细节'
+              : result.mode === 'record'
+                ? '记账准备就绪'
+                : 'Kinova Assistant',
+        answer: combinedAnswer,
+        mode: result.mode,
         type: 'conversational',
         timeframe: deterministicFacts.timeframeLabel,
         matchedCount: deterministicFacts.transactionCount,
         exactTotalSpent: deterministicFacts.exactTotalSpent,
         isFoundInPersonalLedger: deterministicFacts.isFoundInPersonalLedger,
+        showLedgerAbsenceNotice:
+          !deterministicFacts.isFoundInPersonalLedger && isSpecificItemOrStoreLookup,
         matchingTransactionIds: deterministicFacts.matchingTransactionIds,
         priceLadder: deterministicFacts.priceLadder,
+        proposedAction: result.proposedAction ?? null,
+        proposedActionApplied: false,
+        clarification: result.clarification ?? null,
         actionTip: result.proposedAction?.label || null,
         deterministicFacts,
       });
@@ -448,6 +557,208 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
         status: 'error',
         message: formatAiErrorMessage(err, 'AI 思考超时，请稍后重试'),
       });
+    }
+  };
+
+  // Execute interactive action suggested by Kinova AI inside the pull-down overlay
+  const handleExecuteProposedAction = async (
+    action: NonNullable<CopilotResult['proposedAction']>
+  ) => {
+    if (applyingAction || copilotState.proposedActionApplied) return;
+    setApplyingAction(true);
+    try {
+      const payload = (action.payload || {}) as Record<string, any>;
+      if (action.type === 'navigate') {
+        const target =
+          typeof payload.path === 'string' && payload.path.startsWith('/')
+            ? payload.path
+            : '/budget';
+        onClose?.();
+        router.push(target);
+        return;
+      }
+
+      if (action.type === 'rebalance_caps') {
+        const rawCaps = (payload.updatedCaps || payload.rebalancedCaps) as Record<string, number> | undefined;
+        if (rawCaps && typeof rawCaps === 'object') {
+          saveCategoryCaps(rawCaps);
+          broadcastCrossTabEvent('CATEGORY_CAPS_UPDATED', { caps: rawCaps });
+          void queryClient.invalidateQueries({ queryKey: ['sheet'] });
+          void queryClient.invalidateQueries({ queryKey: ['overview'] });
+          void queryClient.invalidateQueries({ queryKey: ['budget'] });
+          recordRecentAction({
+            actionType: 'edit',
+            targetType: 'preference',
+            summary: `Rebalanced category caps: ${payload.summaryText || payload.donorSummary || action.label}`,
+            payload: { caps: rawCaps },
+          });
+          toast.success(payload.summaryText || payload.donorSummary || '已重新分配分类预算上限');
+        }
+      } else if (action.type === 'set_preference') {
+        const key = String(payload.key || '').trim();
+        const value = payload.value;
+        if (key === 'paydayDay' && Number(value) >= 1 && Number(value) <= 31) {
+          updateUserMoneyProfile({ paydayDay: Math.round(Number(value)) });
+          broadcastCrossTabEvent('SETTINGS_UPDATED');
+          toast.success(`已设置发薪日为每月 ${Math.round(Number(value))} 日`);
+        } else if (key === 'monthlyBudgetCap' && Number(value) > 0) {
+          updateUserMoneyProfile({ monthlyBudgetCap: Number(value) });
+          broadcastCrossTabEvent('SETTINGS_UPDATED');
+          toast.success(`已更新月度预算上限为 ${formatPrice('MYR', Number(value))}`);
+        } else if (key === 'baselineIncome' && Number(value) > 0) {
+          updateUserMoneyProfile({ baselineIncome: Number(value) });
+          broadcastCrossTabEvent('SETTINGS_UPDATED');
+          toast.success(`已更新月均基线收入为 ${formatPrice('MYR', Number(value))}`);
+        } else if (key === 'emergencyReserve' && Number(value) >= 0) {
+          updateUserMoneyProfile({ emergencyReserve: Number(value) });
+          broadcastCrossTabEvent('SETTINGS_UPDATED');
+          toast.success(`已更新应急储备金为 ${formatPrice('MYR', Number(value))}`);
+        } else if (key === 'goal' && typeof payload.name === 'string') {
+          const currentProfile = getUserMoneyProfile(allTransactions);
+          const nextGoals = [...currentProfile.goals];
+          const existingIdx = nextGoals.findIndex(
+            (g) => g.name.toLowerCase() === String(payload.name).toLowerCase()
+          );
+          const targetAmt = Number(payload.targetAmount || (existingIdx >= 0 ? nextGoals[existingIdx].targetAmount : 0)) || 0;
+          const currentAmt = Number(payload.currentAmount ?? payload.savedAmount ?? (existingIdx >= 0 ? nextGoals[existingIdx].currentAmount : 0)) || 0;
+          if (existingIdx >= 0) {
+            nextGoals[existingIdx] = {
+              ...nextGoals[existingIdx],
+              name: String(payload.name),
+              targetAmount: targetAmt,
+              currentAmount: currentAmt,
+            };
+          } else {
+            nextGoals.push({
+              id: `goal_${Date.now()}`,
+              name: String(payload.name),
+              targetAmount: targetAmt,
+              currentAmount: currentAmt,
+            });
+          }
+          updateUserMoneyProfile({ goals: nextGoals });
+          broadcastCrossTabEvent('SETTINGS_UPDATED');
+          toast.success(`已更新理财目标: ${String(payload.name)}`);
+        }
+      } else if (action.type === 'save_transaction') {
+        const amount = Number(payload.amount || 0);
+        if (amount > 0) {
+          const rawType = String(payload.type || 'Expense').trim().toLowerCase();
+          const normalizedType =
+            rawType === 'income'
+              ? 'Income'
+              : rawType === 'savings' || rawType === 'saving'
+                ? 'Savings'
+                : rawType === 'investment' || rawType === 'invest'
+                  ? 'Investment'
+                  : 'Expense';
+          const txDate =
+            typeof payload.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(payload.date)
+              ? payload.date
+              : getLocalDateString();
+          const monthStr = txDate.slice(0, 7);
+          const newId = `tx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          const currency = String(payload.currency || 'MYR').toUpperCase();
+          const category = String(payload.category || 'Food & Dining');
+          const description = String(payload.description || payload.category || 'Kinova AI Entry');
+          const notes = String(payload.notes || '[Kinova Assistant]');
+          const rowPayload: Record<string, any> = {
+            Id: newId,
+            id: newId,
+            Date: txDate,
+            date: txDate,
+            Type: normalizedType.toLowerCase(),
+            type: normalizedType.toLowerCase(),
+            Category: category,
+            category,
+            SubCategory: '',
+            subCategory: '',
+            Description: description,
+            description,
+            Amount: amount,
+            amount,
+            Currency: currency,
+            currency,
+            TripTag: '',
+            tripTag: '',
+            ReceiptUrl: '',
+            receiptUrl: '',
+            Notes: notes,
+            notes,
+            _month: monthStr,
+            _rowIndex: 2,
+          };
+          applyOptimisticAddToQueryCache(queryClient, monthStr, rowPayload);
+          await addUnifiedRow(monthStr, {
+            Id: newId,
+            id: newId,
+            Date: txDate,
+            Type: normalizedType,
+            Category: category,
+            SubCategory: '',
+            Description: description,
+            Amount: amount,
+            Currency: currency,
+            TripTag: '',
+            ReceiptUrl: '',
+            Notes: notes,
+          });
+          pendingContextRef.current = null;
+          recordRecentAction({
+            actionType: 'record',
+            targetType: 'transaction',
+            summary: `Recorded ${currency} ${amount.toFixed(2)} for ${description}`,
+            payload: { id: newId, amount, category, description, date: txDate, monthStr },
+          });
+          toast.success(`已记录: ${description} (${formatPrice(currency, amount)})`);
+        }
+      } else if (action.type === 'allocate_payday_envelope') {
+        const transfers = Array.isArray(payload.transfers) ? (payload.transfers as Array<Record<string, any>>) : [];
+        const todayStr = getLocalDateString();
+        const monthStr = todayStr.slice(0, 7);
+        for (const t of transfers) {
+          const tempId = t.id || `tx_envelope_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          const amt = Number(t.amount) || 0;
+          if (amt <= 0) continue;
+          const rowData: Record<string, any> = {
+            Id: tempId,
+            id: tempId,
+            Date: t.date || todayStr,
+            date: t.date || todayStr,
+            Type: 'investment',
+            type: 'investment',
+            Category: String(t.category || 'Emergency Savings'),
+            category: String(t.category || 'Emergency Savings'),
+            SubCategory: t.subCategory || 'Payday Auto-Envelope',
+            subCategory: t.subCategory || 'Payday Auto-Envelope',
+            Description: String(t.description || 'Payday Envelope Allocation'),
+            description: String(t.description || 'Payday Envelope Allocation'),
+            Amount: amt,
+            amount: amt,
+            Currency: String(t.currency || 'MYR'),
+            currency: String(t.currency || 'MYR'),
+            TripTag: '',
+            tripTag: '',
+            ReceiptUrl: '',
+            receiptUrl: '',
+            Notes: String(t.notes || '[Payday Auto-Envelope]'),
+            notes: String(t.notes || '[Payday Auto-Envelope]'),
+            _month: monthStr,
+            _rowIndex: 2,
+          };
+          applyOptimisticAddToQueryCache(queryClient, monthStr, rowData);
+          void addUnifiedRow(monthStr, rowData);
+        }
+        toast.success(action.label || '已执行发薪日资金分配');
+      }
+
+      setCopilotState((prev) =>
+        prev.status === 'ready' ? { ...prev, proposedActionApplied: true } : prev
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '操作执行失败，请稍后重试');
+    } finally {
+      setApplyingAction(false);
     }
   };
 
@@ -533,15 +844,15 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
       activeEl?.blur?.();
     }
 
-    // 1. Check Spending Analytics Intent
-    if (isSpendingAnalyticsQuery(clean)) {
-      setActiveIntent('analytics');
-      const result = computeSpendingAnalytics(clean, allTransactions);
-      setAnalyticsResult(result);
+    // 0. If user is answering a multi-turn clarification, stay in Kinova Copilot
+    if (pendingContextRef.current) {
+      setActiveIntent('copilot');
+      setAnalyticsResult(null);
+      void fetchCopilot(clean);
       return;
     }
 
-    // 2. Check Stock / Investment Intent
+    // 1. Check Stock / Investment Intent
     if (STOCK_INTENT_REGEX.test(clean)) {
       setActiveIntent('stock');
       setAnalyticsResult(null);
@@ -549,18 +860,48 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
       return;
     }
 
-    // 3. Check Conversational / Complex Inquiries
-    const isConversational =
-      /(吃了什么|买过什么|吃什么|最便宜|最贵|省了多少|补贴|对比|哪家|哪间|比较|值得|分析|为什么|怎么样|how much did i|where was|cheapest|more on|compare)/i.test(clean);
+    // 2. Check Pure Spending Analytics Intent (excludes budget/advice/goal/complex queries)
+    if (isSpendingAnalyticsQuery(clean)) {
+      setActiveIntent('analytics');
+      const result = computeSpendingAnalytics(clean, allTransactions);
+      setAnalyticsResult(result);
+      return;
+    }
 
-    if (isConversational) {
+    // 3. Check Deterministic Local Intents (budget cap queries, paydays, rebalance, navigation, settings, natural expense)
+    const todayStr = getLocalDateString();
+    const localRoute = routeLocalIntent(clean, getUserMoneyProfile(allTransactions), todayStr);
+    const parsedNaturalExpense = parseNaturalExpense(clean);
+
+    // 4. Route natural questions, advice, rebalance, greetings, budget/goals, or action commands to Kinova Copilot
+    const hasPriceItemIntent =
+      /(\bprice\b|多少钱|单价|卖多少|哪里买|哪家买|买过|收据|小票|receipt)/i.test(clean);
+    const isShortProductLookup =
+      !isQuestionOrAdviceRequest(clean) &&
+      !requiresExtendedReasoning(clean) &&
+      !isRebalanceBudgetRequest(clean) &&
+      !localRoute &&
+      !parsedNaturalExpense &&
+      clean.length <= 36 &&
+      !/[?？]/.test(clean) &&
+      !/^(hi|hello|hey|你好|嗨|哈喽|早|晚安)/i.test(clean);
+
+    const isConversational =
+      Boolean(localRoute) ||
+      Boolean(parsedNaturalExpense) ||
+      isQuestionOrAdviceRequest(clean) ||
+      requiresExtendedReasoning(clean) ||
+      isRebalanceBudgetRequest(clean) ||
+      /(吃了什么|买过什么|吃什么|最便宜|最贵|省了多少|补贴|对比|哪家|哪间|比较|值得|分析|为什么|怎么样|预算|目标|储蓄|存款|现金流|大额|建议|总结|多少|怎么|可以买|能买|how much|where was|cheapest|most expensive|compare|budget|goal|save|afford|summary|advice|recommend)/i.test(clean);
+
+    if ((isConversational || !isShortProductLookup) && !(hasPriceItemIntent && isShortProductLookup)) {
       setActiveIntent('copilot');
       setAnalyticsResult(null);
       void fetchCopilot(clean);
       return;
     }
 
-    // 4. Fallback: Receipt Item Price Recall
+    // 5. Fallback: Instant Receipt Item Price Recall
     setActiveIntent('price');
     setAnalyticsResult(null);
   };
@@ -579,6 +920,9 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
     setStockInsight({ status: 'idle' });
     setCopilotState({ status: 'idle' });
     setGeneralOnlineResult(null);
+    setConversationHistory([]);
+    sessionTurnsRef.current = [];
+    pendingContextRef.current = null;
   };
 
   // Online general search for market price via Google Grounding
@@ -919,6 +1263,21 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                     </div>
                   </div>
                 )}
+
+                <div className="pt-2 border-t border-white/10 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] text-white/50">想要结合预算目标深度分析这笔开支？</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveIntent('copilot');
+                      void fetchCopilot(query);
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-indigo-500/25 hover:bg-indigo-500/40 border border-indigo-400/35 text-xs font-semibold text-indigo-100 inline-flex items-center gap-1.5 cursor-pointer transition-all"
+                  >
+                    <Sparkles size={13} />
+                    <span>✨ 让 Kinova AI 给建议</span>
+                  </button>
+                </div>
               </div>
             )}
 
@@ -1129,20 +1488,32 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                           <span>统计期间: {copilotState.timeframe || copilotState.deterministicFacts?.timeframeLabel}</span>
                         </span>
                       )}
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-white/[0.06] border border-white/10 text-xs text-white/90 font-medium">
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-white/[0.06] border border-white/10 text-xs text-white/90 font-medium whitespace-nowrap">
                         <span>📊</span>
                         <span>匹配记录: {copilotState.matchedCount ?? copilotState.deterministicFacts?.transactionCount ?? 0} 笔</span>
                       </span>
                       {(copilotState.exactTotalSpent != null && copilotState.exactTotalSpent > 0) && (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-500/20 border border-emerald-400/30 text-xs text-emerald-200 font-mono font-bold">
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-500/20 border border-emerald-400/30 text-xs text-emerald-200 font-mono font-bold whitespace-nowrap tabular-nums">
                           <span>💰</span>
                           <span>账本确切总计: {formatPrice('MYR', copilotState.exactTotalSpent)}</span>
                         </span>
                       )}
                     </div>
 
-                    {/* Personal Ledger Absence Distinction */}
-                    {copilotState.isFoundInPersonalLedger === false && (
+                    {/* Multi-turn context trail (previous turns if continuing conversation) */}
+                    {conversationHistory.length > 2 && (
+                      <div className="space-y-1.5 max-h-36 overflow-y-auto px-3 py-2 rounded-2xl bg-black/25 border border-white/10 text-[11px] text-white/70">
+                        <div className="text-[10px] uppercase tracking-wider text-indigo-300 font-semibold">Earlier context</div>
+                        {conversationHistory.slice(0, -2).map((turn, idx) => (
+                          <div key={idx} className={turn.role === 'user' ? 'text-indigo-200 font-medium' : 'text-white/65'}>
+                            {turn.role === 'user' ? `You: ${turn.text}` : `Kinova: ${turn.text}`}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Personal Ledger Absence Distinction (only for explicit item/store lookups) */}
+                    {copilotState.showLedgerAbsenceNotice && (
                       <div className="flex items-start gap-3 p-3.5 rounded-2xl bg-amber-500/15 border border-amber-400/30 text-amber-200 text-xs">
                         <span className="text-lg">ℹ️</span>
                         <div>
@@ -1160,6 +1531,51 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                         {copilotState.answer.split('\n').map((line, idx) => (
                           <p key={idx}>{renderMarkdownInline(line)}</p>
                         ))}
+                      </div>
+                    )}
+
+                    {/* Interactive Clarification Quick Replies */}
+                    {copilotState.clarification && copilotState.clarification.options?.length ? (
+                      <div className="flex flex-wrap gap-2">
+                        {copilotState.clarification.options.map((opt) => (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() => submitInquiry(opt)}
+                            className="px-3 py-1.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/35 border border-indigo-400/35 text-indigo-100 text-xs font-semibold cursor-pointer transition-all"
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {/* Interactive Proposed Action Button */}
+                    {copilotState.proposedAction && (
+                      <div className="flex flex-wrap items-center justify-between gap-2.5 p-3.5 rounded-2xl bg-indigo-500/15 border border-indigo-400/30 text-indigo-100 text-xs">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <span className="text-base shrink-0">💡</span>
+                          <span className="leading-snug">{copilotState.proposedAction.label}</span>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={applyingAction || Boolean(copilotState.proposedActionApplied)}
+                          onClick={() => void handleExecuteProposedAction(copilotState.proposedAction!)}
+                          className={`shrink-0 px-3.5 py-2 rounded-xl font-semibold text-xs inline-flex items-center gap-1.5 transition-all cursor-pointer ${
+                            copilotState.proposedActionApplied
+                              ? 'bg-emerald-500/25 border border-emerald-400/40 text-emerald-200'
+                              : 'bg-indigo-500 hover:bg-indigo-400 text-white shadow-md'
+                          } disabled:opacity-60`}
+                        >
+                          {applyingAction ? (
+                            <LoaderCircle size={13} className="animate-spin" />
+                          ) : copilotState.proposedActionApplied ? (
+                            <Check size={13} />
+                          ) : (
+                            <Sparkles size={13} />
+                          )}
+                          <span>{copilotState.proposedActionApplied ? '已执行' : '一键执行'}</span>
+                        </button>
                       </div>
                     )}
 
@@ -1249,8 +1665,8 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                       </div>
                     )}
 
-                    {/* Action Tip */}
-                    {copilotState.actionTip && (
+                    {/* Action Tip (only if not already shown as interactive proposedAction) */}
+                    {copilotState.actionTip && !copilotState.proposedAction && (
                       <div className="p-3.5 rounded-2xl bg-indigo-500/15 border border-indigo-400/30 text-indigo-100 text-xs flex items-center gap-2.5">
                         <span className="text-base">💡</span>
                         <span>{copilotState.actionTip}</span>
@@ -1340,7 +1756,7 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
                             </div>
 
                             <div className="text-right shrink-0">
-                              <div className="font-mono font-black text-sm sm:text-base text-emerald-400">
+                              <div className="font-mono font-black text-sm sm:text-base text-emerald-400 whitespace-nowrap tabular-nums">
                                 {formatPrice(ladderItem.currency, ladderItem.minUnitPrice)}
                               </div>
                               {isLowest ? (
@@ -1593,8 +2009,8 @@ export function ReceiptPriceSearch({ returnTo = '/', onClose, isOpen }: ReceiptP
               type="text"
               value={draftQuery}
               onChange={(e) => setDraftQuery(e.target.value)}
-              placeholder="问价格、本月消费分析、或股票投资洞察…"
-              className="flex-1 bg-transparent text-white placeholder:text-white/45 text-sm outline-none py-1.5"
+              placeholder="问价格、预算、账单或投资…"
+              className="min-w-0 flex-1 bg-transparent text-white placeholder:text-white/45 text-sm outline-none py-1.5"
               autoComplete="off"
             />
             <button
